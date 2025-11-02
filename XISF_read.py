@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Read TELESCOP, INSTRUME, and OBJECT FITS header values from an XISF file
+Read TELESCOP, INSTRUME, and OBJECT FITS header values from XISF files
 """
 
 import xisf
 import sys
+import os
+from pathlib import Path
 
-def read_fits_keywords(filename, keywords=['TELESCOP', 'INSTRUME', 'OBJECT']):
+def read_fits_keywords(filename, keywords=['TELESCOP', 'INSTRUME', 'OBJECT', 'FILTER','IMAGETYP','EXPOSURE','CCD-TEMP','XBINNING','YBINNING']):
     """
     Read specified FITS headers from an XISF file
     
@@ -60,22 +62,42 @@ def read_fits_keywords(filename, keywords=['TELESCOP', 'INSTRUME', 'OBJECT']):
 def main():
     # Check command line arguments
     if len(sys.argv) != 2:
-        print("Usage: python script.py <xisf_file>")
+        print("Usage: python script.py <xisf_file_or_folder>")
         sys.exit(1)
     
-    filename = sys.argv[1]
+    path = sys.argv[1]
     
-    # Read the FITS keywords
-    keywords = read_fits_keywords(filename)
+    # Check if path is a file or directory
+    if os.path.isfile(path):
+        # Single file
+        files = [path]
+    elif os.path.isdir(path):
+        # Directory - find all .xisf files
+        files = sorted(Path(path).glob('*.xisf'))
+        if not files:
+            print(f"No .xisf files found in directory: {path}")
+            sys.exit(1)
+    else:
+        print(f"Error: '{path}' is not a valid file or directory")
+        sys.exit(1)
     
-    if keywords:
-        print("FITS Keywords:")
-        print("-" * 40)
-        for key, value in keywords.items():
-            if value is not None:
-                print(f"{key}: {value}")
-            else:
-                print(f"{key}: Not found")
+    # Process each file
+    for i, filename in enumerate(files):
+        if i > 0:
+            print()  # Add blank line between files
+        
+        print(f"File: {os.path.basename(filename)}")
+        print("=" * 60)
+        
+        # Read the FITS keywords
+        keywords = read_fits_keywords(str(filename))
+        
+        if keywords:
+            for key, value in keywords.items():
+                if value is not None:
+                    print(f"{key:12s}: {value}")
+                else:
+                    print(f"{key:12s}: Not found")
 
 if __name__ == "__main__":
     main()
