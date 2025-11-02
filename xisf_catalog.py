@@ -188,6 +188,7 @@ class XISFCatalogGUI(QMainWindow):
         self.db_path = 'xisf_catalog.db'
         self.settings = QSettings('XISFCatalog', 'CatalogGUI')
         self.init_ui()
+        # Restore settings after all UI is created
         self.restore_settings()
     
     def init_ui(self):
@@ -238,7 +239,7 @@ class XISFCatalogGUI(QMainWindow):
         
         self.clear_db_btn = QPushButton('Clear Database')
         self.clear_db_btn.clicked.connect(self.clear_database)
-        self.clear_db_btn.setStyleSheet("QPushButton { background-color: #ff4444; color: white; }")
+        self.clear_db_btn.setStyleSheet("QPushButton { background-color: #8b0000; color: white; } QPushButton:hover { background-color: #a00000; }")
         button_layout.addWidget(self.clear_db_btn)
         
         layout.addLayout(button_layout)
@@ -282,10 +283,12 @@ class XISFCatalogGUI(QMainWindow):
         left_layout.addWidget(recent_label)
         
         self.recent_objects_table = QTableWidget()
-        self.recent_objects_table.setColumnCount(3)
-        self.recent_objects_table.setHorizontalHeaderLabels(['Object', 'Most Recent Date', 'Total Files'])
+        self.recent_objects_table.setColumnCount(4)
+        self.recent_objects_table.setHorizontalHeaderLabels(['Object', 'Most Recent Date', 'Telescope', 'Instrument'])
         self.recent_objects_table.horizontalHeader().setStretchLastSection(True)
-        self.recent_objects_table.horizontalHeader().sectionResized.connect(self.save_settings)
+        self.recent_objects_table.horizontalHeader().setSectionsMovable(False)
+        self.recent_objects_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.recent_objects_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         left_layout.addWidget(self.recent_objects_table)
         
         tables_layout.addLayout(left_layout)
@@ -297,10 +300,12 @@ class XISFCatalogGUI(QMainWindow):
         right_layout.addWidget(exposure_label)
         
         self.top_exposure_table = QTableWidget()
-        self.top_exposure_table.setColumnCount(3)
-        self.top_exposure_table.setHorizontalHeaderLabels(['Object', 'Total Exposure (s)', 'Total Exposure (hrs)'])
+        self.top_exposure_table.setColumnCount(4)
+        self.top_exposure_table.setHorizontalHeaderLabels(['Object', 'Total Exposure (hrs)', 'Telescope', 'Instrument'])
         self.top_exposure_table.horizontalHeader().setStretchLastSection(True)
-        self.top_exposure_table.horizontalHeader().sectionResized.connect(self.save_settings)
+        self.top_exposure_table.horizontalHeader().setSectionsMovable(False)
+        self.top_exposure_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.top_exposure_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         right_layout.addWidget(self.top_exposure_table)
         
         tables_layout.addLayout(right_layout)
@@ -309,22 +314,36 @@ class XISFCatalogGUI(QMainWindow):
         
         return widget
     
+    def connect_signals(self):
+        """Connect signals after all widgets are created"""
+        # Connect column resize signals to save settings
+        self.catalog_tree.header().sectionResized.connect(self.save_settings)
+        self.recent_objects_table.horizontalHeader().sectionResized.connect(self.save_settings)
+        self.top_exposure_table.horizontalHeader().sectionResized.connect(self.save_settings)
+    
     def refresh_statistics(self):
         """Refresh the statistics tables"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get 10 most recent objects
+            # Get 10 most recent objects with their telescope and instrument
             cursor.execute('''
                 SELECT 
-                    object,
-                    MAX(date_loc) as most_recent_date,
-                    COUNT(*) as file_count
-                FROM xisf_files
-                WHERE object IS NOT NULL AND date_loc IS NOT NULL
-                GROUP BY object
-                ORDER BY most_recent_date DESC
+                    f1.object,
+                    f1.date_loc,
+                    f1.telescop,
+                    f1.instrume
+                FROM xisf_files f1
+                INNER JOIN (
+                    SELECT object, MAX(date_loc) as max_date
+                    FROM xisf_files
+                    WHERE object IS NOT NULL AND date_loc IS NOT NULL
+                    GROUP BY object
+                ) f2 ON f1.object = f2.object AND f1.date_loc = f2.max_date
+                WHERE f1.object IS NOT NULL AND f1.date_loc IS NOT NULL
+                GROUP BY f1.object
+                ORDER BY f1.date_loc DESC
                 LIMIT 10
             ''')
             
@@ -332,22 +351,24 @@ class XISFCatalogGUI(QMainWindow):
             
             # Update recent objects table
             self.recent_objects_table.setRowCount(len(recent_objects))
-            for i, (obj, date, count) in enumerate(recent_objects):
+            for i, (obj, date, telescop, instrume) in enumerate(recent_objects):
                 self.recent_objects_table.setItem(i, 0, QTableWidgetItem(obj or 'Unknown'))
                 self.recent_objects_table.setItem(i, 1, QTableWidgetItem(date or 'N/A'))
-                self.recent_objects_table.setItem(i, 2, QTableWidgetItem(str(count)))
+                self.recent_objects_table.setItem(i, 2, QTableWidgetItem(telescop or 'N/A'))
+                self.recent_objects_table.setItem(i, 3, QTableWidgetItem(instrume or 'N/A'))
             
             self.recent_objects_table.resizeColumnsToContents()
             
             # Get top 10 objects by total exposure
             cursor.execute('''
                 SELECT 
-                    object,
-                    SUM(exposure) as total_exposure,
-                    COUNT(*) as file_count
-                FROM xisf_files
-                WHERE object IS NOT NULL AND exposure IS NOT NULL
-                GROUP BY object
+                    f1.object,
+                    SUM(f1.exposure) as total_exposure,
+                    (SELECT telescop FROM xisf_files WHERE object = f1.object LIMIT 1) as telescop,
+                    (SELECT instrume FROM xisf_files WHERE object = f1.object LIMIT 1) as instrume
+                FROM xisf_files f1
+                WHERE f1.object IS NOT NULL AND f1.exposure IS NOT NULL
+                GROUP BY f1.object
                 ORDER BY total_exposure DESC
                 LIMIT 10
             ''')
@@ -356,10 +377,11 @@ class XISFCatalogGUI(QMainWindow):
             
             # Update top exposure table
             self.top_exposure_table.setRowCount(len(top_exposure_objects))
-            for i, (obj, total_exp, count) in enumerate(top_exposure_objects):
+            for i, (obj, total_exp, telescop, instrume) in enumerate(top_exposure_objects):
                 self.top_exposure_table.setItem(i, 0, QTableWidgetItem(obj or 'Unknown'))
-                self.top_exposure_table.setItem(i, 1, QTableWidgetItem(f'{total_exp:.1f}' if total_exp else '0.0'))
-                self.top_exposure_table.setItem(i, 2, QTableWidgetItem(f'{total_exp/3600:.2f}' if total_exp else '0.00'))
+                self.top_exposure_table.setItem(i, 1, QTableWidgetItem(f'{total_exp/3600:.2f}' if total_exp else '0.00'))
+                self.top_exposure_table.setItem(i, 2, QTableWidgetItem(telescop or 'N/A'))
+                self.top_exposure_table.setItem(i, 3, QTableWidgetItem(instrume or 'N/A'))
             
             self.top_exposure_table.resizeColumnsToContents()
             
@@ -377,13 +399,15 @@ class XISFCatalogGUI(QMainWindow):
         for i in range(self.catalog_tree.columnCount()):
             self.settings.setValue(f'catalog_tree_col_{i}', self.catalog_tree.columnWidth(i))
         
-        # Save recent objects table column widths
-        for i in range(self.recent_objects_table.columnCount() - 1):  # Skip last column (stretch)
-            self.settings.setValue(f'recent_table_col_{i}', self.recent_objects_table.columnWidth(i))
+        # Save recent objects table column widths (all except last which is stretched)
+        for i in range(self.recent_objects_table.columnCount() - 1):
+            width = self.recent_objects_table.columnWidth(i)
+            self.settings.setValue(f'recent_table_col_{i}', width)
         
-        # Save top exposure table column widths
-        for i in range(self.top_exposure_table.columnCount() - 1):  # Skip last column (stretch)
-            self.settings.setValue(f'exposure_table_col_{i}', self.top_exposure_table.columnWidth(i))
+        # Save top exposure table column widths (all except last which is stretched)
+        for i in range(self.top_exposure_table.columnCount() - 1):
+            width = self.top_exposure_table.columnWidth(i)
+            self.settings.setValue(f'exposure_table_col_{i}', width)
     
     def restore_settings(self):
         """Restore window size and column widths"""
@@ -395,20 +419,23 @@ class XISFCatalogGUI(QMainWindow):
         # Restore catalog tree column widths
         for i in range(self.catalog_tree.columnCount()):
             width = self.settings.value(f'catalog_tree_col_{i}')
-            if width:
+            if width is not None:
                 self.catalog_tree.setColumnWidth(i, int(width))
         
-        # Restore recent objects table column widths
+        # Restore recent objects table column widths (all except last which is stretched)
         for i in range(self.recent_objects_table.columnCount() - 1):
             width = self.settings.value(f'recent_table_col_{i}')
-            if width:
+            if width is not None:
                 self.recent_objects_table.setColumnWidth(i, int(width))
         
-        # Restore top exposure table column widths
+        # Restore top exposure table column widths (all except last which is stretched)
         for i in range(self.top_exposure_table.columnCount() - 1):
             width = self.settings.value(f'exposure_table_col_{i}')
-            if width:
+            if width is not None:
                 self.top_exposure_table.setColumnWidth(i, int(width))
+        
+        # Connect signals after restoring settings to avoid triggering saves during restore
+        self.connect_signals()
     
     def closeEvent(self, event):
         """Save settings when closing"""
@@ -427,12 +454,11 @@ class XISFCatalogGUI(QMainWindow):
         
         # Tree widget
         self.catalog_tree = QTreeWidget()
-        self.catalog_tree.setColumnCount(3)
+        self.catalog_tree.setColumnCount(4)
         self.catalog_tree.setHeaderLabels([
-            'Name', 'Telescope', 'Instrument'
+            'Name', 'Image Type', 'Telescope', 'Instrument'
         ])
         self.catalog_tree.setColumnWidth(0, 300)
-        self.catalog_tree.header().sectionResized.connect(self.save_settings)
         layout.addWidget(self.catalog_tree)
         
         return widget
@@ -604,6 +630,7 @@ class XISFCatalogGUI(QMainWindow):
                         cursor.execute('''
                             SELECT 
                                 filename,
+                                imagetyp,
                                 exposure,
                                 telescop,
                                 instrume,
@@ -617,12 +644,13 @@ class XISFCatalogGUI(QMainWindow):
                         
                         files = cursor.fetchall()
                         
-                        for filename, exposure, telescop, instrume, date_loc in files:
+                        for filename, imagetyp, exposure, telescop, instrume, date_loc in files:
                             # Create file node
                             file_item = QTreeWidgetItem(date_item)
                             file_item.setText(0, filename)
-                            file_item.setText(1, telescop or 'N/A')
-                            file_item.setText(2, instrume or 'N/A')
+                            file_item.setText(1, imagetyp or 'N/A')
+                            file_item.setText(2, telescop or 'N/A')
+                            file_item.setText(3, instrume or 'N/A')
             
             conn.close()
             
@@ -644,6 +672,72 @@ class XISFCatalogGUI(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    
+    # Set dark theme
+    app.setStyle('Fusion')
+    
+    dark_palette = app.palette()
+    
+    # Define dark theme colors
+    dark_palette.setColor(dark_palette.ColorRole.Window, Qt.GlobalColor.darkGray)
+    dark_palette.setColor(dark_palette.ColorRole.WindowText, Qt.GlobalColor.white)
+    dark_palette.setColor(dark_palette.ColorRole.Base, Qt.GlobalColor.black)
+    dark_palette.setColor(dark_palette.ColorRole.AlternateBase, Qt.GlobalColor.darkGray)
+    dark_palette.setColor(dark_palette.ColorRole.ToolTipBase, Qt.GlobalColor.white)
+    dark_palette.setColor(dark_palette.ColorRole.ToolTipText, Qt.GlobalColor.white)
+    dark_palette.setColor(dark_palette.ColorRole.Text, Qt.GlobalColor.white)
+    dark_palette.setColor(dark_palette.ColorRole.Button, Qt.GlobalColor.darkGray)
+    dark_palette.setColor(dark_palette.ColorRole.ButtonText, Qt.GlobalColor.white)
+    dark_palette.setColor(dark_palette.ColorRole.BrightText, Qt.GlobalColor.red)
+    dark_palette.setColor(dark_palette.ColorRole.Link, Qt.GlobalColor.blue)
+    dark_palette.setColor(dark_palette.ColorRole.Highlight, Qt.GlobalColor.blue)
+    dark_palette.setColor(dark_palette.ColorRole.HighlightedText, Qt.GlobalColor.black)
+    
+    app.setPalette(dark_palette)
+    
+    # Additional stylesheet for better appearance
+    app.setStyleSheet("""
+        QToolTip {
+            color: #ffffff;
+            background-color: #2a2a2a;
+            border: 1px solid white;
+        }
+        QPushButton {
+            background-color: #404040;
+            border: 1px solid #555555;
+            padding: 5px;
+            border-radius: 3px;
+        }
+        QPushButton:hover {
+            background-color: #505050;
+        }
+        QPushButton:pressed {
+            background-color: #303030;
+        }
+        QTreeWidget, QTableWidget {
+            background-color: #2a2a2a;
+            alternate-background-color: #353535;
+        }
+        QHeaderView::section {
+            background-color: #404040;
+            padding: 4px;
+            border: 1px solid #555555;
+            font-weight: bold;
+        }
+        QProgressBar {
+            border: 1px solid #555555;
+            border-radius: 3px;
+            text-align: center;
+        }
+        QProgressBar::chunk {
+            background-color: #3a7bd5;
+        }
+        QTextEdit {
+            background-color: #2a2a2a;
+            border: 1px solid #555555;
+        }
+    """)
+    
     window = XISFCatalogGUI()
     window.show()
     sys.exit(app.exec())
