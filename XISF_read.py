@@ -8,7 +8,7 @@ import sys
 import os
 from pathlib import Path
 
-def read_fits_keywords(filename, keywords=['TELESCOP', 'INSTRUME', 'OBJECT', 'FILTER','IMAGETYP','EXPOSURE','CCD-TEMP','XBINNING','YBINNING']):
+def read_fits_keywords(filename, keywords=['TELESCOP', 'INSTRUME', 'OBJECT', 'FILTER','IMAGETYP','EXPOSURE','CCD-TEMP','XBINNING','YBINNING','DATE-LOC']):
     """
     Read specified FITS headers from an XISF file
     
