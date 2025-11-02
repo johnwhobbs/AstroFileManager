@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QLabel, QProgressBar, QTextEdit, QTreeWidget,
     QTreeWidgetItem
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 import xisf
 
 
@@ -186,7 +186,9 @@ class XISFCatalogGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.db_path = 'xisf_catalog.db'
+        self.settings = QSettings('XISFCatalog', 'CatalogGUI')
         self.init_ui()
+        self.restore_settings()
     
     def init_ui(self):
         """Initialize the user interface"""
@@ -205,9 +207,11 @@ class XISFCatalogGUI(QMainWindow):
         # Create tabs
         self.import_tab = self.create_import_tab()
         self.view_tab = self.create_view_tab()
+        self.stats_tab = self.create_stats_tab()
         
         tabs.addTab(self.import_tab, "Import Files")
         tabs.addTab(self.view_tab, "View Catalog")
+        tabs.addTab(self.stats_tab, "Statistics")
         
         # Connect tab change to refresh
         tabs.currentChanged.connect(self.on_tab_changed)
@@ -258,6 +262,159 @@ class XISFCatalogGUI(QMainWindow):
         
         return widget
     
+    def create_stats_tab(self):
+        """Create the statistics tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Refresh button
+        refresh_btn = QPushButton('Refresh Statistics')
+        refresh_btn.clicked.connect(self.refresh_statistics)
+        layout.addWidget(refresh_btn)
+        
+        # Horizontal layout for two tables side by side
+        tables_layout = QHBoxLayout()
+        
+        # Left side - Most Recent Objects
+        left_layout = QVBoxLayout()
+        recent_label = QLabel('10 Most Recent Objects')
+        recent_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        left_layout.addWidget(recent_label)
+        
+        self.recent_objects_table = QTableWidget()
+        self.recent_objects_table.setColumnCount(3)
+        self.recent_objects_table.setHorizontalHeaderLabels(['Object', 'Most Recent Date', 'Total Files'])
+        self.recent_objects_table.horizontalHeader().setStretchLastSection(True)
+        self.recent_objects_table.horizontalHeader().sectionResized.connect(self.save_settings)
+        left_layout.addWidget(self.recent_objects_table)
+        
+        tables_layout.addLayout(left_layout)
+        
+        # Right side - Top Exposure Objects
+        right_layout = QVBoxLayout()
+        exposure_label = QLabel('Top 10 Objects by Total Exposure')
+        exposure_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        right_layout.addWidget(exposure_label)
+        
+        self.top_exposure_table = QTableWidget()
+        self.top_exposure_table.setColumnCount(3)
+        self.top_exposure_table.setHorizontalHeaderLabels(['Object', 'Total Exposure (s)', 'Total Exposure (hrs)'])
+        self.top_exposure_table.horizontalHeader().setStretchLastSection(True)
+        self.top_exposure_table.horizontalHeader().sectionResized.connect(self.save_settings)
+        right_layout.addWidget(self.top_exposure_table)
+        
+        tables_layout.addLayout(right_layout)
+        
+        layout.addLayout(tables_layout)
+        
+        return widget
+    
+    def refresh_statistics(self):
+        """Refresh the statistics tables"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Get 10 most recent objects
+            cursor.execute('''
+                SELECT 
+                    object,
+                    MAX(date_loc) as most_recent_date,
+                    COUNT(*) as file_count
+                FROM xisf_files
+                WHERE object IS NOT NULL AND date_loc IS NOT NULL
+                GROUP BY object
+                ORDER BY most_recent_date DESC
+                LIMIT 10
+            ''')
+            
+            recent_objects = cursor.fetchall()
+            
+            # Update recent objects table
+            self.recent_objects_table.setRowCount(len(recent_objects))
+            for i, (obj, date, count) in enumerate(recent_objects):
+                self.recent_objects_table.setItem(i, 0, QTableWidgetItem(obj or 'Unknown'))
+                self.recent_objects_table.setItem(i, 1, QTableWidgetItem(date or 'N/A'))
+                self.recent_objects_table.setItem(i, 2, QTableWidgetItem(str(count)))
+            
+            self.recent_objects_table.resizeColumnsToContents()
+            
+            # Get top 10 objects by total exposure
+            cursor.execute('''
+                SELECT 
+                    object,
+                    SUM(exposure) as total_exposure,
+                    COUNT(*) as file_count
+                FROM xisf_files
+                WHERE object IS NOT NULL AND exposure IS NOT NULL
+                GROUP BY object
+                ORDER BY total_exposure DESC
+                LIMIT 10
+            ''')
+            
+            top_exposure_objects = cursor.fetchall()
+            
+            # Update top exposure table
+            self.top_exposure_table.setRowCount(len(top_exposure_objects))
+            for i, (obj, total_exp, count) in enumerate(top_exposure_objects):
+                self.top_exposure_table.setItem(i, 0, QTableWidgetItem(obj or 'Unknown'))
+                self.top_exposure_table.setItem(i, 1, QTableWidgetItem(f'{total_exp:.1f}' if total_exp else '0.0'))
+                self.top_exposure_table.setItem(i, 2, QTableWidgetItem(f'{total_exp/3600:.2f}' if total_exp else '0.00'))
+            
+            self.top_exposure_table.resizeColumnsToContents()
+            
+            conn.close()
+            
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to refresh statistics: {e}')
+    
+    def save_settings(self):
+        """Save window size and column widths"""
+        # Save window geometry
+        self.settings.setValue('geometry', self.saveGeometry())
+        
+        # Save catalog tree column widths
+        for i in range(self.catalog_tree.columnCount()):
+            self.settings.setValue(f'catalog_tree_col_{i}', self.catalog_tree.columnWidth(i))
+        
+        # Save recent objects table column widths
+        for i in range(self.recent_objects_table.columnCount() - 1):  # Skip last column (stretch)
+            self.settings.setValue(f'recent_table_col_{i}', self.recent_objects_table.columnWidth(i))
+        
+        # Save top exposure table column widths
+        for i in range(self.top_exposure_table.columnCount() - 1):  # Skip last column (stretch)
+            self.settings.setValue(f'exposure_table_col_{i}', self.top_exposure_table.columnWidth(i))
+    
+    def restore_settings(self):
+        """Restore window size and column widths"""
+        # Restore window geometry
+        geometry = self.settings.value('geometry')
+        if geometry:
+            self.restoreGeometry(geometry)
+        
+        # Restore catalog tree column widths
+        for i in range(self.catalog_tree.columnCount()):
+            width = self.settings.value(f'catalog_tree_col_{i}')
+            if width:
+                self.catalog_tree.setColumnWidth(i, int(width))
+        
+        # Restore recent objects table column widths
+        for i in range(self.recent_objects_table.columnCount() - 1):
+            width = self.settings.value(f'recent_table_col_{i}')
+            if width:
+                self.recent_objects_table.setColumnWidth(i, int(width))
+        
+        # Restore top exposure table column widths
+        for i in range(self.top_exposure_table.columnCount() - 1):
+            width = self.settings.value(f'exposure_table_col_{i}')
+            if width:
+                self.top_exposure_table.setColumnWidth(i, int(width))
+    
+    def closeEvent(self, event):
+        """Save settings when closing"""
+        self.save_settings()
+        event.accept()
+    
     def create_view_tab(self):
         """Create the view tab"""
         widget = QWidget()
@@ -270,11 +427,12 @@ class XISFCatalogGUI(QMainWindow):
         
         # Tree widget
         self.catalog_tree = QTreeWidget()
-        self.catalog_tree.setColumnCount(6)
+        self.catalog_tree.setColumnCount(3)
         self.catalog_tree.setHeaderLabels([
-            'Name', 'Files', 'Exposure (s)', 'Telescope', 'Instrument', 'Date'
+            'Name', 'Telescope', 'Instrument'
         ])
-        self.catalog_tree.setColumnWidth(0, 250)
+        self.catalog_tree.setColumnWidth(0, 300)
+        self.catalog_tree.header().sectionResized.connect(self.save_settings)
         layout.addWidget(self.catalog_tree)
         
         return widget
@@ -402,8 +560,6 @@ class XISFCatalogGUI(QMainWindow):
                 # Create object node
                 obj_item = QTreeWidgetItem(self.catalog_tree)
                 obj_item.setText(0, obj_name or 'Unknown')
-                obj_item.setText(1, str(obj_file_count))
-                obj_item.setText(2, f'{obj_total_exp:.1f}' if obj_total_exp else '0.0')
                 obj_item.setFlags(obj_item.flags() | Qt.ItemFlag.ItemIsAutoTristate)
                 
                 # Get all filters for this object
@@ -424,8 +580,6 @@ class XISFCatalogGUI(QMainWindow):
                     # Create filter node
                     filter_item = QTreeWidgetItem(obj_item)
                     filter_item.setText(0, filter_name or 'No Filter')
-                    filter_item.setText(1, str(filter_file_count))
-                    filter_item.setText(2, f'{filter_total_exp:.1f}' if filter_total_exp else '0.0')
                     
                     # Get all dates for this object and filter
                     cursor.execute('''
@@ -445,8 +599,6 @@ class XISFCatalogGUI(QMainWindow):
                         # Create date node
                         date_item = QTreeWidgetItem(filter_item)
                         date_item.setText(0, date_val or 'No Date')
-                        date_item.setText(1, str(date_file_count))
-                        date_item.setText(2, f'{date_total_exp:.1f}' if date_total_exp else '0.0')
                         
                         # Get all files for this object, filter, and date
                         cursor.execute('''
@@ -469,11 +621,8 @@ class XISFCatalogGUI(QMainWindow):
                             # Create file node
                             file_item = QTreeWidgetItem(date_item)
                             file_item.setText(0, filename)
-                            file_item.setText(1, '1')
-                            file_item.setText(2, f'{exposure:.1f}' if exposure else 'N/A')
-                            file_item.setText(3, telescop or 'N/A')
-                            file_item.setText(4, instrume or 'N/A')
-                            file_item.setText(5, date_loc or 'N/A')
+                            file_item.setText(1, telescop or 'N/A')
+                            file_item.setText(2, instrume or 'N/A')
             
             conn.close()
             
@@ -487,8 +636,10 @@ class XISFCatalogGUI(QMainWindow):
     
     def on_tab_changed(self, index):
         """Handle tab change"""
-        if index == 1:  # View tab
+        if index == 1:  # View Catalog tab
             self.refresh_catalog_view()
+        elif index == 2:  # Statistics tab
+            self.refresh_statistics()
 
 
 def main():
