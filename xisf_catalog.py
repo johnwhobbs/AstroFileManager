@@ -1,0 +1,502 @@
+#!/usr/bin/env python3
+"""
+PyQt GUI for XISF Catalog Database
+"""
+
+import sys
+import os
+import sqlite3
+import hashlib
+from pathlib import Path
+from datetime import datetime, timedelta
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QFileDialog, QMessageBox, QTabWidget, QTableWidget,
+    QTableWidgetItem, QLabel, QProgressBar, QTextEdit, QTreeWidget,
+    QTreeWidgetItem
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+import xisf
+
+
+class ImportWorker(QThread):
+    """Worker thread for importing XISF files"""
+    progress = pyqtSignal(int, int, str)  # current, total, message
+    finished = pyqtSignal(int, int)  # processed, errors
+    
+    def __init__(self, files, db_path):
+        super().__init__()
+        self.files = files
+        self.db_path = db_path
+        self.processed = 0
+        self.errors = 0
+    
+    def calculate_file_hash(self, filepath):
+        """Calculate SHA256 hash of a file"""
+        hash_obj = hashlib.sha256()
+        with open(filepath, 'rb') as f:
+            for chunk in iter(lambda: f.read(4096), b''):
+                hash_obj.update(chunk)
+        return hash_obj.hexdigest()
+    
+    def process_date_loc(self, date_str):
+        """Process DATE-LOC: subtract 12 hours and return date only in YYYY-MM-DD format"""
+        if not date_str:
+            return None
+        
+        try:
+            # Convert to string if needed
+            date_str = str(date_str).strip()
+            
+            # Handle fractional seconds that have too many digits (7+ digits instead of 6)
+            # Python's %f expects exactly 6 digits for microseconds
+            if 'T' in date_str and '.' in date_str:
+                parts = date_str.split('.')
+                if len(parts) == 2:
+                    # Truncate fractional seconds to 6 digits
+                    fractional = parts[1][:6]
+                    date_str = f"{parts[0]}.{fractional}"
+            
+            # Try parsing common FITS date formats
+            formats = [
+                '%Y-%m-%dT%H:%M:%S.%f',  # With microseconds
+                '%Y-%m-%dT%H:%M:%S',     # Standard ISO format
+                '%Y-%m-%d %H:%M:%S',     # Space instead of T
+                '%Y-%m-%d',              # Date only
+            ]
+            
+            for fmt in formats:
+                try:
+                    dt = datetime.strptime(date_str, fmt)
+                    # Subtract 12 hours
+                    dt = dt - timedelta(hours=12)
+                    result = dt.strftime('%Y-%m-%d')
+                    return result
+                except ValueError:
+                    continue
+            
+            return None
+            
+        except Exception:
+            return None
+    
+    def read_fits_keywords(self, filename):
+        """Read FITS keywords from XISF file"""
+        keywords = ['TELESCOP', 'INSTRUME', 'OBJECT', 'FILTER', 'IMAGETYP', 
+                    'EXPOSURE', 'CCD-TEMP', 'XBINNING', 'YBINNING', 'DATE-LOC']
+        try:
+            xisf_file = xisf.XISF(filename)
+            im_data = xisf_file.read_image(0)
+            
+            if hasattr(xisf_file, 'fits_keywords'):
+                fits_keywords = xisf_file.fits_keywords
+            elif hasattr(im_data, 'fits_keywords'):
+                fits_keywords = im_data.fits_keywords
+            else:
+                metadata = xisf_file.get_images_metadata()[0]
+                fits_keywords = metadata.get('FITSKeywords', {})
+            
+            results = {}
+            for keyword in keywords:
+                if fits_keywords and keyword in fits_keywords:
+                    keyword_data = fits_keywords[keyword]
+                    if isinstance(keyword_data, list) and len(keyword_data) > 0:
+                        results[keyword] = keyword_data[0]['value']
+                    else:
+                        results[keyword] = keyword_data
+                else:
+                    results[keyword] = None
+            
+            return results
+        except Exception as e:
+            return None
+    
+    def run(self):
+        """Process files and import to database"""
+        conn = sqlite3.connect(self.db_path)
+        
+        for i, filepath in enumerate(self.files):
+            basename = os.path.basename(filepath)
+            self.progress.emit(i + 1, len(self.files), f"Processing: {basename}")
+            
+            try:
+                # Calculate hash
+                file_hash = self.calculate_file_hash(filepath)
+                
+                # Read FITS keywords
+                keywords = self.read_fits_keywords(filepath)
+                
+                if keywords:
+                    cursor = conn.cursor()
+                    
+                    # Check if exists
+                    cursor.execute('SELECT id FROM xisf_files WHERE file_hash = ?', (file_hash,))
+                    existing = cursor.fetchone()
+                    
+                    filename = os.path.basename(filepath)
+                    
+                    # Process DATE-LOC to subtract 12 hours and get date only
+                    date_loc = self.process_date_loc(keywords.get('DATE-LOC'))
+                    
+                    if existing:
+                        cursor.execute('''
+                            UPDATE xisf_files
+                            SET filepath = ?, filename = ?, telescop = ?, instrume = ?, 
+                                object = ?, filter = ?, imagetyp = ?, exposure = ?,
+                                ccd_temp = ?, xbinning = ?, ybinning = ?, date_loc = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE file_hash = ?
+                        ''', (
+                            filepath, filename,
+                            keywords.get('TELESCOP'), keywords.get('INSTRUME'),
+                            keywords.get('OBJECT'), keywords.get('FILTER'),
+                            keywords.get('IMAGETYP'), keywords.get('EXPOSURE'),
+                            keywords.get('CCD-TEMP'), keywords.get('XBINNING'),
+                            keywords.get('YBINNING'), date_loc,
+                            file_hash
+                        ))
+                    else:
+                        cursor.execute('''
+                            INSERT INTO xisf_files 
+                            (file_hash, filepath, filename, telescop, instrume, object, 
+                             filter, imagetyp, exposure, ccd_temp, xbinning, ybinning, date_loc)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            file_hash, filepath, filename,
+                            keywords.get('TELESCOP'), keywords.get('INSTRUME'),
+                            keywords.get('OBJECT'), keywords.get('FILTER'),
+                            keywords.get('IMAGETYP'), keywords.get('EXPOSURE'),
+                            keywords.get('CCD-TEMP'), keywords.get('XBINNING'),
+                            keywords.get('YBINNING'), date_loc
+                        ))
+                    
+                    conn.commit()
+                    self.processed += 1
+                else:
+                    self.errors += 1
+                    
+            except Exception as e:
+                self.errors += 1
+        
+        conn.close()
+        self.finished.emit(self.processed, self.errors)
+
+
+class XISFCatalogGUI(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.db_path = 'xisf_catalog.db'
+        self.init_ui()
+    
+    def init_ui(self):
+        """Initialize the user interface"""
+        self.setWindowTitle('XISF Catalog Manager')
+        self.setGeometry(100, 100, 1000, 600)
+        
+        # Create central widget and main layout
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+        
+        # Create tab widget
+        tabs = QTabWidget()
+        layout.addWidget(tabs)
+        
+        # Create tabs
+        self.import_tab = self.create_import_tab()
+        self.view_tab = self.create_view_tab()
+        
+        tabs.addTab(self.import_tab, "Import Files")
+        tabs.addTab(self.view_tab, "View Catalog")
+        
+        # Connect tab change to refresh
+        tabs.currentChanged.connect(self.on_tab_changed)
+    
+    def create_import_tab(self):
+        """Create the import tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Database info
+        db_label = QLabel(f"Database: {self.db_path}")
+        layout.addWidget(db_label)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        self.import_files_btn = QPushButton('Import XISF Files')
+        self.import_files_btn.clicked.connect(self.import_files)
+        button_layout.addWidget(self.import_files_btn)
+        
+        self.import_folder_btn = QPushButton('Import Folder')
+        self.import_folder_btn.clicked.connect(self.import_folder)
+        button_layout.addWidget(self.import_folder_btn)
+        
+        self.clear_db_btn = QPushButton('Clear Database')
+        self.clear_db_btn.clicked.connect(self.clear_database)
+        self.clear_db_btn.setStyleSheet("QPushButton { background-color: #ff4444; color: white; }")
+        button_layout.addWidget(self.clear_db_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+        
+        # Status label
+        self.status_label = QLabel('')
+        layout.addWidget(self.status_label)
+        
+        # Log area
+        log_label = QLabel('Import Log:')
+        layout.addWidget(log_label)
+        
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        layout.addWidget(self.log_text)
+        
+        return widget
+    
+    def create_view_tab(self):
+        """Create the view tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Refresh button
+        refresh_btn = QPushButton('Refresh')
+        refresh_btn.clicked.connect(self.refresh_catalog_view)
+        layout.addWidget(refresh_btn)
+        
+        # Tree widget
+        self.catalog_tree = QTreeWidget()
+        self.catalog_tree.setColumnCount(6)
+        self.catalog_tree.setHeaderLabels([
+            'Name', 'Files', 'Exposure (s)', 'Telescope', 'Instrument', 'Date'
+        ])
+        self.catalog_tree.setColumnWidth(0, 250)
+        layout.addWidget(self.catalog_tree)
+        
+        return widget
+    
+    def import_files(self):
+        """Import individual XISF files"""
+        files, _ = QFileDialog.getOpenFileNames(
+            self, 'Select XISF Files', '', 'XISF Files (*.xisf)'
+        )
+        
+        if files:
+            self.start_import(files)
+    
+    def import_folder(self):
+        """Import all XISF files from a folder and its subfolders"""
+        folder = QFileDialog.getExistingDirectory(self, 'Select Folder')
+        
+        if folder:
+            # Recursively find all .xisf files in folder and subfolders
+            files = list(Path(folder).rglob('*.xisf'))
+            if files:
+                self.start_import([str(f) for f in files])
+            else:
+                QMessageBox.warning(self, 'No Files', 'No XISF files found in selected folder or its subfolders.')
+    
+    def start_import(self, files):
+        """Start the import worker thread"""
+        if not os.path.exists(self.db_path):
+            QMessageBox.critical(
+                self, 'Database Error',
+                f'Database not found: {self.db_path}\nPlease create it first.'
+            )
+            return
+        
+        self.log_text.clear()
+        self.log_text.append(f"Starting import of {len(files)} files...\n")
+        
+        # Disable buttons
+        self.import_files_btn.setEnabled(False)
+        self.import_folder_btn.setEnabled(False)
+        self.clear_db_btn.setEnabled(False)
+        
+        # Show progress bar
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setMaximum(len(files))
+        self.progress_bar.setValue(0)
+        
+        # Create and start worker
+        self.worker = ImportWorker(files, self.db_path)
+        self.worker.progress.connect(self.on_import_progress)
+        self.worker.finished.connect(self.on_import_finished)
+        self.worker.start()
+    
+    def on_import_progress(self, current, total, message):
+        """Handle progress updates"""
+        self.progress_bar.setValue(current)
+        self.status_label.setText(f"Processing {current}/{total}")
+        self.log_text.append(message)
+    
+    def on_import_finished(self, processed, errors):
+        """Handle import completion"""
+        self.progress_bar.setVisible(False)
+        self.status_label.setText('')
+        
+        self.log_text.append(f"\n{'='*60}")
+        self.log_text.append(f"Import complete!")
+        self.log_text.append(f"Successfully processed: {processed}")
+        self.log_text.append(f"Errors: {errors}")
+        
+        # Re-enable buttons
+        self.import_files_btn.setEnabled(True)
+        self.import_folder_btn.setEnabled(True)
+        self.clear_db_btn.setEnabled(True)
+        
+        QMessageBox.information(
+            self, 'Import Complete',
+            f'Successfully processed: {processed}\nErrors: {errors}'
+        )
+    
+    def clear_database(self):
+        """Clear all records from the database"""
+        reply = QMessageBox.question(
+            self, 'Confirm Clear',
+            'Are you sure you want to delete all records from the database?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM xisf_files')
+                conn.commit()
+                conn.close()
+                
+                self.log_text.append('\nDatabase cleared successfully!')
+                QMessageBox.information(self, 'Success', 'Database cleared successfully!')
+            except Exception as e:
+                QMessageBox.critical(self, 'Error', f'Failed to clear database: {e}')
+    
+    def refresh_catalog_view(self):
+        """Refresh the catalog view tree"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            self.catalog_tree.clear()
+            
+            # Get all objects
+            cursor.execute('''
+                SELECT 
+                    object,
+                    COUNT(*) as file_count,
+                    SUM(exposure) as total_exposure
+                FROM xisf_files
+                WHERE object IS NOT NULL
+                GROUP BY object
+                ORDER BY object
+            ''')
+            
+            objects = cursor.fetchall()
+            
+            for obj_name, obj_file_count, obj_total_exp in objects:
+                # Create object node
+                obj_item = QTreeWidgetItem(self.catalog_tree)
+                obj_item.setText(0, obj_name or 'Unknown')
+                obj_item.setText(1, str(obj_file_count))
+                obj_item.setText(2, f'{obj_total_exp:.1f}' if obj_total_exp else '0.0')
+                obj_item.setFlags(obj_item.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+                
+                # Get all filters for this object
+                cursor.execute('''
+                    SELECT 
+                        filter,
+                        COUNT(*) as file_count,
+                        SUM(exposure) as total_exposure
+                    FROM xisf_files
+                    WHERE object = ?
+                    GROUP BY filter
+                    ORDER BY filter
+                ''', (obj_name,))
+                
+                filters = cursor.fetchall()
+                
+                for filter_name, filter_file_count, filter_total_exp in filters:
+                    # Create filter node
+                    filter_item = QTreeWidgetItem(obj_item)
+                    filter_item.setText(0, filter_name or 'No Filter')
+                    filter_item.setText(1, str(filter_file_count))
+                    filter_item.setText(2, f'{filter_total_exp:.1f}' if filter_total_exp else '0.0')
+                    
+                    # Get all dates for this object and filter
+                    cursor.execute('''
+                        SELECT 
+                            date_loc,
+                            COUNT(*) as file_count,
+                            SUM(exposure) as total_exposure
+                        FROM xisf_files
+                        WHERE object = ? AND (filter = ? OR (filter IS NULL AND ? IS NULL))
+                        GROUP BY date_loc
+                        ORDER BY date_loc DESC
+                    ''', (obj_name, filter_name, filter_name))
+                    
+                    dates = cursor.fetchall()
+                    
+                    for date_val, date_file_count, date_total_exp in dates:
+                        # Create date node
+                        date_item = QTreeWidgetItem(filter_item)
+                        date_item.setText(0, date_val or 'No Date')
+                        date_item.setText(1, str(date_file_count))
+                        date_item.setText(2, f'{date_total_exp:.1f}' if date_total_exp else '0.0')
+                        
+                        # Get all files for this object, filter, and date
+                        cursor.execute('''
+                            SELECT 
+                                filename,
+                                exposure,
+                                telescop,
+                                instrume,
+                                date_loc
+                            FROM xisf_files
+                            WHERE object = ? 
+                                AND (filter = ? OR (filter IS NULL AND ? IS NULL))
+                                AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
+                            ORDER BY filename
+                        ''', (obj_name, filter_name, filter_name, date_val, date_val))
+                        
+                        files = cursor.fetchall()
+                        
+                        for filename, exposure, telescop, instrume, date_loc in files:
+                            # Create file node
+                            file_item = QTreeWidgetItem(date_item)
+                            file_item.setText(0, filename)
+                            file_item.setText(1, '1')
+                            file_item.setText(2, f'{exposure:.1f}' if exposure else 'N/A')
+                            file_item.setText(3, telescop or 'N/A')
+                            file_item.setText(4, instrume or 'N/A')
+                            file_item.setText(5, date_loc or 'N/A')
+            
+            conn.close()
+            
+            # Expand all top-level items by default
+            for i in range(self.catalog_tree.topLevelItemCount()):
+                item = self.catalog_tree.topLevelItem(i)
+                self.catalog_tree.expandItem(item)
+            
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to refresh view: {e}')
+    
+    def on_tab_changed(self, index):
+        """Handle tab change"""
+        if index == 1:  # View tab
+            self.refresh_catalog_view()
+
+
+def main():
+    app = QApplication(sys.argv)
+    window = XISFCatalogGUI()
+    window.show()
+    sys.exit(app.exec())
+
+
+if __name__ == '__main__':
+    main()
