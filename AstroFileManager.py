@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Read TELESCOP, INSTRUME, and OBJECT FITS header values from XISF files
+Read FITS header values from XISF files
 """
 
 import xisf
