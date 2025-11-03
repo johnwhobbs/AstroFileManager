@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QFileDialog, QMessageBox, QTabWidget, QTableWidget,
     QTableWidgetItem, QLabel, QProgressBar, QTextEdit, QTreeWidget,
-    QTreeWidgetItem
+    QTreeWidgetItem, QRadioButton, QButtonGroup, QGroupBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 import xisf
@@ -114,6 +114,11 @@ class ImportWorker(QThread):
     def run(self):
         """Process files and import to database"""
         conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Use batch processing for better performance
+        batch_size = 50
+        batch_data = []
         
         for i, filepath in enumerate(self.files):
             basename = os.path.basename(filepath)
@@ -127,51 +132,53 @@ class ImportWorker(QThread):
                 keywords = self.read_fits_keywords(filepath)
                 
                 if keywords:
-                    cursor = conn.cursor()
-                    
-                    # Check if exists
-                    cursor.execute('SELECT id FROM xisf_files WHERE file_hash = ?', (file_hash,))
-                    existing = cursor.fetchone()
-                    
                     filename = os.path.basename(filepath)
                     
                     # Process DATE-LOC to subtract 12 hours and get date only
                     date_loc = self.process_date_loc(keywords.get('DATE-LOC'))
                     
-                    if existing:
-                        cursor.execute('''
-                            UPDATE xisf_files
-                            SET filepath = ?, filename = ?, telescop = ?, instrume = ?, 
-                                object = ?, filter = ?, imagetyp = ?, exposure = ?,
-                                ccd_temp = ?, xbinning = ?, ybinning = ?, date_loc = ?,
-                                updated_at = CURRENT_TIMESTAMP
-                            WHERE file_hash = ?
-                        ''', (
-                            filepath, filename,
-                            keywords.get('TELESCOP'), keywords.get('INSTRUME'),
-                            keywords.get('OBJECT'), keywords.get('FILTER'),
-                            keywords.get('IMAGETYP'), keywords.get('EXPOSURE'),
-                            keywords.get('CCD-TEMP'), keywords.get('XBINNING'),
-                            keywords.get('YBINNING'), date_loc,
-                            file_hash
-                        ))
-                    else:
-                        cursor.execute('''
-                            INSERT INTO xisf_files 
-                            (file_hash, filepath, filename, telescop, instrume, object, 
-                             filter, imagetyp, exposure, ccd_temp, xbinning, ybinning, date_loc)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (
-                            file_hash, filepath, filename,
-                            keywords.get('TELESCOP'), keywords.get('INSTRUME'),
-                            keywords.get('OBJECT'), keywords.get('FILTER'),
-                            keywords.get('IMAGETYP'), keywords.get('EXPOSURE'),
-                            keywords.get('CCD-TEMP'), keywords.get('XBINNING'),
-                            keywords.get('YBINNING'), date_loc
-                        ))
+                    # Add to batch
+                    batch_data.append((
+                        file_hash, filepath, filename,
+                        keywords.get('TELESCOP'), keywords.get('INSTRUME'),
+                        keywords.get('OBJECT'), keywords.get('FILTER'),
+                        keywords.get('IMAGETYP'), keywords.get('EXPOSURE'),
+                        keywords.get('CCD-TEMP'), keywords.get('XBINNING'),
+                        keywords.get('YBINNING'), date_loc
+                    ))
                     
-                    conn.commit()
-                    self.processed += 1
+                    # Process batch when it reaches batch_size or on last file
+                    if len(batch_data) >= batch_size or i == len(self.files) - 1:
+                        # Insert batch using executemany for better performance
+                        cursor.execute('BEGIN TRANSACTION')
+                        
+                        for data in batch_data:
+                            file_hash = data[0]
+                            
+                            # Check if exists
+                            cursor.execute('SELECT id FROM xisf_files WHERE file_hash = ?', (file_hash,))
+                            existing = cursor.fetchone()
+                            
+                            if existing:
+                                cursor.execute('''
+                                    UPDATE xisf_files
+                                    SET filepath = ?, filename = ?, telescop = ?, instrume = ?, 
+                                        object = ?, filter = ?, imagetyp = ?, exposure = ?,
+                                        ccd_temp = ?, xbinning = ?, ybinning = ?, date_loc = ?,
+                                        updated_at = CURRENT_TIMESTAMP
+                                    WHERE file_hash = ?
+                                ''', data[1:] + (file_hash,))
+                            else:
+                                cursor.execute('''
+                                    INSERT INTO xisf_files 
+                                    (file_hash, filepath, filename, telescop, instrume, object, 
+                                     filter, imagetyp, exposure, ccd_temp, xbinning, ybinning, date_loc)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ''', data)
+                        
+                        conn.commit()
+                        self.processed += len(batch_data)
+                        batch_data = []
                 else:
                     self.errors += 1
                     
@@ -209,10 +216,12 @@ class XISFCatalogGUI(QMainWindow):
         self.import_tab = self.create_import_tab()
         self.view_tab = self.create_view_tab()
         self.stats_tab = self.create_stats_tab()
+        self.settings_tab = self.create_settings_tab()
         
         tabs.addTab(self.import_tab, "Import Files")
         tabs.addTab(self.view_tab, "View Catalog")
         tabs.addTab(self.stats_tab, "Statistics")
+        tabs.addTab(self.settings_tab, "Settings")
         
         # Connect tab change to refresh
         tabs.currentChanged.connect(self.on_tab_changed)
@@ -273,8 +282,8 @@ class XISFCatalogGUI(QMainWindow):
         refresh_btn.clicked.connect(self.refresh_statistics)
         layout.addWidget(refresh_btn)
         
-        # Horizontal layout for two tables side by side
-        tables_layout = QHBoxLayout()
+        # First row - two tables side by side
+        top_row_layout = QHBoxLayout()
         
         # Left side - Most Recent Objects
         left_layout = QVBoxLayout()
@@ -291,7 +300,7 @@ class XISFCatalogGUI(QMainWindow):
         self.recent_objects_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         left_layout.addWidget(self.recent_objects_table)
         
-        tables_layout.addLayout(left_layout)
+        top_row_layout.addLayout(left_layout)
         
         # Right side - Top Exposure Objects
         right_layout = QVBoxLayout()
@@ -308,11 +317,85 @@ class XISFCatalogGUI(QMainWindow):
         self.top_exposure_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         right_layout.addWidget(self.top_exposure_table)
         
-        tables_layout.addLayout(right_layout)
+        top_row_layout.addLayout(right_layout)
         
-        layout.addLayout(tables_layout)
+        layout.addLayout(top_row_layout)
+        
+        # Second row - Top Months table (full width)
+        months_label = QLabel('Top 10 Months by Total Exposure')
+        months_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(months_label)
+        
+        self.top_months_table = QTableWidget()
+        self.top_months_table.setColumnCount(3)
+        self.top_months_table.setHorizontalHeaderLabels(['Month', 'Total Exposure (hrs)', 'Number of Sessions'])
+        self.top_months_table.horizontalHeader().setStretchLastSection(True)
+        self.top_months_table.horizontalHeader().setSectionsMovable(False)
+        self.top_months_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.top_months_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        layout.addWidget(self.top_months_table)
         
         return widget
+    
+    def create_settings_tab(self):
+        """Create the settings tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Theme settings group
+        theme_group = QGroupBox("Theme")
+        theme_layout = QVBoxLayout()
+        
+        # Radio buttons for theme selection
+        self.theme_button_group = QButtonGroup()
+        self.standard_theme_radio = QRadioButton("Standard Theme")
+        self.dark_theme_radio = QRadioButton("Dark Theme")
+        
+        self.theme_button_group.addButton(self.standard_theme_radio, 0)
+        self.theme_button_group.addButton(self.dark_theme_radio, 1)
+        
+        theme_layout.addWidget(self.standard_theme_radio)
+        theme_layout.addWidget(self.dark_theme_radio)
+        
+        # Set current theme
+        current_theme = self.settings.value('theme', 'dark')
+        if current_theme == 'standard':
+            self.standard_theme_radio.setChecked(True)
+        else:
+            self.dark_theme_radio.setChecked(True)
+        
+        theme_group.setLayout(theme_layout)
+        layout.addWidget(theme_group)
+        
+        # OK button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        ok_button = QPushButton('Apply Theme')
+        ok_button.clicked.connect(self.apply_theme_setting)
+        button_layout.addWidget(ok_button)
+        layout.addLayout(button_layout)
+        
+        # Add stretch to push everything to the top
+        layout.addStretch()
+        
+        return widget
+    
+    def apply_theme_setting(self):
+        """Apply the selected theme"""
+        if self.standard_theme_radio.isChecked():
+            theme = 'standard'
+        else:
+            theme = 'dark'
+        
+        # Save theme preference
+        self.settings.setValue('theme', theme)
+        
+        # Show message that restart is needed
+        QMessageBox.information(
+            self,
+            'Theme Changed',
+            'Theme has been changed. Please restart the application for the changes to take effect.'
+        )
     
     def connect_signals(self):
         """Connect signals after all widgets are created"""
@@ -320,6 +403,7 @@ class XISFCatalogGUI(QMainWindow):
         self.catalog_tree.header().sectionResized.connect(self.save_settings)
         self.recent_objects_table.horizontalHeader().sectionResized.connect(self.save_settings)
         self.top_exposure_table.horizontalHeader().sectionResized.connect(self.save_settings)
+        self.top_months_table.horizontalHeader().sectionResized.connect(self.save_settings)
     
     def refresh_statistics(self):
         """Refresh the statistics tables"""
@@ -359,7 +443,7 @@ class XISFCatalogGUI(QMainWindow):
             
             self.recent_objects_table.resizeColumnsToContents()
             
-            # Get top 10 objects by total exposure
+            # Get top 10 objects by total exposure (Light Frames only)
             cursor.execute('''
                 SELECT 
                     f1.object,
@@ -367,7 +451,9 @@ class XISFCatalogGUI(QMainWindow):
                     (SELECT telescop FROM xisf_files WHERE object = f1.object LIMIT 1) as telescop,
                     (SELECT instrume FROM xisf_files WHERE object = f1.object LIMIT 1) as instrume
                 FROM xisf_files f1
-                WHERE f1.object IS NOT NULL AND f1.exposure IS NOT NULL
+                WHERE f1.object IS NOT NULL 
+                    AND f1.exposure IS NOT NULL 
+                    AND (f1.imagetyp = 'Light Frame' OR f1.imagetyp LIKE '%Light%')
                 GROUP BY f1.object
                 ORDER BY total_exposure DESC
                 LIMIT 10
@@ -384,6 +470,41 @@ class XISFCatalogGUI(QMainWindow):
                 self.top_exposure_table.setItem(i, 3, QTableWidgetItem(instrume or 'N/A'))
             
             self.top_exposure_table.resizeColumnsToContents()
+            
+            # Get top 10 months by total exposure (Light Frames only)
+            cursor.execute('''
+                SELECT 
+                    strftime('%Y-%m', date_loc) as month,
+                    SUM(exposure) as total_exposure,
+                    COUNT(DISTINCT date_loc) as session_count
+                FROM xisf_files
+                WHERE date_loc IS NOT NULL 
+                    AND exposure IS NOT NULL
+                    AND (imagetyp = 'Light Frame' OR imagetyp LIKE '%Light%')
+                GROUP BY month
+                ORDER BY total_exposure DESC
+                LIMIT 10
+            ''')
+            
+            top_months = cursor.fetchall()
+            
+            # Update top months table
+            self.top_months_table.setRowCount(len(top_months))
+            for i, (month, total_exp, sessions) in enumerate(top_months):
+                # Format month as "Month Year" (e.g., "October 2024")
+                if month:
+                    year, month_num = month.split('-')
+                    month_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                                   'July', 'August', 'September', 'October', 'November', 'December']
+                    formatted_month = f"{month_names[int(month_num)]} {year}"
+                else:
+                    formatted_month = 'Unknown'
+                
+                self.top_months_table.setItem(i, 0, QTableWidgetItem(formatted_month))
+                self.top_months_table.setItem(i, 1, QTableWidgetItem(f'{total_exp/3600:.2f}' if total_exp else '0.00'))
+                self.top_months_table.setItem(i, 2, QTableWidgetItem(str(sessions)))
+            
+            self.top_months_table.resizeColumnsToContents()
             
             conn.close()
             
@@ -408,6 +529,11 @@ class XISFCatalogGUI(QMainWindow):
         for i in range(self.top_exposure_table.columnCount() - 1):
             width = self.top_exposure_table.columnWidth(i)
             self.settings.setValue(f'exposure_table_col_{i}', width)
+        
+        # Save top months table column widths (all except last which is stretched)
+        for i in range(self.top_months_table.columnCount() - 1):
+            width = self.top_months_table.columnWidth(i)
+            self.settings.setValue(f'months_table_col_{i}', width)
     
     def restore_settings(self):
         """Restore window size and column widths"""
@@ -433,6 +559,12 @@ class XISFCatalogGUI(QMainWindow):
             width = self.settings.value(f'exposure_table_col_{i}')
             if width is not None:
                 self.top_exposure_table.setColumnWidth(i, int(width))
+        
+        # Restore top months table column widths (all except last which is stretched)
+        for i in range(self.top_months_table.columnCount() - 1):
+            width = self.settings.value(f'months_table_col_{i}')
+            if width is not None:
+                self.top_months_table.setColumnWidth(i, int(width))
         
         # Connect signals after restoring settings to avoid triggering saves during restore
         self.connect_signals()
@@ -673,7 +805,23 @@ class XISFCatalogGUI(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     
-    # Set dark theme
+    # Load theme setting
+    settings = QSettings('XISFCatalog', 'CatalogGUI')
+    theme = settings.value('theme', 'dark')
+    
+    # Apply theme
+    if theme == 'dark':
+        apply_dark_theme(app)
+    else:
+        apply_standard_theme(app)
+    
+    window = XISFCatalogGUI()
+    window.show()
+    sys.exit(app.exec())
+
+
+def apply_dark_theme(app):
+    """Apply dark theme to the application"""
     app.setStyle('Fusion')
     
     dark_palette = app.palette()
@@ -736,11 +884,52 @@ def main():
             background-color: #2a2a2a;
             border: 1px solid #555555;
         }
+        QGroupBox {
+            border: 1px solid #555555;
+            margin-top: 0.5em;
+            padding-top: 0.5em;
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 3px 0 3px;
+        }
     """)
+
+
+def apply_standard_theme(app):
+    """Apply standard theme to the application"""
+    # Use the system default style
+    app.setStyle('Fusion')
     
-    window = XISFCatalogGUI()
-    window.show()
-    sys.exit(app.exec())
+    # Use system default palette - no custom colors
+    app.setPalette(app.style().standardPalette())
+    
+    # Minimal stylesheet for consistency
+    app.setStyleSheet("""
+        QPushButton {
+            padding: 5px;
+        }
+        QProgressBar {
+            border: 1px solid #cccccc;
+            border-radius: 3px;
+            text-align: center;
+        }
+        QProgressBar::chunk {
+            background-color: #0078d4;
+        }
+        QGroupBox {
+            font-weight: bold;
+            border: 1px solid #cccccc;
+            margin-top: 0.5em;
+            padding-top: 0.5em;
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 3px 0 3px;
+        }
+    """)
 
 
 if __name__ == '__main__':
