@@ -13,7 +13,8 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QFileDialog, QMessageBox, QTabWidget, QTableWidget,
     QTableWidgetItem, QLabel, QProgressBar, QTextEdit, QTreeWidget,
-    QTreeWidgetItem, QRadioButton, QButtonGroup, QGroupBox
+    QTreeWidgetItem, QRadioButton, QButtonGroup, QGroupBox, QComboBox,
+    QLineEdit
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 import xisf
@@ -216,11 +217,13 @@ class XISFCatalogGUI(QMainWindow):
         self.import_tab = self.create_import_tab()
         self.view_tab = self.create_view_tab()
         self.stats_tab = self.create_stats_tab()
+        self.maintenance_tab = self.create_maintenance_tab()
         self.settings_tab = self.create_settings_tab()
         
         tabs.addTab(self.import_tab, "Import Files")
         tabs.addTab(self.view_tab, "View Catalog")
         tabs.addTab(self.stats_tab, "Statistics")
+        tabs.addTab(self.maintenance_tab, "Maintenance")
         tabs.addTab(self.settings_tab, "Settings")
         
         # Connect tab change to refresh
@@ -245,11 +248,6 @@ class XISFCatalogGUI(QMainWindow):
         self.import_folder_btn = QPushButton('Import Folder')
         self.import_folder_btn.clicked.connect(self.import_folder)
         button_layout.addWidget(self.import_folder_btn)
-        
-        self.clear_db_btn = QPushButton('Clear Database')
-        self.clear_db_btn.clicked.connect(self.clear_database)
-        self.clear_db_btn.setStyleSheet("QPushButton { background-color: #8b0000; color: white; } QPushButton:hover { background-color: #a00000; }")
-        button_layout.addWidget(self.clear_db_btn)
         
         layout.addLayout(button_layout)
         
@@ -336,6 +334,175 @@ class XISFCatalogGUI(QMainWindow):
         layout.addWidget(self.top_months_table)
         
         return widget
+    
+    def create_maintenance_tab(self):
+        """Create the maintenance tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Clear Database section
+        clear_group = QGroupBox("Database Management")
+        clear_layout = QVBoxLayout()
+        
+        clear_info = QLabel("Clear all records from the database:")
+        clear_layout.addWidget(clear_info)
+        
+        self.clear_db_btn = QPushButton('Clear Database')
+        self.clear_db_btn.clicked.connect(self.clear_database)
+        self.clear_db_btn.setStyleSheet("QPushButton { background-color: #8b0000; color: white; } QPushButton:hover { background-color: #a00000; }")
+        clear_layout.addWidget(self.clear_db_btn)
+        
+        clear_group.setLayout(clear_layout)
+        layout.addWidget(clear_group)
+        
+        # Search and Replace section
+        replace_group = QGroupBox("Search and Replace")
+        replace_layout = QVBoxLayout()
+        
+        replace_info = QLabel("Replace values in FITS keywords:")
+        replace_layout.addWidget(replace_info)
+        
+        # FITS Keyword selection
+        keyword_layout = QHBoxLayout()
+        keyword_label = QLabel("FITS Keyword:")
+        keyword_label.setMinimumWidth(120)
+        self.keyword_combo = QComboBox()
+        self.keyword_combo.addItems([
+            'TELESCOP', 'INSTRUME', 'OBJECT', 'FILTER', 
+            'IMAGETYP', 'DATE-LOC'
+        ])
+        self.keyword_combo.currentTextChanged.connect(self.on_keyword_changed)
+        keyword_layout.addWidget(keyword_label)
+        keyword_layout.addWidget(self.keyword_combo)
+        replace_layout.addLayout(keyword_layout)
+        
+        # Current value selection
+        current_value_layout = QHBoxLayout()
+        current_value_label = QLabel("Current Value:")
+        current_value_label.setMinimumWidth(120)
+        self.current_value_combo = QComboBox()
+        current_value_layout.addWidget(current_value_label)
+        current_value_layout.addWidget(self.current_value_combo)
+        replace_layout.addLayout(current_value_layout)
+        
+        # Replacement value input
+        replacement_layout = QHBoxLayout()
+        replacement_label = QLabel("Replacement Value:")
+        replacement_label.setMinimumWidth(120)
+        self.replacement_input = QLineEdit()
+        replacement_layout.addWidget(replacement_label)
+        replacement_layout.addWidget(self.replacement_input)
+        replace_layout.addLayout(replacement_layout)
+        
+        # Replace button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        self.replace_btn = QPushButton('Replace Values')
+        self.replace_btn.clicked.connect(self.replace_values)
+        button_layout.addWidget(self.replace_btn)
+        replace_layout.addLayout(button_layout)
+        
+        replace_group.setLayout(replace_layout)
+        layout.addWidget(replace_group)
+        
+        # Add stretch to push everything to the top
+        layout.addStretch()
+        
+        return widget
+    
+    def on_keyword_changed(self):
+        """Update the current value dropdown when keyword selection changes"""
+        keyword = self.keyword_combo.currentText()
+        self.populate_current_values(keyword)
+    
+    def populate_current_values(self, keyword):
+        """Populate the current value dropdown with existing values from the database"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Map FITS keywords to database column names
+            column_map = {
+                'TELESCOP': 'telescop',
+                'INSTRUME': 'instrume',
+                'OBJECT': 'object',
+                'FILTER': 'filter',
+                'IMAGETYP': 'imagetyp',
+                'DATE-LOC': 'date_loc'
+            }
+            
+            column = column_map.get(keyword)
+            if column:
+                cursor.execute(f'SELECT DISTINCT {column} FROM xisf_files WHERE {column} IS NOT NULL ORDER BY {column}')
+                values = [row[0] for row in cursor.fetchall()]
+                
+                self.current_value_combo.clear()
+                self.current_value_combo.addItems(values)
+            
+            conn.close()
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to load values: {e}')
+    
+    def replace_values(self):
+        """Replace values in the database"""
+        keyword = self.keyword_combo.currentText()
+        current_value = self.current_value_combo.currentText()
+        replacement_value = self.replacement_input.text()
+        
+        if not current_value:
+            QMessageBox.warning(self, 'No Value Selected', 'Please select a current value to replace.')
+            return
+        
+        if not replacement_value:
+            QMessageBox.warning(self, 'No Replacement', 'Please enter a replacement value.')
+            return
+        
+        # Confirm the replacement
+        reply = QMessageBox.question(
+            self, 'Confirm Replacement',
+            f'Replace all occurrences of:\n\n'
+            f'Keyword: {keyword}\n'
+            f'Current Value: "{current_value}"\n'
+            f'Replacement Value: "{replacement_value}"\n\n'
+            f'Are you sure?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                # Map FITS keywords to database column names
+                column_map = {
+                    'TELESCOP': 'telescop',
+                    'INSTRUME': 'instrume',
+                    'OBJECT': 'object',
+                    'FILTER': 'filter',
+                    'IMAGETYP': 'imagetyp',
+                    'DATE-LOC': 'date_loc'
+                }
+                
+                column = column_map.get(keyword)
+                if column:
+                    cursor.execute(f'UPDATE xisf_files SET {column} = ? WHERE {column} = ?', 
+                                   (replacement_value, current_value))
+                    rows_affected = cursor.rowcount
+                    conn.commit()
+                    
+                    QMessageBox.information(
+                        self, 'Success',
+                        f'Successfully replaced {rows_affected} occurrence(s).'
+                    )
+                    
+                    # Refresh the current values dropdown
+                    self.populate_current_values(keyword)
+                    self.replacement_input.clear()
+                
+                conn.close()
+            except Exception as e:
+                QMessageBox.critical(self, 'Error', f'Failed to replace values: {e}')
     
     def create_settings_tab(self):
         """Create the settings tab"""
@@ -786,10 +953,7 @@ class XISFCatalogGUI(QMainWindow):
             
             conn.close()
             
-            # Expand all top-level items by default
-            for i in range(self.catalog_tree.topLevelItemCount()):
-                item = self.catalog_tree.topLevelItem(i)
-                self.catalog_tree.expandItem(item)
+            # Don't expand any items by default - keep everything collapsed
             
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to refresh view: {e}')
@@ -800,6 +964,10 @@ class XISFCatalogGUI(QMainWindow):
             self.refresh_catalog_view()
         elif index == 2:  # Statistics tab
             self.refresh_statistics()
+        elif index == 3:  # Maintenance tab
+            # Populate current values when maintenance tab is opened
+            keyword = self.keyword_combo.currentText()
+            self.populate_current_values(keyword)
 
 
 def main():
