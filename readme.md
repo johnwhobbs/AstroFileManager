@@ -4,19 +4,23 @@ A PyQt6-based desktop application for cataloging and managing XISF astrophotogra
 
 ## Features
 
-- **Import XISF Files**: Import individual files or entire folders (including subfolders)
+- **Import XISF Files**: Import individual files or entire folders (including all subfolders recursively)
 - **Automatic Metadata Extraction**: Reads FITS keywords including:
   - Telescope and instrument information
   - Object name
   - Filter type
+  - Image type (Light Frame, Dark Frame, Flat Frame, etc.)
   - Exposure time
   - CCD temperature
   - Binning settings
-  - Observation date
+  - Observation date (automatically adjusted by -12 hours for session grouping)
 - **Hierarchical Catalog View**: Browse your images organized by Object → Filter → Date → Individual Files
-- **Statistics Dashboard**: View your most recently imaged objects and objects with the most total exposure time
-- **Duplicate Detection**: Uses file hashing to prevent duplicate entries
-- **Persistent Settings**: Window size and column widths are saved between sessions
+- **Statistics Dashboard**: 
+  - View your 10 most recently imaged objects with telescope and instrument info
+  - View top 10 objects by total light frame exposure time (in hours) with equipment details
+- **Duplicate Detection**: Uses SHA256 file hashing to prevent duplicate entries
+- **Persistent Settings**: Window size, position, and all column widths are saved between sessions
+- **Dark Theme**: Easy-on-the-eyes dark interface perfect for nighttime use
 
 ## Requirements
 
@@ -53,12 +57,12 @@ python xisf_catalog_gui.py
 
 **Import Files:**
 1. Click "Import XISF Files" to select individual files
-2. Or click "Import Folder" to import all XISF files from a folder and its subfolders
+2. Or click "Import Folder" to import all XISF files from a folder and all its subfolders recursively
 3. Monitor progress in the log window
 4. View import summary when complete
 
 **Clear Database:**
-- Click "Clear Database" to remove all records (requires confirmation)
+- Click "Clear Database" (red button) to remove all records (requires confirmation)
 
 ### View Catalog Tab
 
@@ -68,32 +72,38 @@ Browse your XISF files in a hierarchical tree structure:
 ▼ M31 (Object)
   ▼ Ha (Filter)
     ▼ 2024-10-15 (Date)
-      • M31_Ha_001.xisf
-      • M31_Ha_002.xisf
+      • M31_Ha_001.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
+      • M31_Ha_002.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
     ▼ 2024-10-14
-      • M31_Ha_003.xisf
+      • M31_Ha_003.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
   ▼ OIII
     ▼ 2024-10-15
-      • M31_OIII_001.xisf
+      • M31_OIII_001.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
 ```
 
+**Displayed Information:**
+- **Name**: Object/Filter/Date/Filename hierarchy
+- **Image Type**: Light Frame, Dark Frame, Flat Frame, Bias Frame, etc.
+- **Telescope**: Telescope name
+- **Instrument**: Camera/instrument name
+
 - Click the arrows to expand/collapse sections
-- View telescope and instrument information for each file
 - Click "Refresh" to update the view
 
 ### Statistics Tab
 
-View two key statistics:
+View two key statistics with equipment information:
 
 **10 Most Recent Objects:**
 - Shows objects you've imaged most recently
 - Sorted by most recent observation date
-- Displays total number of files per object
+- Displays telescope and instrument used for the most recent session
 
 **Top 10 Objects by Total Exposure:**
-- Shows objects with the most accumulated exposure time
-- Displays exposure in both seconds and hours
-- Helps track your imaging progress
+- Shows objects with the most accumulated **light frame** exposure time
+- Displays total exposure in hours (calibration frames excluded)
+- Shows telescope and instrument used
+- Helps track your imaging progress on each target
 
 ## Database Schema
 
@@ -119,11 +129,23 @@ The SQLite database contains a single table `xisf_files` with the following fiel
 ## Date Processing
 
 The application processes the DATE-LOC FITS keyword by:
-1. Reading the timestamp from the FITS header
+1. Reading the timestamp from the FITS header (handles up to 7 decimal places in fractional seconds)
 2. Subtracting 12 hours (to normalize imaging sessions that span midnight)
 3. Storing only the date in YYYY-MM-DD format
 
 This ensures that imaging sessions are grouped by their actual observation night rather than being split across calendar days.
+
+## User Interface
+
+**Dark Theme:**
+The application features a dark theme optimized for nighttime use, with:
+- Dark gray backgrounds
+- High contrast text
+- Blue highlights for selections
+- Styled buttons with hover effects
+
+**Column Widths:**
+All column widths are resizable and automatically saved. Your preferred layout will be restored when you reopen the application.
 
 ## File Hash Detection
 
@@ -134,8 +156,9 @@ The application calculates a SHA256 hash for each imported file. If you attempt 
 The application automatically saves:
 - Window size and position
 - Column widths in all tables and tree views
+- All layout preferences
 
-Settings are restored when you reopen the application.
+Settings are stored using Qt's QSettings in platform-specific locations and are restored when you reopen the application.
 
 ## Troubleshooting
 
@@ -145,7 +168,13 @@ Settings are restored when you reopen the application.
 
 **Date fields showing NULL:**
 - Ensure your XISF files contain the DATE-LOC FITS keyword
-- The application supports dates with fractional seconds up to 7 digits
+- The application supports dates with fractional seconds up to 7 digits (nanoseconds)
+- Dates are automatically normalized by subtracting 12 hours
+
+**Statistics showing unexpected values:**
+- The "Top 10 Objects by Total Exposure" only counts Light Frames
+- Dark Frames, Flat Frames, and Bias Frames are excluded from exposure calculations
+- Ensure your files have the correct IMAGETYP FITS keyword
 
 **Import errors:**
 - Check that your files are valid XISF format
@@ -173,7 +202,11 @@ Feel free to submit issues or pull requests for improvements.
 ## Version History
 
 **v1.0.0** - Initial release
-- Import and catalog XISF files
-- Hierarchical catalog view
-- Statistics dashboard
-- Persistent settings
+- Import and catalog XISF files from folders and subfolders
+- Hierarchical catalog view (Object → Filter → Date → Files)
+- Statistics dashboard with equipment information
+- Persistent settings (window size and column widths)
+- Dark theme UI
+- Light frame-only exposure calculations
+- Automatic date normalization (-12 hours)
+- SHA256 file hash duplicate detection
