@@ -22,8 +22,13 @@ A PyQt6-based desktop application for cataloging and managing XISF astrophotogra
   - Database management with safe clear database function
   - Search and replace functionality for bulk metadata corrections
   - Fix inconsistent FITS keyword values across your entire catalog
+  - **File Organization**: Automatically organize files into structured folders with standardized naming
+    - Separate structures for Lights and Calibration frames (Darks, Flats, Bias)
+    - Preview organization plan before execution
+    - Preserves original files while creating organized copies
 - **Settings Management**:
-  - Configure database file location
+  - Configure repository path for organized file storage
+  - Choose between Standard and Dark themes
   - Customize application preferences
 - **Duplicate Detection**: Uses SHA256 file hashing to prevent duplicate entries
 - **Persistent Settings**: Window size, position, and all column widths are saved between sessions
@@ -144,14 +149,85 @@ The search and replace tool allows you to fix inconsistent metadata across your 
 - Normalize filter names (e.g., "Hydrogen Alpha" → "Ha")
 - Correct instrument names across multiple imaging sessions
 
+**File Organization:**
+
+The File Organization tool automatically organizes your XISF files into a structured folder hierarchy with standardized naming conventions:
+
+1. **Preview Organization Plan**: See how files will be organized before making any changes
+   - Shows source and destination paths for the first 10 files
+   - Displays total count of files to be organized
+   - No files are modified during preview
+
+2. **Execute File Organization**: Copy files to the organized structure
+   - Creates a standardized folder hierarchy based on file type
+   - Renames files using metadata-based naming conventions
+   - Original files are preserved (not deleted)
+   - Updates database with new file paths
+   - Progress is logged in real-time
+
+**Folder Structure:**
+
+The organization system creates different structures based on image type:
+
+**Light Frames:**
+```
+Lights/
+  └── [Object]/
+      └── [Filter]/
+          └── [Date]_[Object]_[Filter]_[Exp]_[Temp]_[Binning]_[Seq].xisf
+```
+Example: `Lights/M31/Ha/2024-10-15_M31_Ha_300s_-10C_Bin1x1_001.xisf`
+
+**Dark Frames:**
+```
+Calibration/
+  └── Darks/
+      └── [Exp]_[Temp]_[Binning]/
+          └── [Date]_Dark_[Exp]_[Temp]_[Binning]_[Seq].xisf
+```
+Example: `Calibration/Darks/300s_-10C_Bin1x1/2024-10-15_Dark_300s_-10C_Bin1x1_001.xisf`
+
+**Flat Frames:**
+```
+Calibration/
+  └── Flats/
+      └── [Filter]_[Temp]_[Binning]/
+          └── [Date]_Flat_[Filter]_[Temp]_[Binning]_[Seq].xisf
+```
+Example: `Calibration/Flats/Ha_-10C_Bin1x1/2024-10-15_Flat_Ha_-10C_Bin1x1_001.xisf`
+
+**Bias Frames:**
+```
+Calibration/
+  └── Bias/
+      └── [Temp]_[Binning]/
+          └── [Date]_Bias_[Temp]_[Binning]_[Seq].xisf
+```
+Example: `Calibration/Bias/-10C_Bin1x1/2024-10-15_Bias_-10C_Bin1x1_001.xisf`
+
+**Benefits:**
+- Easy matching of calibration frames to light frames
+- Consistent naming across all imaging sessions
+- Simplified workflow for stacking software
+- Organized by object and filter for easy browsing
+- Preserves original files as backup
+
+**Note:** You must set a Repository Path in the Settings tab before using the File Organization feature.
+
 ### Settings Tab
 
 Configure application preferences and database settings.
 
-**Database Configuration:**
-- **Database Location**: Specify the path to your SQLite database file
-- Change database location to work with different catalogs
-- Settings are persisted between sessions
+**Image Repository:**
+- **Repository Path**: Set the destination folder for organized XISF files
+- This path is used by the File Organization feature in the Maintenance tab
+- Browse to select a folder where organized files will be stored
+
+**Theme:**
+- **Standard Theme**: Light theme for daytime use
+- **Dark Theme**: Dark theme optimized for nighttime use
+
+All settings are automatically saved and persisted between sessions.
 
 ## Database Schema
 
@@ -249,10 +325,18 @@ Feel free to submit issues or pull requests for improvements.
 
 ## Version History
 
+**v1.3.0** - File Organization Feature
+- Added automatic file organization with standardized naming conventions
+- Separate folder structures for Lights and Calibration frames (Darks, Flats, Bias)
+- Preview organization plan before execution
+- Intelligent naming based on metadata (object, filter, date, exposure, temp, binning)
+- Repository path configuration in Settings tab
+- Preserves original files while creating organized copies
+
 **v1.2.0** - Maintenance and Settings Update
 - Added Maintenance tab with database management tools
 - Implemented search and replace functionality for bulk metadata corrections
-- Added Settings tab for database configuration
+- Added Settings tab with theme configuration
 - Moved Clear Database function to Maintenance tab for better organization
 - Changed default tree view behavior to keep items collapsed
 
