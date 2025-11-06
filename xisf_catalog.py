@@ -1705,10 +1705,6 @@ def apply_standard_theme(app):
         }
     """)
 
-
-if __name__ == '__main__':
-    main()
-
     def create_settings_tab(self):
         """Create the settings tab"""
         widget = QWidget()
