@@ -4,34 +4,59 @@ A PyQt6-based desktop application for cataloging and managing XISF astrophotogra
 
 ## Features
 
-- **Import XISF Files**: Import individual files or entire folders (including all subfolders recursively)
+- **Flexible Import Modes**:
+  - **Import Only**: Store original file paths in database
+  - **Import and Organize**: Automatically copy files to organized structure during import
+  - Mode selection persists between sessions
+
 - **Automatic Metadata Extraction**: Reads FITS keywords including:
   - Telescope and instrument information
-  - Object name
+  - Object name (automatically NULL for calibration frames)
   - Filter type
-  - Image type (Light Frame, Dark Frame, Flat Frame, etc.)
-  - Exposure time
-  - CCD temperature
+  - Image type (Light Frame, Dark Frame, Flat Frame, Bias Frame)
+  - Exposure time (supports both EXPOSURE and EXPTIME keywords)
+  - CCD temperature (rounded to nearest degree for grouping)
   - Binning settings
-  - Observation date (automatically adjusted by -12 hours for session grouping)
-- **Hierarchical Catalog View**: Browse your images organized by Object → Filter → Date → Individual Files
-- **Statistics Dashboard**:
-  - View your 10 most recently imaged objects with telescope and instrument info
-  - View top 10 objects by total light frame exposure time (in hours) with equipment details
+  - Observation date with smart fallback:
+    - Prefers DATE-LOC (local time)
+    - Falls back to DATE-OBS (UTC) with timezone conversion
+    - Automatically adjusted by -12 hours for session grouping
+
+- **Dual-Section Catalog View**: Browse your images in an organized tree structure:
+  - **Light Frames**: Organized by Object → Filter → Date → Files
+  - **Calibration Frames**: Organized by frame type with intelligent grouping:
+    - Dark Frames: Exposure/Temp/Binning → Date → Files
+    - Flat Frames: Date → Filter/Temp/Binning → Files
+    - Bias Frames: Temp/Binning → Date → Files
+  - Temperature-based grouping (frames within ±0.5°C grouped together)
+
+- **Activity Analytics**:
+  - GitHub-style activity heatmap showing imaging sessions throughout the year
+  - Visual representation of total exposure hours per night
+  - Filter by year to track imaging trends
+
 - **Maintenance Tools**:
   - Database management with safe clear database function
   - Search and replace functionality for bulk metadata corrections
-  - Fix inconsistent FITS keyword values across your entire catalog
   - **File Organization**: Automatically organize files into structured folders with standardized naming
     - Separate structures for Lights and Calibration frames (Darks, Flats, Bias)
     - Preview organization plan before execution
     - Preserves original files while creating organized copies
+    - Can also be triggered during import
+
 - **Settings Management**:
   - Configure repository path for organized file storage
+  - Set timezone for DATE-OBS UTC conversion
   - Choose between Standard and Dark themes
-  - Customize application preferences
-- **Duplicate Detection**: Uses SHA256 file hashing to prevent duplicate entries
-- **Persistent Settings**: Window size, position, and all column widths are saved between sessions
+  - Import mode preference (import only vs organize during import)
+
+- **Smart Data Handling**:
+  - Calibration frames automatically imported without object field
+  - Temperature rounding for intelligent frame grouping
+  - Duplicate detection using SHA256 file hashing
+  - Robust string-to-numeric conversion for all metadata fields
+
+- **Persistent Settings**: Window size, position, column widths, and preferences saved between sessions
 - **Dark Theme**: Easy-on-the-eyes dark interface perfect for nighttime use
 
 ## Requirements
@@ -67,52 +92,103 @@ python xisf_catalog_gui.py
 
 ### Import Tab
 
+**Import Mode Selection:**
+
+Choose how files should be imported:
+
+- **Import only (store original paths)**: Traditional mode - files remain in their original location, only metadata is stored in database
+- **Import and organize (copy to repository)**: Files are automatically copied to organized folder structure during import
+  - Requires repository path to be set in Settings tab
+  - Files organized by metadata (object, filter, date, exposure, temperature, binning)
+  - Original files are preserved
+  - Mode selection is saved between sessions
+
 **Import Files:**
-1. Click "Import XISF Files" to select individual files
-2. Or click "Import Folder" to import all XISF files from a folder and all its subfolders recursively
-3. Monitor progress in the log window
-4. View import summary when complete
+1. Select your preferred import mode using the radio buttons
+2. Click "Import XISF Files" to select individual files, or "Import Folder" to import all XISF files from a folder and subfolders
+3. If "Import and organize" mode is selected, files will be copied to the repository structure during import
+4. Monitor progress in the log window (shows organization status if applicable)
+5. View import summary when complete
+
+**Import Log:**
+- Shows which mode is active
+- Displays repository path if organizing
+- Shows "Organized: filename" for successfully organized files
+- Shows warnings if organization fails (falls back to original path)
 
 ### View Catalog Tab
 
-Browse your XISF files in a hierarchical tree structure:
+Browse your XISF files in a dual-section hierarchical tree structure:
 
+**Light Frames Section:**
 ```
-▼ M31 (Object)
-  ▼ Ha (Filter)
+▼ Light Frames
+  ▼ M31 (Object)
+    ▼ Ha (Filter)
+      ▼ 2024-10-15 (Date)
+        • M31_Ha_001.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
+        • M31_Ha_002.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
+      ▼ 2024-10-14
+        • M31_Ha_003.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
+    ▼ OIII
+      ▼ 2024-10-15
+        • M31_OIII_001.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
+```
+
+**Calibration Frames Section:**
+```
+▼ Calibration Frames
+  ▼ Dark Frames
+    ▼ 300s_-10C_Bin1x1 (Exposure/Temp/Binning)
+      ▼ 2024-10-15 (Date)
+        • Dark_001.xisf [Dark Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
+        • Dark_002.xisf [Dark Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
+  ▼ Flat Frames
     ▼ 2024-10-15 (Date)
-      • M31_Ha_001.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
-      • M31_Ha_002.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
-    ▼ 2024-10-14
-      • M31_Ha_003.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
-  ▼ OIII
-    ▼ 2024-10-15
-      • M31_OIII_001.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
+      ▼ Ha_-10C_Bin1x1 (Filter/Temp/Binning)
+        • Flat_001.xisf [Flat Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
+  ▼ Bias Frames
+    ▼ -10C_Bin1x1 (Temp/Binning)
+      ▼ 2024-10-15 (Date)
+        • Bias_001.xisf [Bias Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
 ```
+
+**Temperature Grouping:**
+- Frames with similar temperatures (within ±0.5°C) are grouped together
+- Example: frames at -10.2°C, -10.8°C, and -9.6°C all appear under "-10C"
+- This intelligent grouping helps match calibration frames to light frames
 
 **Displayed Information:**
-- **Name**: Object/Filter/Date/Filename hierarchy
-- **Image Type**: Light Frame, Dark Frame, Flat Frame, Bias Frame, etc.
+- **Name**: Hierarchical organization by frame type, object, filter, date, etc.
+- **Image Type**: Light Frame, Dark Frame, Flat Frame, Bias Frame
 - **Telescope**: Telescope name
 - **Instrument**: Camera/instrument name
 
+**Navigation:**
 - Click the arrows to expand/collapse sections
-- Click "Refresh" to update the view
+- Click "Refresh" to update the view after imports or changes
+- All calibration frames are now visible (previously hidden)
 
-### Statistics Tab
+### Analytics Tab
 
-View two key statistics with equipment information:
+Visualize your imaging activity with a GitHub-style activity heatmap:
 
-**10 Most Recent Objects:**
-- Shows objects you've imaged most recently
-- Sorted by most recent observation date
-- Displays telescope and instrument used for the most recent session
+**Activity Heatmap:**
+- Shows imaging sessions throughout the year in a calendar-style grid
+- Each cell represents one day, color-coded by total exposure hours:
+  - Gray: No imaging activity
+  - Light blue: < 2 hours
+  - Medium blue: 2-4 hours
+  - Dark blue: 4-6 hours
+  - Darkest blue: 6+ hours
+- Hover over any day to see the exact date and total exposure hours
+- Select different years using the dropdown to view historical data
 
-**Top 10 Objects by Total Exposure:**
-- Shows objects with the most accumulated **light frame** exposure time
-- Displays total exposure in hours (calibration frames excluded)
-- Shows telescope and instrument used
-- Helps track your imaging progress on each target
+**Use Cases:**
+- Track your imaging consistency and frequency
+- Identify your most productive imaging periods
+- Visualize seasonal patterns in your astrophotography workflow
+- Share your imaging statistics with the community
 
 ### Maintenance Tab
 
@@ -222,8 +298,16 @@ Configure application preferences and database settings.
 
 **Image Repository:**
 - **Repository Path**: Set the destination folder for organized XISF files
-- This path is used by the File Organization feature in the Maintenance tab
+- This path is used by the File Organization feature and the "Import and organize" mode
 - Browse to select a folder where organized files will be stored
+
+**Timezone:**
+- **Timezone Selection**: Set your local timezone for DATE-OBS conversion
+- Dropdown includes 23 common timezones worldwide
+- Used when files have DATE-OBS (UTC) but no DATE-LOC
+- Important for master calibration frames which typically only have DATE-OBS
+- Ensures dates are correctly converted to local time for session grouping
+- Defaults to UTC if not set
 
 **Theme:**
 - **Standard Theme**: Light theme for daytime use
@@ -254,12 +338,22 @@ The SQLite database contains a single table `xisf_files` with the following fiel
 
 ## Date Processing
 
-The application processes the DATE-LOC FITS keyword by:
-1. Reading the timestamp from the FITS header (handles up to 7 decimal places in fractional seconds)
-2. Subtracting 12 hours (to normalize imaging sessions that span midnight)
-3. Storing only the date in YYYY-MM-DD format
+The application uses a smart fallback approach for date extraction:
 
-This ensures that imaging sessions are grouped by their actual observation night rather than being split across calendar days.
+**Primary Method - DATE-LOC:**
+1. Reads the DATE-LOC timestamp from the FITS header (handles up to 7 decimal places in fractional seconds)
+2. Subtracts 12 hours (to normalize imaging sessions that span midnight)
+3. Stores only the date in YYYY-MM-DD format
+
+**Fallback Method - DATE-OBS:**
+If DATE-LOC is not available (common for master calibration frames):
+1. Reads the DATE-OBS timestamp from the FITS header (UTC time)
+2. Converts from UTC to your configured local timezone
+3. Subtracts 12 hours (to normalize imaging sessions that span midnight)
+4. Stores only the date in YYYY-MM-DD format
+
+**Session Grouping:**
+The 12-hour subtraction ensures that imaging sessions are grouped by their actual observation night rather than being split across calendar days. For example, images captured from 8 PM on November 7 to 2 AM on November 8 will all be grouped under "2024-11-07".
 
 ## User Interface
 
@@ -293,14 +387,21 @@ Settings are stored using Qt's QSettings in platform-specific locations and are 
 - The database file `xisf_catalog.db` must be in the same directory as the GUI script
 
 **Date fields showing NULL:**
-- Ensure your XISF files contain the DATE-LOC FITS keyword
+- Files need either DATE-LOC or DATE-OBS FITS keyword
+- If using DATE-OBS, ensure timezone is set in Settings tab
 - The application supports dates with fractional seconds up to 7 digits (nanoseconds)
 - Dates are automatically normalized by subtracting 12 hours
 
-**Statistics showing unexpected values:**
-- The "Top 10 Objects by Total Exposure" only counts Light Frames
-- Dark Frames, Flat Frames, and Bias Frames are excluded from exposure calculations
-- Ensure your files have the correct IMAGETYP FITS keyword
+**Organization failing during import:**
+- Check that repository path is set correctly in Settings tab
+- Ensure you have write permissions to the repository location
+- Check disk space is available
+- View import log for specific error messages
+
+**Calibration frames not showing in View Catalog:**
+- Click the "Refresh" button to update the tree view
+- Expand the "Calibration Frames" section in the tree
+- Ensure frames have correct IMAGETYP keyword (Dark, Flat, or Bias)
 
 **Import errors:**
 - Check that your files are valid XISF format
@@ -326,6 +427,46 @@ This project is provided as-is for personal use in managing astrophotography fil
 Feel free to submit issues or pull requests for improvements.
 
 ## Version History
+
+**v2.0.0** - Major Update: Integrated Workflow & Enhanced Data Handling
+- **Import Workflow Integration**: Added import mode selection (import only vs import and organize)
+  - Files can now be organized during import instead of as separate step
+  - Mode selection persists between sessions
+  - Warning shown if organize mode selected without repository path
+- **Timezone Support**: Added DATE-OBS with timezone conversion
+  - Supports master calibration frames that only have DATE-OBS (UTC)
+  - 23 common timezones available in Settings tab
+  - Automatic fallback: DATE-LOC → DATE-OBS with timezone conversion
+- **View Catalog Improvements**: Dual-section tree view
+  - Separated Light Frames and Calibration Frames sections
+  - All calibration frames now visible (Dark, Flat, Bias)
+  - Intelligent grouping: Darks by exposure/temp/binning, Flats by date/filter/temp/binning, Bias by temp/binning
+- **Temperature Rounding**: Frames within ±0.5°C grouped together
+  - Applied to View Catalog display and file organization
+  - Helps match calibration frames to light frames
+  - Consistent across Dark, Flat, and Bias frames
+- **Enhanced Import Logic**:
+  - EXPTIME keyword support (FITS standard) in addition to EXPOSURE
+  - Calibration frames automatically imported without object field
+  - Robust string-to-numeric conversion for all metadata fields
+  - Better error handling with detailed messages in import log
+- **Analytics Tab**: Replaced Statistics tab with GitHub-style activity heatmap
+  - Visual calendar showing imaging sessions throughout the year
+  - Color-coded by total exposure hours per night
+  - Year selector for historical data
+- **Code Cleanup**: Removed legacy migration tools
+  - Removed "Fix Calibration Frame Objects" (now handled during import)
+  - Removed "Re-extract Exposure Times" (now handled during import)
+  - Removed "Re-extract Dates" (now handled during import)
+- **Bug Fixes**:
+  - Fixed flat frame organization to group by date first (Issue #9)
+  - Fixed database filename not updated during organization (Issue #11)
+  - Fixed calibration frames not visible in View Catalog (Issue #13)
+  - Fixed flat frames incorrectly imported with object field (Issue #14)
+  - Fixed exposure time not importing from EXPTIME keyword (Issue #16)
+  - Fixed master frames missing dates (Issue #17)
+  - Fixed flat frames not grouping by temperature (Issue #20)
+  - Fixed file organization during import (Issue #23)
 
 **v1.3.0** - File Organization Feature
 - Added automatic file organization with standardized naming conventions
