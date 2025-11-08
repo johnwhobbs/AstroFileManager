@@ -7,6 +7,7 @@ import sys
 import os
 import sqlite3
 import hashlib
+import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -289,7 +290,6 @@ class ImportWorker(QThread):
                             )
 
                             # Create directory if needed
-                            import shutil
                             os.makedirs(os.path.dirname(organized_path), exist_ok=True)
 
                             # Copy file to organized location
@@ -301,8 +301,9 @@ class ImportWorker(QThread):
 
                             self.progress.emit(i + 1, len(self.files), f"Organized: {filename}")
                         except Exception as e:
-                            # If organization fails, keep original path
-                            self.progress.emit(i + 1, len(self.files), f"Organization failed: {basename}, using original path")
+                            # If organization fails, keep original path and log error
+                            self.progress.emit(i + 1, len(self.files), f"⚠️  Organization failed for {basename}: {str(e)} - using original path")
+                            # Don't increment errors, just continue with original path
 
                     # Add to batch
                     batch_data.append((
