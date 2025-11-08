@@ -26,11 +26,13 @@ class ImportWorker(QThread):
     progress = pyqtSignal(int, int, str)  # current, total, message
     finished = pyqtSignal(int, int)  # processed, errors
     
-    def __init__(self, files, db_path, timezone='UTC'):
+    def __init__(self, files, db_path, timezone='UTC', organize=False, repo_path=None):
         super().__init__()
         self.files = files
         self.db_path = db_path
         self.timezone = timezone
+        self.organize = organize
+        self.repo_path = repo_path
         self.processed = 0
         self.errors = 0
     
@@ -175,7 +177,59 @@ class ImportWorker(QThread):
             return results
         except Exception as e:
             return None
-    
+
+    def generate_organized_path(self, repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, original_filename):
+        """Generate the organized path and filename for a file"""
+        # Sanitize values
+        obj = obj or "Unknown"
+        filt = filt or "NoFilter"
+        imgtyp = imgtyp or "Unknown"
+        date = date or "0000-00-00"
+
+        # Determine binning string
+        if xbin and ybin:
+            binning = f"Bin{int(xbin)}x{int(ybin)}"
+        else:
+            binning = "Bin1x1"
+
+        # Determine temp string (round to nearest degree)
+        temp_str = f"{int(round(temp))}C" if temp is not None else "0C"
+
+        # Extract sequence number from original filename if possible
+        import re
+        seq_match = re.search(r'_(\d+)\.(xisf|fits?)$', original_filename, re.IGNORECASE)
+        seq = seq_match.group(1) if seq_match else "001"
+
+        # Determine file type and path structure
+        if 'light' in imgtyp.lower():
+            # Lights/[Object]/[Filter]/[filename]
+            subdir = os.path.join("Lights", obj, filt)
+            exp_str = f"{int(exp)}s" if exp else "0s"
+            new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+
+        elif 'dark' in imgtyp.lower():
+            # Calibration/Darks/[exp]_[temp]_[binning]/[filename]
+            exp_str = f"{int(exp)}s" if exp else "0s"
+            subdir = os.path.join("Calibration", "Darks", f"{exp_str}_{temp_str}_{binning}")
+            new_filename = f"{date}_Dark_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+
+        elif 'flat' in imgtyp.lower():
+            # Calibration/Flats/[date]/[filter]_[temp]_[binning]/[filename]
+            subdir = os.path.join("Calibration", "Flats", date, f"{filt}_{temp_str}_{binning}")
+            new_filename = f"{date}_Flat_{filt}_{temp_str}_{binning}_{seq}.xisf"
+
+        elif 'bias' in imgtyp.lower():
+            # Calibration/Bias/[temp]_[binning]/[filename]
+            subdir = os.path.join("Calibration", "Bias", f"{temp_str}_{binning}")
+            new_filename = f"{date}_Bias_{temp_str}_{binning}_{seq}.xisf"
+
+        else:
+            # Unknown type - put in root with original structure
+            subdir = "Uncategorized"
+            new_filename = original_filename
+
+        return os.path.join(repo_path, subdir, new_filename)
+
     def run(self):
         """Process files and import to database"""
         conn = sqlite3.connect(self.db_path)
@@ -216,6 +270,39 @@ class ImportWorker(QThread):
 
                     # Set object to None for calibration frames (they are not object-specific)
                     obj = None if is_calibration else keywords.get('OBJECT')
+
+                    # Organize file if requested
+                    if self.organize and self.repo_path:
+                        try:
+                            # Generate organized path
+                            organized_path = self.generate_organized_path(
+                                self.repo_path,
+                                obj,
+                                keywords.get('FILTER'),
+                                keywords.get('IMAGETYP'),
+                                keywords.get('EXPOSURE'),
+                                keywords.get('CCD-TEMP'),
+                                keywords.get('XBINNING'),
+                                keywords.get('YBINNING'),
+                                date_loc,
+                                filename
+                            )
+
+                            # Create directory if needed
+                            import shutil
+                            os.makedirs(os.path.dirname(organized_path), exist_ok=True)
+
+                            # Copy file to organized location
+                            shutil.copy2(filepath, organized_path)
+
+                            # Update filepath and filename to organized location
+                            filepath = organized_path
+                            filename = os.path.basename(organized_path)
+
+                            self.progress.emit(i + 1, len(self.files), f"Organized: {filename}")
+                        except Exception as e:
+                            # If organization fails, keep original path
+                            self.progress.emit(i + 1, len(self.files), f"Organization failed: {basename}, using original path")
 
                     # Add to batch
                     batch_data.append((
@@ -329,7 +416,38 @@ class XISFCatalogGUI(QMainWindow):
         button_layout.addWidget(self.import_folder_btn)
         
         layout.addLayout(button_layout)
-        
+
+        # Import Mode Selection
+        import_mode_group = QGroupBox("Import Mode")
+        import_mode_layout = QVBoxLayout()
+
+        self.import_mode_button_group = QButtonGroup()
+        self.import_only_radio = QRadioButton("Import only (store original paths)")
+        self.import_organize_radio = QRadioButton("Import and organize (copy to repository)")
+
+        self.import_mode_button_group.addButton(self.import_only_radio, 0)
+        self.import_mode_button_group.addButton(self.import_organize_radio, 1)
+
+        import_mode_layout.addWidget(self.import_only_radio)
+
+        organize_help = QLabel("Copies files to organized folder structure in repository location.")
+        organize_help.setStyleSheet("color: #888888; font-size: 10px; margin-left: 20px;")
+        import_mode_layout.addWidget(self.import_organize_radio)
+        import_mode_layout.addWidget(organize_help)
+
+        # Set default mode from settings
+        import_mode = self.settings.value('import_mode', 'import_only')
+        if import_mode == 'import_organize':
+            self.import_organize_radio.setChecked(True)
+        else:
+            self.import_only_radio.setChecked(True)
+
+        # Connect signal to save setting
+        self.import_mode_button_group.buttonClicked.connect(self.save_import_mode)
+
+        import_mode_group.setLayout(import_mode_layout)
+        layout.addWidget(import_mode_group)
+
         # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
@@ -1491,6 +1609,14 @@ class XISFCatalogGUI(QMainWindow):
             f'Timezone set to: {timezone}\n\nThis will be used for converting DATE-OBS timestamps.'
         )
 
+    def save_import_mode(self):
+        """Save the selected import mode"""
+        if self.import_organize_radio.isChecked():
+            mode = 'import_organize'
+        else:
+            mode = 'import_only'
+        self.settings.setValue('import_mode', mode)
+
     def apply_theme_setting(self):
         """Apply the selected theme"""
         if self.standard_theme_radio.isChecked():
@@ -1609,7 +1735,31 @@ class XISFCatalogGUI(QMainWindow):
         
         # Create and start worker
         timezone = self.settings.value('timezone', 'UTC')
-        self.worker = ImportWorker(files, self.db_path, timezone)
+
+        # Check import mode
+        import_mode = self.settings.value('import_mode', 'import_only')
+        organize = (import_mode == 'import_organize')
+        repo_path = self.settings.value('repository_path', '') if organize else None
+
+        # Warn if organize mode but no repository path
+        if organize and not repo_path:
+            QMessageBox.warning(
+                self, 'No Repository Path',
+                'Import and organize mode is selected, but repository path is not set.\n\n'
+                'Files will be imported with original paths.\n\n'
+                'Set repository path in Settings tab to enable organization during import.'
+            )
+            organize = False
+            repo_path = None
+
+        # Log import mode
+        if organize:
+            self.log_text.append(f"Import mode: Organize files to repository\n")
+            self.log_text.append(f"Repository: {repo_path}\n")
+        else:
+            self.log_text.append(f"Import mode: Store original paths\n")
+
+        self.worker = ImportWorker(files, self.db_path, timezone, organize, repo_path)
         self.worker.progress.connect(self.on_import_progress)
         self.worker.finished.connect(self.on_import_finished)
         self.worker.start()
