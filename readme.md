@@ -191,10 +191,11 @@ Example: `Calibration/Darks/300s_-10C_Bin1x1/2024-10-15_Dark_300s_-10C_Bin1x1_00
 ```
 Calibration/
   └── Flats/
-      └── [Filter]_[Temp]_[Binning]/
-          └── [Date]_Flat_[Filter]_[Temp]_[Binning]_[Seq].xisf
+      └── [Date]/
+          └── [Filter]_[Temp]_[Binning]/
+              └── [Date]_Flat_[Filter]_[Temp]_[Binning]_[Seq].xisf
 ```
-Example: `Calibration/Flats/Ha_-10C_Bin1x1/2024-10-15_Flat_Ha_-10C_Bin1x1_001.xisf`
+Example: `Calibration/Flats/2024-10-15/Ha_-10C_Bin1x1/2024-10-15_Flat_Ha_-10C_Bin1x1_001.xisf`
 
 **Bias Frames:**
 ```
@@ -207,6 +208,7 @@ Example: `Calibration/Bias/-10C_Bin1x1/2024-10-15_Bias_-10C_Bin1x1_001.xisf`
 
 **Benefits:**
 - Easy matching of calibration frames to light frames
+- Flats organized by date for session-specific calibration (best practice)
 - Consistent naming across all imaging sessions
 - Simplified workflow for stacking software
 - Organized by object and filter for easy browsing
