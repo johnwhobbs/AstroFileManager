@@ -1127,8 +1127,8 @@ class XISFCatalogGUI(QMainWindow):
         else:
             binning = "Bin1x1"
         
-        # Determine temp string
-        temp_str = f"{int(temp)}C" if temp is not None else "0C"
+        # Determine temp string (round to nearest degree)
+        temp_str = f"{int(round(temp))}C" if temp is not None else "0C"
         
         # Extract sequence number from original filename if possible
         import re
@@ -1535,14 +1535,14 @@ class XISFCatalogGUI(QMainWindow):
             cursor.execute('''
                 SELECT
                     exposure,
-                    ccd_temp,
+                    ROUND(ccd_temp) as ccd_temp,
                     xbinning,
                     ybinning,
                     COUNT(*) as file_count
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Dark%' AND object IS NULL
-                GROUP BY exposure, ccd_temp, xbinning, ybinning
-                ORDER BY exposure, ccd_temp, xbinning, ybinning
+                GROUP BY exposure, ROUND(ccd_temp), xbinning, ybinning
+                ORDER BY exposure, ROUND(ccd_temp), xbinning, ybinning
             ''')
 
             dark_groups = cursor.fetchall()
@@ -1564,7 +1564,7 @@ class XISFCatalogGUI(QMainWindow):
                     WHERE imagetyp LIKE '%Dark%'
                         AND object IS NULL
                         AND (exposure = ? OR (exposure IS NULL AND ? IS NULL))
-                        AND (ccd_temp = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                        AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
                         AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
                         AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
                     ORDER BY date_loc DESC
@@ -1583,7 +1583,7 @@ class XISFCatalogGUI(QMainWindow):
                         WHERE imagetyp LIKE '%Dark%'
                             AND object IS NULL
                             AND (exposure = ? OR (exposure IS NULL AND ? IS NULL))
-                            AND (ccd_temp = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                            AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
                             AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
                             AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
                             AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
@@ -1621,7 +1621,7 @@ class XISFCatalogGUI(QMainWindow):
                 cursor.execute('''
                     SELECT
                         filter,
-                        ccd_temp,
+                        ROUND(ccd_temp) as ccd_temp,
                         xbinning,
                         ybinning,
                         COUNT(*) as file_count
@@ -1629,8 +1629,8 @@ class XISFCatalogGUI(QMainWindow):
                     WHERE imagetyp LIKE '%Flat%'
                         AND object IS NULL
                         AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
-                    GROUP BY filter, ccd_temp, xbinning, ybinning
-                    ORDER BY filter, ccd_temp, xbinning, ybinning
+                    GROUP BY filter, ROUND(ccd_temp), xbinning, ybinning
+                    ORDER BY filter, ROUND(ccd_temp), xbinning, ybinning
                 ''', (date_val, date_val))
 
                 flat_groups = cursor.fetchall()
@@ -1653,7 +1653,7 @@ class XISFCatalogGUI(QMainWindow):
                             AND object IS NULL
                             AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
                             AND (filter = ? OR (filter IS NULL AND ? IS NULL))
-                            AND (ccd_temp = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                            AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
                             AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
                             AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
                         ORDER BY filename
@@ -1675,14 +1675,14 @@ class XISFCatalogGUI(QMainWindow):
 
             cursor.execute('''
                 SELECT
-                    ccd_temp,
+                    ROUND(ccd_temp) as ccd_temp,
                     xbinning,
                     ybinning,
                     COUNT(*) as file_count
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Bias%' AND object IS NULL
-                GROUP BY ccd_temp, xbinning, ybinning
-                ORDER BY ccd_temp, xbinning, ybinning
+                GROUP BY ROUND(ccd_temp), xbinning, ybinning
+                ORDER BY ROUND(ccd_temp), xbinning, ybinning
             ''')
 
             bias_groups = cursor.fetchall()
@@ -1702,7 +1702,7 @@ class XISFCatalogGUI(QMainWindow):
                     FROM xisf_files
                     WHERE imagetyp LIKE '%Bias%'
                         AND object IS NULL
-                        AND (ccd_temp = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                        AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
                         AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
                         AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
                     ORDER BY date_loc DESC
@@ -1720,7 +1720,7 @@ class XISFCatalogGUI(QMainWindow):
                         FROM xisf_files
                         WHERE imagetyp LIKE '%Bias%'
                             AND object IS NULL
-                            AND (ccd_temp = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                            AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
                             AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
                             AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
                             AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
