@@ -83,12 +83,12 @@ class ImportWorker(QThread):
     
     def read_fits_keywords(self, filename):
         """Read FITS keywords from XISF file"""
-        keywords = ['TELESCOP', 'INSTRUME', 'OBJECT', 'FILTER', 'IMAGETYP', 
-                    'EXPOSURE', 'CCD-TEMP', 'XBINNING', 'YBINNING', 'DATE-LOC']
+        keywords = ['TELESCOP', 'INSTRUME', 'OBJECT', 'FILTER', 'IMAGETYP',
+                    'EXPOSURE', 'EXPTIME', 'CCD-TEMP', 'XBINNING', 'YBINNING', 'DATE-LOC']
         try:
             xisf_file = xisf.XISF(filename)
             im_data = xisf_file.read_image(0)
-            
+
             if hasattr(xisf_file, 'fits_keywords'):
                 fits_keywords = xisf_file.fits_keywords
             elif hasattr(im_data, 'fits_keywords'):
@@ -96,7 +96,7 @@ class ImportWorker(QThread):
             else:
                 metadata = xisf_file.get_images_metadata()[0]
                 fits_keywords = metadata.get('FITSKeywords', {})
-            
+
             results = {}
             for keyword in keywords:
                 if fits_keywords and keyword in fits_keywords:
@@ -107,7 +107,12 @@ class ImportWorker(QThread):
                         results[keyword] = keyword_data
                 else:
                     results[keyword] = None
-            
+
+            # Special handling: prefer EXPTIME over EXPOSURE (EXPTIME is FITS standard)
+            # This ensures compatibility with both standard and non-standard keywords
+            if results.get('EXPTIME') is not None:
+                results['EXPOSURE'] = results['EXPTIME']
+
             return results
         except Exception as e:
             return None
@@ -722,6 +727,25 @@ class XISFCatalogGUI(QMainWindow):
         fix_calib_group.setLayout(fix_calib_layout)
         layout.addWidget(fix_calib_group)
 
+        # Re-extract Exposure Times section
+        reextract_group = QGroupBox("Re-extract Exposure Times")
+        reextract_layout = QVBoxLayout()
+
+        reextract_info = QLabel("Re-read exposure times from files using EXPTIME keyword:")
+        reextract_layout.addWidget(reextract_info)
+
+        reextract_help = QLabel("Some files may have been imported with NULL exposure because they use\n"
+                               "EXPTIME instead of EXPOSURE. This tool re-reads exposure data from the files.")
+        reextract_help.setStyleSheet("color: #888888; font-size: 10px;")
+        reextract_layout.addWidget(reextract_help)
+
+        self.reextract_btn = QPushButton('Re-extract Exposure Times')
+        self.reextract_btn.clicked.connect(self.reextract_exposure_times)
+        reextract_layout.addWidget(self.reextract_btn)
+
+        reextract_group.setLayout(reextract_layout)
+        layout.addWidget(reextract_group)
+
         # Add stretch to push everything to the top
         layout.addStretch()
 
@@ -860,6 +884,80 @@ class XISFCatalogGUI(QMainWindow):
 
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to fix calibration frames: {e}')
+
+    def reextract_exposure_times(self):
+        """Re-read exposure times from files that have NULL exposure"""
+        reply = QMessageBox.question(
+            self, 'Re-extract Exposure Times',
+            'This will re-read FITS keywords from files with NULL exposure.\n\n'
+            'Files with EXPTIME keyword will have their exposure time updated.\n\n'
+            'This may take some time if you have many files. Continue?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Get all files with NULL exposure
+            cursor.execute('''
+                SELECT id, filepath
+                FROM xisf_files
+                WHERE exposure IS NULL
+            ''')
+
+            files_to_update = cursor.fetchall()
+
+            if not files_to_update:
+                QMessageBox.information(
+                    self, 'No Files to Update',
+                    'No files with NULL exposure found.'
+                )
+                conn.close()
+                return
+
+            updated_count = 0
+            error_count = 0
+
+            # Re-read FITS keywords from each file
+            for file_id, filepath in files_to_update:
+                try:
+                    if not os.path.exists(filepath):
+                        error_count += 1
+                        continue
+
+                    # Use the ImportWorker's read_fits_keywords method
+                    worker = ImportWorker([], self.db_path)
+                    keywords = worker.read_fits_keywords(filepath)
+
+                    if keywords and keywords.get('EXPOSURE') is not None:
+                        cursor.execute('''
+                            UPDATE xisf_files
+                            SET exposure = ?,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        ''', (keywords.get('EXPOSURE'), file_id))
+                        updated_count += 1
+
+                except Exception:
+                    error_count += 1
+
+            conn.commit()
+            conn.close()
+
+            QMessageBox.information(
+                self, 'Success',
+                f'Re-extracted exposure times from {updated_count} file(s).\n'
+                f'Errors: {error_count}\n\n'
+                'Files with EXPTIME keyword now have their exposure time populated.'
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to re-extract exposure times: {e}')
 
     def preview_organization(self):
         """Preview the file organization plan"""
