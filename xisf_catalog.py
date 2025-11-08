@@ -9,6 +9,7 @@ import sqlite3
 import hashlib
 from pathlib import Path
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QFileDialog, QMessageBox, QTabWidget, QTableWidget,
@@ -25,10 +26,11 @@ class ImportWorker(QThread):
     progress = pyqtSignal(int, int, str)  # current, total, message
     finished = pyqtSignal(int, int)  # processed, errors
     
-    def __init__(self, files, db_path):
+    def __init__(self, files, db_path, timezone='UTC'):
         super().__init__()
         self.files = files
         self.db_path = db_path
+        self.timezone = timezone
         self.processed = 0
         self.errors = 0
     
@@ -80,11 +82,68 @@ class ImportWorker(QThread):
             
         except Exception:
             return None
-    
+
+    def process_date_obs(self, date_str, timezone_str):
+        """Process DATE-OBS: convert from UTC to local timezone, subtract 12 hours, return date in YYYY-MM-DD format"""
+        if not date_str:
+            return None
+
+        try:
+            # Convert to string if needed
+            date_str = str(date_str).strip()
+
+            # Handle fractional seconds that have too many digits (7+ digits instead of 6)
+            # Python's %f expects exactly 6 digits for microseconds
+            if 'T' in date_str and '.' in date_str:
+                parts = date_str.split('.')
+                if len(parts) == 2:
+                    # Truncate fractional seconds to 6 digits
+                    fractional = parts[1][:6]
+                    date_str = f"{parts[0]}.{fractional}"
+
+            # Try parsing common FITS date formats
+            formats = [
+                '%Y-%m-%dT%H:%M:%S.%f',  # With microseconds
+                '%Y-%m-%dT%H:%M:%S',     # Standard ISO format
+                '%Y-%m-%d %H:%M:%S',     # Space instead of T
+                '%Y-%m-%d',              # Date only
+            ]
+
+            dt = None
+            for fmt in formats:
+                try:
+                    dt = datetime.strptime(date_str, fmt)
+                    break
+                except ValueError:
+                    continue
+
+            if dt is None:
+                return None
+
+            # DATE-OBS is in UTC, convert to local timezone
+            try:
+                # Add UTC timezone info
+                dt_utc = dt.replace(tzinfo=ZoneInfo('UTC'))
+                # Convert to target timezone
+                target_tz = ZoneInfo(timezone_str)
+                dt_local = dt_utc.astimezone(target_tz)
+                # Subtract 12 hours for session grouping
+                dt_local = dt_local - timedelta(hours=12)
+                result = dt_local.strftime('%Y-%m-%d')
+                return result
+            except Exception:
+                # If timezone conversion fails, fall back to simple subtraction
+                dt = dt - timedelta(hours=12)
+                result = dt.strftime('%Y-%m-%d')
+                return result
+
+        except Exception:
+            return None
+
     def read_fits_keywords(self, filename):
         """Read FITS keywords from XISF file"""
         keywords = ['TELESCOP', 'INSTRUME', 'OBJECT', 'FILTER', 'IMAGETYP',
-                    'EXPOSURE', 'EXPTIME', 'CCD-TEMP', 'XBINNING', 'YBINNING', 'DATE-LOC']
+                    'EXPOSURE', 'EXPTIME', 'CCD-TEMP', 'XBINNING', 'YBINNING', 'DATE-LOC', 'DATE-OBS']
         try:
             xisf_file = xisf.XISF(filename)
             im_data = xisf_file.read_image(0)
@@ -140,8 +199,11 @@ class ImportWorker(QThread):
                 if keywords:
                     filename = os.path.basename(filepath)
 
-                    # Process DATE-LOC to subtract 12 hours and get date only
+                    # Process date: prefer DATE-LOC, fall back to DATE-OBS with timezone conversion
                     date_loc = self.process_date_loc(keywords.get('DATE-LOC'))
+                    if date_loc is None and keywords.get('DATE-OBS'):
+                        # DATE-LOC not available, use DATE-OBS with timezone conversion
+                        date_loc = self.process_date_obs(keywords.get('DATE-OBS'), self.timezone)
 
                     # Determine if this is a calibration frame
                     imagetyp = keywords.get('IMAGETYP', '')
@@ -746,6 +808,25 @@ class XISFCatalogGUI(QMainWindow):
         reextract_group.setLayout(reextract_layout)
         layout.addWidget(reextract_group)
 
+        # Re-extract Dates section
+        reextract_dates_group = QGroupBox("Re-extract Dates from DATE-OBS")
+        reextract_dates_layout = QVBoxLayout()
+
+        reextract_dates_info = QLabel("Re-read dates from files using DATE-OBS keyword:")
+        reextract_dates_layout.addWidget(reextract_dates_info)
+
+        reextract_dates_help = QLabel("Master frames may not have DATE-LOC but have DATE-OBS (UTC).\n"
+                                     "This tool converts DATE-OBS to local time using your timezone setting.")
+        reextract_dates_help.setStyleSheet("color: #888888; font-size: 10px;")
+        reextract_dates_layout.addWidget(reextract_dates_help)
+
+        self.reextract_dates_btn = QPushButton('Re-extract Dates')
+        self.reextract_dates_btn.clicked.connect(self.reextract_dates)
+        reextract_dates_layout.addWidget(self.reextract_dates_btn)
+
+        reextract_dates_group.setLayout(reextract_dates_layout)
+        layout.addWidget(reextract_dates_group)
+
         # Add stretch to push everything to the top
         layout.addStretch()
 
@@ -931,7 +1012,8 @@ class XISFCatalogGUI(QMainWindow):
                         continue
 
                     # Use the ImportWorker's read_fits_keywords method
-                    worker = ImportWorker([], self.db_path)
+                    timezone = self.settings.value('timezone', 'UTC')
+                    worker = ImportWorker([], self.db_path, timezone)
                     keywords = worker.read_fits_keywords(filepath)
 
                     if keywords and keywords.get('EXPOSURE') is not None:
@@ -958,6 +1040,88 @@ class XISFCatalogGUI(QMainWindow):
 
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to re-extract exposure times: {e}')
+
+    def reextract_dates(self):
+        """Re-read dates from files that have NULL date_loc using DATE-OBS"""
+        reply = QMessageBox.question(
+            self, 'Re-extract Dates',
+            'This will re-read FITS keywords from files with NULL date_loc.\n\n'
+            'Files with DATE-OBS keyword will have their date updated using\n'
+            'your configured timezone setting.\n\n'
+            'This may take some time if you have many files. Continue?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Get all files with NULL date_loc
+            cursor.execute('''
+                SELECT id, filepath
+                FROM xisf_files
+                WHERE date_loc IS NULL
+            ''')
+
+            files_to_update = cursor.fetchall()
+
+            if not files_to_update:
+                QMessageBox.information(
+                    self, 'No Files to Update',
+                    'No files with NULL date_loc found.'
+                )
+                conn.close()
+                return
+
+            updated_count = 0
+            error_count = 0
+            timezone = self.settings.value('timezone', 'UTC')
+
+            # Re-read FITS keywords from each file
+            for file_id, filepath in files_to_update:
+                try:
+                    if not os.path.exists(filepath):
+                        error_count += 1
+                        continue
+
+                    # Use the ImportWorker's methods
+                    worker = ImportWorker([], self.db_path, timezone)
+                    keywords = worker.read_fits_keywords(filepath)
+
+                    if keywords:
+                        # Try DATE-LOC first, then DATE-OBS
+                        date_loc = worker.process_date_loc(keywords.get('DATE-LOC'))
+                        if date_loc is None and keywords.get('DATE-OBS'):
+                            date_loc = worker.process_date_obs(keywords.get('DATE-OBS'), timezone)
+
+                        if date_loc is not None:
+                            cursor.execute('''
+                                UPDATE xisf_files
+                                SET date_loc = ?,
+                                    updated_at = CURRENT_TIMESTAMP
+                                WHERE id = ?
+                            ''', (date_loc, file_id))
+                            updated_count += 1
+
+                except Exception:
+                    error_count += 1
+
+            conn.commit()
+            conn.close()
+
+            QMessageBox.information(
+                self, 'Success',
+                f'Re-extracted dates from {updated_count} file(s).\n'
+                f'Errors: {error_count}\n\n'
+                f'Used timezone: {timezone}'
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to re-extract dates: {e}')
 
     def preview_organization(self):
         """Preview the file organization plan"""
@@ -1198,7 +1362,69 @@ class XISFCatalogGUI(QMainWindow):
         
         repo_group.setLayout(repo_layout)
         layout.addWidget(repo_group)
-        
+
+        # Timezone settings group
+        timezone_group = QGroupBox("Timezone")
+        timezone_layout = QVBoxLayout()
+
+        timezone_info = QLabel("Set your local timezone for DATE-OBS conversion:")
+        timezone_layout.addWidget(timezone_info)
+
+        timezone_help = QLabel("Used to convert UTC timestamps (DATE-OBS) to local time for session grouping.")
+        timezone_help.setStyleSheet("color: #888888; font-size: 10px;")
+        timezone_layout.addWidget(timezone_help)
+
+        timezone_selector_layout = QHBoxLayout()
+        timezone_label = QLabel("Timezone:")
+        timezone_label.setMinimumWidth(120)
+        self.timezone_combo = QComboBox()
+
+        # Common timezones
+        common_timezones = [
+            'UTC',
+            'America/New_York',
+            'America/Chicago',
+            'America/Denver',
+            'America/Los_Angeles',
+            'America/Phoenix',
+            'America/Anchorage',
+            'Pacific/Honolulu',
+            'Europe/London',
+            'Europe/Paris',
+            'Europe/Berlin',
+            'Europe/Rome',
+            'Europe/Madrid',
+            'Europe/Athens',
+            'Asia/Tokyo',
+            'Asia/Shanghai',
+            'Asia/Hong_Kong',
+            'Asia/Singapore',
+            'Asia/Dubai',
+            'Australia/Sydney',
+            'Australia/Melbourne',
+            'Australia/Perth',
+            'Pacific/Auckland'
+        ]
+
+        self.timezone_combo.addItems(common_timezones)
+
+        # Set current timezone
+        current_timezone = self.settings.value('timezone', 'UTC')
+        index = self.timezone_combo.findText(current_timezone)
+        if index >= 0:
+            self.timezone_combo.setCurrentIndex(index)
+
+        save_timezone_btn = QPushButton('Save Timezone')
+        save_timezone_btn.clicked.connect(self.save_timezone_setting)
+
+        timezone_selector_layout.addWidget(timezone_label)
+        timezone_selector_layout.addWidget(self.timezone_combo)
+        timezone_selector_layout.addWidget(save_timezone_btn)
+        timezone_layout.addLayout(timezone_selector_layout)
+
+        timezone_group.setLayout(timezone_layout)
+        layout.addWidget(timezone_group)
+
         # Theme settings group
         theme_group = QGroupBox("Theme")
         theme_layout = QVBoxLayout()
@@ -1255,16 +1481,26 @@ class XISFCatalogGUI(QMainWindow):
                 f'Image repository location set to:\n{directory}'
             )
     
+    def save_timezone_setting(self):
+        """Save the selected timezone"""
+        timezone = self.timezone_combo.currentText()
+        self.settings.setValue('timezone', timezone)
+        QMessageBox.information(
+            self,
+            'Timezone Saved',
+            f'Timezone set to: {timezone}\n\nThis will be used for converting DATE-OBS timestamps.'
+        )
+
     def apply_theme_setting(self):
         """Apply the selected theme"""
         if self.standard_theme_radio.isChecked():
             theme = 'standard'
         else:
             theme = 'dark'
-        
+
         # Save theme preference
         self.settings.setValue('theme', theme)
-        
+
         # Show message that restart is needed
         QMessageBox.information(
             self,
@@ -1372,7 +1608,8 @@ class XISFCatalogGUI(QMainWindow):
         self.progress_bar.setValue(0)
         
         # Create and start worker
-        self.worker = ImportWorker(files, self.db_path)
+        timezone = self.settings.value('timezone', 'UTC')
+        self.worker = ImportWorker(files, self.db_path, timezone)
         self.worker.progress.connect(self.on_import_progress)
         self.worker.finished.connect(self.on_import_finished)
         self.worker.start()
