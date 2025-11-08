@@ -1,4 +1,4 @@
-# XISF Catalog Manager
+# AstroFileManager
 
 A PyQt6-based desktop application for cataloging and managing XISF astrophotography files. This application reads FITS header information from XISF files and stores them in a SQLite database for easy browsing and analysis.
 
@@ -92,7 +92,7 @@ pip install PyQt6 xisf
 2. Create the database using the database creation script:
 
 ```bash
-python create_database.py
+python create_db.py
 ```
 
 This creates `xisf_catalog.db` in the current directory.
@@ -100,7 +100,7 @@ This creates `xisf_catalog.db` in the current directory.
 3. Run the GUI application:
 
 ```bash
-python xisf_catalog_gui.py
+python AstroFileManager.py
 ```
 
 ## Usage
@@ -551,7 +551,7 @@ Settings are stored using Qt's QSettings in platform-specific locations and are 
 ## Troubleshooting
 
 **"Database not found" error:**
-- Make sure you've created the database using `create_database.py` first
+- Make sure you've created the database using `create_db.py` first
 - The database file `xisf_catalog.db` must be in the same directory as the GUI script
 
 **Date fields showing NULL:**
@@ -593,11 +593,11 @@ Settings are stored using Qt's QSettings in platform-specific locations and are 
 ## File Structure
 
 ```
-xisf-catalog/
-├── create_database.py      # Database creation script
-├── xisf_catalog_gui.py     # Main GUI application
+AstroFileManager/
+├── create_db.py            # Database creation script
+├── AstroFileManager.py     # Main GUI application
 ├── xisf_catalog.db         # SQLite database (created on first run)
-└── README.md               # This file
+└── readme.md               # This file
 ```
 
 ## License

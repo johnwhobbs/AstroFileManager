@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-PyQt GUI for XISF Catalog Database
+AstroFileManager - XISF File Management for Astrophotography
+A PyQt6-based application for cataloging, organizing, and managing XISF astrophotography files.
 """
 
 import sys
@@ -377,14 +378,14 @@ class XISFCatalogGUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.db_path = 'xisf_catalog.db'
-        self.settings = QSettings('XISFCatalog', 'CatalogGUI')
+        self.settings = QSettings('AstroFileManager', 'AstroFileManager')
         self.init_ui()
         # Restore settings after all UI is created
         self.restore_settings()
     
     def init_ui(self):
         """Initialize the user interface"""
-        self.setWindowTitle('XISF Catalog Manager')
+        self.setWindowTitle('AstroFileManager')
         self.setGeometry(100, 100, 1000, 600)
         
         # Create central widget and main layout
@@ -2591,7 +2592,7 @@ def main():
     app = QApplication(sys.argv)
     
     # Load theme setting
-    settings = QSettings('XISFCatalog', 'CatalogGUI')
+    settings = QSettings('AstroFileManager', 'AstroFileManager')
     theme = settings.value('theme', 'dark')
     
     # Apply theme
