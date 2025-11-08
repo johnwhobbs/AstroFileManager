@@ -134,15 +134,27 @@ class ImportWorker(QThread):
                 
                 if keywords:
                     filename = os.path.basename(filepath)
-                    
+
                     # Process DATE-LOC to subtract 12 hours and get date only
                     date_loc = self.process_date_loc(keywords.get('DATE-LOC'))
-                    
+
+                    # Determine if this is a calibration frame
+                    imagetyp = keywords.get('IMAGETYP', '')
+                    is_calibration = False
+                    if imagetyp:
+                        imagetyp_lower = imagetyp.lower()
+                        is_calibration = ('dark' in imagetyp_lower or
+                                        'flat' in imagetyp_lower or
+                                        'bias' in imagetyp_lower)
+
+                    # Set object to None for calibration frames (they are not object-specific)
+                    obj = None if is_calibration else keywords.get('OBJECT')
+
                     # Add to batch
                     batch_data.append((
                         file_hash, filepath, filename,
                         keywords.get('TELESCOP'), keywords.get('INSTRUME'),
-                        keywords.get('OBJECT'), keywords.get('FILTER'),
+                        obj, keywords.get('FILTER'),
                         keywords.get('IMAGETYP'), keywords.get('EXPOSURE'),
                         keywords.get('CCD-TEMP'), keywords.get('XBINNING'),
                         keywords.get('YBINNING'), date_loc
@@ -690,10 +702,29 @@ class XISFCatalogGUI(QMainWindow):
         
         organize_group.setLayout(organize_layout)
         layout.addWidget(organize_group)
-        
+
+        # Fix Calibration Frame Objects section
+        fix_calib_group = QGroupBox("Fix Calibration Data")
+        fix_calib_layout = QVBoxLayout()
+
+        fix_calib_info = QLabel("Remove object field from calibration frames (Dark, Flat, Bias):")
+        fix_calib_layout.addWidget(fix_calib_info)
+
+        fix_calib_help = QLabel("Some flat/dark/bias frames may have been imported with an object field.\n"
+                               "This tool removes the object field from all calibration frames.")
+        fix_calib_help.setStyleSheet("color: #888888; font-size: 10px;")
+        fix_calib_layout.addWidget(fix_calib_help)
+
+        self.fix_calib_btn = QPushButton('Fix Calibration Frame Objects')
+        self.fix_calib_btn.clicked.connect(self.fix_calibration_objects)
+        fix_calib_layout.addWidget(self.fix_calib_btn)
+
+        fix_calib_group.setLayout(fix_calib_layout)
+        layout.addWidget(fix_calib_group)
+
         # Add stretch to push everything to the top
         layout.addStretch()
-        
+
         return widget
     
     def on_keyword_changed(self):
@@ -789,7 +820,47 @@ class XISFCatalogGUI(QMainWindow):
                 conn.close()
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to replace values: {e}')
-    
+
+    def fix_calibration_objects(self):
+        """Remove object field from calibration frames"""
+        reply = QMessageBox.question(
+            self, 'Fix Calibration Frame Objects',
+            'This will remove the object field from all Dark, Flat, and Bias frames.\n\n'
+            'Calibration frames should not have an object associated with them.\n\n'
+            'Continue?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                UPDATE xisf_files
+                SET object = NULL
+                WHERE (imagetyp LIKE '%Dark%'
+                    OR imagetyp LIKE '%Flat%'
+                    OR imagetyp LIKE '%Bias%')
+                    AND object IS NOT NULL
+            ''')
+
+            rows_affected = cursor.rowcount
+            conn.commit()
+            conn.close()
+
+            QMessageBox.information(
+                self, 'Success',
+                f'Fixed {rows_affected} calibration frame(s).\n\n'
+                'Object field has been removed from Dark, Flat, and Bias frames.'
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to fix calibration frames: {e}')
+
     def preview_organization(self):
         """Preview the file organization plan"""
         repo_path = self.settings.value('repository_path', '')
