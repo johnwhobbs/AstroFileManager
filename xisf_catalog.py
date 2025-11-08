@@ -915,8 +915,10 @@ class XISFCatalogGUI(QMainWindow):
                         shutil.copy2(filepath, new_path)
                         self.organize_log.append(f"✓ Copied: {os.path.basename(new_path)}")
                     
-                    # Update database with new path
-                    cursor.execute('UPDATE xisf_files SET filepath = ? WHERE id = ?', (new_path, file_id))
+                    # Update database with new path and filename
+                    new_filename = os.path.basename(new_path)
+                    cursor.execute('UPDATE xisf_files SET filepath = ?, filename = ? WHERE id = ?',
+                                   (new_path, new_filename, file_id))
                     success_count += 1
                     
                 except Exception as e:
