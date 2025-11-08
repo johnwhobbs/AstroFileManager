@@ -30,6 +30,20 @@ A PyQt6-based desktop application for cataloging and managing XISF astrophotogra
     - Bias Frames: Temp/Binning → Date → Files
   - Temperature-based grouping (frames within ±0.5°C grouped together)
 
+- **Sessions Calibration Tracking**: Comprehensive session management with intelligent calibration matching:
+  - **Automatic Session Detection**: Groups light frames by date, object, and filter
+  - **Smart Calibration Matching**: Finds matching Darks, Bias, and Flats with tolerance-based criteria
+    - Darks: Exact exposure (±0.1s), ±1°C temperature, matching binning
+    - Bias: ±1°C temperature, matching binning
+    - Flats: Filter match, ±3°C temperature, ±7 days from session, matching binning
+  - **Master Frame Detection**: Identifies and displays master calibration frames
+  - **Quality Scoring**: 0-100% quality score based on frame counts (100% = 20+ frames)
+  - **Status Indicators**: Visual color-coded status (Complete/Partial/Missing)
+  - **Smart Recommendations**: Specific guidance for missing or incomplete calibration
+  - **Session Reports**: Export comprehensive reports with calibration status and recommendations
+  - **Statistics Dashboard**: Real-time completion rate and session breakdowns
+  - **Advanced Filtering**: Status filter, missing-only mode, master frame toggle
+
 - **Activity Analytics**:
   - GitHub-style activity heatmap showing imaging sessions throughout the year
   - Visual representation of total exposure hours per night
@@ -169,6 +183,159 @@ Browse your XISF files in a dual-section hierarchical tree structure:
 - Click the arrows to expand/collapse sections
 - Click "Refresh" to update the view after imports or changes
 - All calibration frames are now visible (previously hidden)
+
+### Sessions Tab
+
+The Sessions tab provides comprehensive calibration tracking by automatically matching your imaging sessions with their required calibration frames (Darks, Bias, Flats). It identifies missing calibration data and provides specific recommendations for completing your calibration library.
+
+**Session Detection:**
+
+Sessions are automatically detected by grouping light frames that share:
+- Same date (after -12 hour adjustment for overnight sessions)
+- Same target object
+- Same filter
+
+Each unique combination creates a session entry that is then analyzed for calibration completeness.
+
+**Calibration Matching Criteria:**
+
+The system uses intelligent tolerance-based matching to find calibration frames:
+
+**Dark Frames:**
+- Exact exposure match (within ±0.1 seconds)
+- Temperature within ±1°C of session average
+- Matching X and Y binning
+
+**Bias Frames:**
+- Temperature within ±1°C of session average
+- Matching X and Y binning
+
+**Flat Frames:**
+- Exact filter match (or both NULL for no-filter imaging)
+- Temperature within ±3°C of session average (more flexible for dusk/dawn flats)
+- Date within ±7 days of session (allows using recent flats)
+- Matching X and Y binning
+
+**Master Frame Detection:**
+
+Master calibration frames are automatically identified when IMAGETYP contains "Master" (e.g., "Master Dark Frame", "Master Flat Frame"). Master frames are displayed with special "Master" badges and provide an alternative to having 10+ individual calibration frames.
+
+**Status Indicators:**
+
+Each session is color-coded based on calibration completeness:
+
+- **Green (Complete)**: All three calibration types present (Darks + Bias + Flats) with minimum 10 frames each OR master available
+- **Blue (Complete with Masters)**: All calibration types present AND at least one master frame available
+- **Orange (Partial)**: Some calibration frames available but not all types
+- **Red (Missing)**: No calibration frames found for any type
+
+**Quality Scoring:**
+
+Each calibration type receives a quality score (0-100%) based on frame count:
+- 100% = 20+ frames (recommended for best results)
+- Proportional scoring for 1-19 frames (e.g., 10 frames = 50%)
+- 0% = no matching frames
+
+Minimum of 10 frames is recommended for acceptable calibration quality.
+
+**Frame Count Indicators:**
+
+- **✓ 20 frames** - Excellent (sufficient frames)
+- **✓ 15 + 1 Master** - Excellent (some frames plus master available)
+- **⚠ 8 frames (need 10+)** - Warning (below minimum)
+- **✗ Missing** - Critical (no matching frames)
+
+**Filter Controls:**
+
+Use the top controls to focus on specific sessions:
+
+- **Status Filter**: Show All, Complete, Partial, or Missing sessions
+- **Missing Only**: Checkbox to show only sessions lacking some calibration
+- **Include Masters**: Toggle whether to count master frames in availability
+- **Export Report**: Generate comprehensive text report of all sessions
+
+**Session Details Panel:**
+
+Click any session to view detailed information:
+
+- Light frame count and average settings (exposure, temperature, binning)
+- Exact calibration frame counts for each type
+- Master frame availability indicators
+- Quality scores for each calibration type
+- Overall session status
+
+**Recommendations Panel:**
+
+For incomplete sessions, the system provides specific, actionable recommendations:
+
+**Example recommendations:**
+```
+• Capture dark frames: 300.0s exposure at ~-10°C, 1x1 binning (minimum 10, recommended 20+)
+• Add more bias frames: Currently 8, need at least 10 for good calibration
+• Capture flat frames: Ha, ~-10°C, 1x1 binning (minimum 10, recommended 20+)
+```
+
+For complete sessions:
+```
+✓ All calibration frames are present
+
+Optional improvements:
+• Consider adding more darks (currently 12, recommended 20+)
+• Consider adding more flats (currently 15, recommended 20+)
+```
+
+**Session Statistics:**
+
+The statistics panel at the top shows real-time summary:
+
+- **Total Sessions**: Count of all unique imaging sessions
+- **Complete**: Sessions with all calibration types present
+- **Partial**: Sessions with some calibration missing
+- **Missing**: Sessions with no calibration
+- **Completion Rate**: Percentage of sessions ready for processing
+
+**Export Session Report:**
+
+Click "Export Report" to generate a comprehensive text file containing:
+
+- All session details with calibration status
+- Quality scores for each calibration type
+- Specific recommendations for each incomplete session
+- Summary statistics and completion rate
+
+Example report excerpt:
+```
+================================================================================
+Session: 2024-11-07 - M31 - Ha
+Status: Partial
+Light Frames: 25 | Exposure: 300.0s | Temp: -10.2°C | Binning: 1x1
+
+  Darks (300.0s): 20 frames (Quality: 100%)
+  Bias: 25 frames (Quality: 100%)
+  Flats (Ha): 0 frames (Quality: 0%)
+
+  Recommendations:
+    • Capture flat frames: Ha, ~-10°C, 1x1 binning (minimum 10, recommended 20+)
+```
+
+**Use Cases:**
+
+- **Pre-processing Planning**: Identify which sessions are ready to process
+- **Calibration Library Management**: Track which calibration frames you need to acquire
+- **Session Completeness**: Quickly see which imaging sessions lack calibration
+- **Master Frame Utilization**: Leverage master frames to avoid needing 20+ individual frames
+- **Quality Assessment**: Ensure you have sufficient calibration frames for best results
+- **Historical Analysis**: Review past sessions and identify gaps in calibration data
+
+**Tips:**
+
+- Sessions with master frames show in blue even with fewer individual frames
+- Use "Missing Only" filter to focus on sessions needing calibration
+- Export reports before imaging sessions to plan calibration frame acquisition
+- Temperature tolerances account for cooling variations between sessions
+- Flat frames can be from nearby dates (±7 days) as dust patterns change slowly
+- Aim for 20+ frames per calibration type for optimal results
+- Master frames reduce the need for large frame counts
 
 ### Analytics Tab
 
@@ -404,6 +571,20 @@ Settings are stored using Qt's QSettings in platform-specific locations and are 
 - Expand the "Calibration Frames" section in the tree
 - Ensure frames have correct IMAGETYP keyword (Dark, Flat, or Bias)
 
+**Sessions tab showing no calibration matches:**
+- Verify calibration frames have been imported (check View Catalog tab)
+- Check that calibration frame temperatures are within tolerance (±1°C for Darks/Bias, ±3°C for Flats)
+- Ensure binning matches exactly (1x1, 2x2, etc.)
+- For Darks: verify exposure times match light frames (within ±0.1s)
+- For Flats: verify filter names match exactly and dates are within ±7 days
+- Click "Refresh Sessions" to update the view
+
+**Sessions tab column widths resetting:**
+- Column widths are automatically saved when you resize them
+- Widths persist across tab switches and application restarts
+- If widths don't save, check that the application has write permissions for QSettings storage
+- Try resizing columns and closing/reopening the application to verify persistence
+
 **Import errors:**
 - Check that your files are valid XISF format
 - Verify that the xisf Python library is installed correctly
@@ -428,6 +609,28 @@ This project is provided as-is for personal use in managing astrophotography fil
 Feel free to submit issues or pull requests for improvements.
 
 ## Version History
+
+**v2.1.0** - Sessions Tab: Comprehensive Calibration Tracking
+- **Sessions Tab**: New comprehensive calibration tracking system
+  - Automatic session detection by grouping light frames (date + object + filter)
+  - Smart calibration matching with tolerance-based criteria:
+    - Darks: Exact exposure (±0.1s), ±1°C temperature, matching binning
+    - Bias: ±1°C temperature, matching binning
+    - Flats: Filter match, ±3°C temperature, ±7 days from session, matching binning
+  - Master frame detection and display with special badges
+  - Quality scoring system (0-100%) based on frame counts
+  - Color-coded status indicators (Complete/Partial/Missing/Complete with Masters)
+  - Smart recommendations engine for missing or incomplete calibration
+  - Export comprehensive session reports with calibration status and recommendations
+  - Real-time statistics dashboard (total sessions, completion rate, breakdowns)
+  - Advanced filtering: status filter, missing-only mode, master frame toggle
+  - Session details panel with frame counts, settings, and quality scores
+- **Column Width Persistence**: Sessions tab column widths now save and restore (Issue #33)
+  - Automatic save on resize
+  - Widths persist across tab switches and application restarts
+  - Removed auto-resize that was overriding user preferences
+- **Code Cleanup**: Removed Statistics tab (previously deleted, incorrectly restored)
+- **Quality of Life**: Improved calibration workflow planning and gap identification
 
 **v2.0.0** - Major Update: Integrated Workflow & Enhanced Data Handling
 - **Import Workflow Integration**: Added import mode selection (import only vs import and organize)
