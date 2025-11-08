@@ -978,8 +978,8 @@ class XISFCatalogGUI(QMainWindow):
             new_filename = f"{date}_Dark_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
             
         elif 'flat' in imgtyp.lower():
-            # Calibration/Flats/[filter]_[temp]_[binning]/[filename]
-            subdir = os.path.join("Calibration", "Flats", f"{filt}_{temp_str}_{binning}")
+            # Calibration/Flats/[date]/[filter]_[temp]_[binning]/[filename]
+            subdir = os.path.join("Calibration", "Flats", date, f"{filt}_{temp_str}_{binning}")
             new_filename = f"{date}_Flat_{filt}_{temp_str}_{binning}_{seq}.xisf"
             
         elif 'bias' in imgtyp.lower():
