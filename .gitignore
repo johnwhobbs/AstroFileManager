@@ -1,2 +1,4 @@
 xisf_catalog.db
-
+__pycache__/
+*.pyc
+*.pyo
