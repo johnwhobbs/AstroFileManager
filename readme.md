@@ -38,6 +38,7 @@ A PyQt6-based desktop application for cataloging and managing XISF astrophotogra
 - **Maintenance Tools**:
   - Database management with safe clear database function
   - Search and replace functionality for bulk metadata corrections
+  - Fix inconsistent FITS keyword values across your entire catalog
   - **File Organization**: Automatically organize files into structured folders with standardized naming
     - Separate structures for Lights and Calibration frames (Darks, Flats, Bias)
     - Preview organization plan before execution
