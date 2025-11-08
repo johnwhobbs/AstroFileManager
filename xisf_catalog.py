@@ -400,7 +400,6 @@ class XISFCatalogGUI(QMainWindow):
         self.import_tab = self.create_import_tab()
         self.view_tab = self.create_view_tab()
         self.sessions_tab = self.create_sessions_tab()
-        self.stats_tab = self.create_stats_tab()
         self.analytics_tab = self.create_analytics_tab()
         self.maintenance_tab = self.create_maintenance_tab()
         self.settings_tab = self.create_settings_tab()
@@ -408,7 +407,6 @@ class XISFCatalogGUI(QMainWindow):
         tabs.addTab(self.import_tab, "Import Files")
         tabs.addTab(self.view_tab, "View Catalog")
         tabs.addTab(self.sessions_tab, "Sessions")
-        tabs.addTab(self.stats_tab, "Statistics")
         tabs.addTab(self.analytics_tab, "Analytics")
         tabs.addTab(self.maintenance_tab, "Maintenance")
         tabs.addTab(self.settings_tab, "Settings")
@@ -587,71 +585,6 @@ class XISFCatalogGUI(QMainWindow):
 
         return widget
 
-    def create_stats_tab(self):
-        """Create the statistics tab"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        # Refresh button
-        refresh_btn = QPushButton('Refresh Statistics')
-        refresh_btn.clicked.connect(self.refresh_statistics)
-        layout.addWidget(refresh_btn)
-        
-        # First row - two tables side by side
-        top_row_layout = QHBoxLayout()
-        
-        # Left side - Most Recent Objects
-        left_layout = QVBoxLayout()
-        recent_label = QLabel('10 Most Recent Objects')
-        recent_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        left_layout.addWidget(recent_label)
-        
-        self.recent_objects_table = QTableWidget()
-        self.recent_objects_table.setColumnCount(4)
-        self.recent_objects_table.setHorizontalHeaderLabels(['Object', 'Most Recent Date', 'Telescope', 'Instrument'])
-        self.recent_objects_table.horizontalHeader().setStretchLastSection(True)
-        self.recent_objects_table.horizontalHeader().setSectionsMovable(False)
-        self.recent_objects_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.recent_objects_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        left_layout.addWidget(self.recent_objects_table)
-        
-        top_row_layout.addLayout(left_layout)
-        
-        # Right side - Top Exposure Objects
-        right_layout = QVBoxLayout()
-        exposure_label = QLabel('Top 10 Objects by Total Exposure')
-        exposure_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        right_layout.addWidget(exposure_label)
-        
-        self.top_exposure_table = QTableWidget()
-        self.top_exposure_table.setColumnCount(4)
-        self.top_exposure_table.setHorizontalHeaderLabels(['Object', 'Total Exposure (hrs)', 'Telescope', 'Instrument'])
-        self.top_exposure_table.horizontalHeader().setStretchLastSection(True)
-        self.top_exposure_table.horizontalHeader().setSectionsMovable(False)
-        self.top_exposure_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.top_exposure_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        right_layout.addWidget(self.top_exposure_table)
-        
-        top_row_layout.addLayout(right_layout)
-        
-        layout.addLayout(top_row_layout)
-        
-        # Second row - Top Months table (full width)
-        months_label = QLabel('Top 10 Months by Total Exposure')
-        months_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        layout.addWidget(months_label)
-        
-        self.top_months_table = QTableWidget()
-        self.top_months_table.setColumnCount(3)
-        self.top_months_table.setHorizontalHeaderLabels(['Month', 'Total Exposure (hrs)', 'Number of Sessions'])
-        self.top_months_table.horizontalHeader().setStretchLastSection(True)
-        self.top_months_table.horizontalHeader().setSectionsMovable(False)
-        self.top_months_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.top_months_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        layout.addWidget(self.top_months_table)
-        
-        return widget
-    
     def create_analytics_tab(self):
         """Create the analytics tab with activity heatmap"""
         widget = QWidget()
@@ -2083,11 +2016,9 @@ class XISFCatalogGUI(QMainWindow):
             self.refresh_catalog_view()
         elif index == 2:  # Sessions tab
             self.refresh_sessions()
-        elif index == 3:  # Statistics tab
-            self.refresh_statistics()
-        elif index == 4:  # Analytics tab
+        elif index == 3:  # Analytics tab
             self.refresh_analytics()
-        elif index == 5:  # Maintenance tab
+        elif index == 4:  # Maintenance tab
             # Populate current values when maintenance tab is opened
             keyword = self.keyword_combo.currentText()
             self.populate_current_values(keyword)
