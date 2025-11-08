@@ -189,12 +189,22 @@ class ImportWorker(QThread):
 
         # Determine binning string
         if xbin and ybin:
-            binning = f"Bin{int(xbin)}x{int(ybin)}"
+            try:
+                binning = f"Bin{int(float(xbin))}x{int(float(ybin))}"
+            except (ValueError, TypeError):
+                binning = "Bin1x1"
         else:
             binning = "Bin1x1"
 
         # Determine temp string (round to nearest degree)
-        temp_str = f"{int(round(temp))}C" if temp is not None else "0C"
+        if temp is not None:
+            try:
+                temp_float = float(temp)
+                temp_str = f"{int(round(temp_float))}C"
+            except (ValueError, TypeError):
+                temp_str = "0C"
+        else:
+            temp_str = "0C"
 
         # Extract sequence number from original filename if possible
         import re
@@ -205,12 +215,18 @@ class ImportWorker(QThread):
         if 'light' in imgtyp.lower():
             # Lights/[Object]/[Filter]/[filename]
             subdir = os.path.join("Lights", obj, filt)
-            exp_str = f"{int(exp)}s" if exp else "0s"
+            try:
+                exp_str = f"{int(float(exp))}s" if exp else "0s"
+            except (ValueError, TypeError):
+                exp_str = "0s"
             new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
 
         elif 'dark' in imgtyp.lower():
             # Calibration/Darks/[exp]_[temp]_[binning]/[filename]
-            exp_str = f"{int(exp)}s" if exp else "0s"
+            try:
+                exp_str = f"{int(float(exp))}s" if exp else "0s"
+            except (ValueError, TypeError):
+                exp_str = "0s"
             subdir = os.path.join("Calibration", "Darks", f"{exp_str}_{temp_str}_{binning}")
             new_filename = f"{date}_Dark_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
 
@@ -1406,28 +1422,44 @@ class XISFCatalogGUI(QMainWindow):
         
         # Determine binning string
         if xbin and ybin:
-            binning = f"Bin{int(xbin)}x{int(ybin)}"
+            try:
+                binning = f"Bin{int(float(xbin))}x{int(float(ybin))}"
+            except (ValueError, TypeError):
+                binning = "Bin1x1"
         else:
             binning = "Bin1x1"
         
         # Determine temp string (round to nearest degree)
-        temp_str = f"{int(round(temp))}C" if temp is not None else "0C"
-        
+        if temp is not None:
+            try:
+                temp_float = float(temp)
+                temp_str = f"{int(round(temp_float))}C"
+            except (ValueError, TypeError):
+                temp_str = "0C"
+        else:
+            temp_str = "0C"
+
         # Extract sequence number from original filename if possible
         import re
         seq_match = re.search(r'_(\d+)\.(xisf|fits?)$', original_filename, re.IGNORECASE)
         seq = seq_match.group(1) if seq_match else "001"
-        
+
         # Determine file type and path structure
         if 'light' in imgtyp.lower():
             # Lights/[Object]/[Filter]/[filename]
             subdir = os.path.join("Lights", obj, filt)
-            exp_str = f"{int(exp)}s" if exp else "0s"
+            try:
+                exp_str = f"{int(float(exp))}s" if exp else "0s"
+            except (ValueError, TypeError):
+                exp_str = "0s"
             new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
-            
+
         elif 'dark' in imgtyp.lower():
             # Calibration/Darks/[exp]_[temp]_[binning]/[filename]
-            exp_str = f"{int(exp)}s" if exp else "0s"
+            try:
+                exp_str = f"{int(float(exp))}s" if exp else "0s"
+            except (ValueError, TypeError):
+                exp_str = "0s"
             subdir = os.path.join("Calibration", "Darks", f"{exp_str}_{temp_str}_{binning}")
             new_filename = f"{date}_Dark_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
             
