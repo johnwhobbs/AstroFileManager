@@ -7,8 +7,10 @@ import sys
 import os
 import sqlite3
 import hashlib
+import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QFileDialog, QMessageBox, QTabWidget, QTableWidget,
@@ -25,10 +27,13 @@ class ImportWorker(QThread):
     progress = pyqtSignal(int, int, str)  # current, total, message
     finished = pyqtSignal(int, int)  # processed, errors
     
-    def __init__(self, files, db_path):
+    def __init__(self, files, db_path, timezone='UTC', organize=False, repo_path=None):
         super().__init__()
         self.files = files
         self.db_path = db_path
+        self.timezone = timezone
+        self.organize = organize
+        self.repo_path = repo_path
         self.processed = 0
         self.errors = 0
     
@@ -80,15 +85,72 @@ class ImportWorker(QThread):
             
         except Exception:
             return None
-    
+
+    def process_date_obs(self, date_str, timezone_str):
+        """Process DATE-OBS: convert from UTC to local timezone, subtract 12 hours, return date in YYYY-MM-DD format"""
+        if not date_str:
+            return None
+
+        try:
+            # Convert to string if needed
+            date_str = str(date_str).strip()
+
+            # Handle fractional seconds that have too many digits (7+ digits instead of 6)
+            # Python's %f expects exactly 6 digits for microseconds
+            if 'T' in date_str and '.' in date_str:
+                parts = date_str.split('.')
+                if len(parts) == 2:
+                    # Truncate fractional seconds to 6 digits
+                    fractional = parts[1][:6]
+                    date_str = f"{parts[0]}.{fractional}"
+
+            # Try parsing common FITS date formats
+            formats = [
+                '%Y-%m-%dT%H:%M:%S.%f',  # With microseconds
+                '%Y-%m-%dT%H:%M:%S',     # Standard ISO format
+                '%Y-%m-%d %H:%M:%S',     # Space instead of T
+                '%Y-%m-%d',              # Date only
+            ]
+
+            dt = None
+            for fmt in formats:
+                try:
+                    dt = datetime.strptime(date_str, fmt)
+                    break
+                except ValueError:
+                    continue
+
+            if dt is None:
+                return None
+
+            # DATE-OBS is in UTC, convert to local timezone
+            try:
+                # Add UTC timezone info
+                dt_utc = dt.replace(tzinfo=ZoneInfo('UTC'))
+                # Convert to target timezone
+                target_tz = ZoneInfo(timezone_str)
+                dt_local = dt_utc.astimezone(target_tz)
+                # Subtract 12 hours for session grouping
+                dt_local = dt_local - timedelta(hours=12)
+                result = dt_local.strftime('%Y-%m-%d')
+                return result
+            except Exception:
+                # If timezone conversion fails, fall back to simple subtraction
+                dt = dt - timedelta(hours=12)
+                result = dt.strftime('%Y-%m-%d')
+                return result
+
+        except Exception:
+            return None
+
     def read_fits_keywords(self, filename):
         """Read FITS keywords from XISF file"""
-        keywords = ['TELESCOP', 'INSTRUME', 'OBJECT', 'FILTER', 'IMAGETYP', 
-                    'EXPOSURE', 'CCD-TEMP', 'XBINNING', 'YBINNING', 'DATE-LOC']
+        keywords = ['TELESCOP', 'INSTRUME', 'OBJECT', 'FILTER', 'IMAGETYP',
+                    'EXPOSURE', 'EXPTIME', 'CCD-TEMP', 'XBINNING', 'YBINNING', 'DATE-LOC', 'DATE-OBS']
         try:
             xisf_file = xisf.XISF(filename)
             im_data = xisf_file.read_image(0)
-            
+
             if hasattr(xisf_file, 'fits_keywords'):
                 fits_keywords = xisf_file.fits_keywords
             elif hasattr(im_data, 'fits_keywords'):
@@ -96,7 +158,7 @@ class ImportWorker(QThread):
             else:
                 metadata = xisf_file.get_images_metadata()[0]
                 fits_keywords = metadata.get('FITSKeywords', {})
-            
+
             results = {}
             for keyword in keywords:
                 if fits_keywords and keyword in fits_keywords:
@@ -107,11 +169,84 @@ class ImportWorker(QThread):
                         results[keyword] = keyword_data
                 else:
                     results[keyword] = None
-            
+
+            # Special handling: prefer EXPTIME over EXPOSURE (EXPTIME is FITS standard)
+            # This ensures compatibility with both standard and non-standard keywords
+            if results.get('EXPTIME') is not None:
+                results['EXPOSURE'] = results['EXPTIME']
+
             return results
         except Exception as e:
             return None
-    
+
+    def generate_organized_path(self, repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, original_filename):
+        """Generate the organized path and filename for a file"""
+        # Sanitize values
+        obj = obj or "Unknown"
+        filt = filt or "NoFilter"
+        imgtyp = imgtyp or "Unknown"
+        date = date or "0000-00-00"
+
+        # Determine binning string
+        if xbin and ybin:
+            try:
+                binning = f"Bin{int(float(xbin))}x{int(float(ybin))}"
+            except (ValueError, TypeError):
+                binning = "Bin1x1"
+        else:
+            binning = "Bin1x1"
+
+        # Determine temp string (round to nearest degree)
+        if temp is not None:
+            try:
+                temp_float = float(temp)
+                temp_str = f"{int(round(temp_float))}C"
+            except (ValueError, TypeError):
+                temp_str = "0C"
+        else:
+            temp_str = "0C"
+
+        # Extract sequence number from original filename if possible
+        import re
+        seq_match = re.search(r'_(\d+)\.(xisf|fits?)$', original_filename, re.IGNORECASE)
+        seq = seq_match.group(1) if seq_match else "001"
+
+        # Determine file type and path structure
+        if 'light' in imgtyp.lower():
+            # Lights/[Object]/[Filter]/[filename]
+            subdir = os.path.join("Lights", obj, filt)
+            try:
+                exp_str = f"{int(float(exp))}s" if exp else "0s"
+            except (ValueError, TypeError):
+                exp_str = "0s"
+            new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+
+        elif 'dark' in imgtyp.lower():
+            # Calibration/Darks/[exp]_[temp]_[binning]/[filename]
+            try:
+                exp_str = f"{int(float(exp))}s" if exp else "0s"
+            except (ValueError, TypeError):
+                exp_str = "0s"
+            subdir = os.path.join("Calibration", "Darks", f"{exp_str}_{temp_str}_{binning}")
+            new_filename = f"{date}_Dark_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+
+        elif 'flat' in imgtyp.lower():
+            # Calibration/Flats/[date]/[filter]_[temp]_[binning]/[filename]
+            subdir = os.path.join("Calibration", "Flats", date, f"{filt}_{temp_str}_{binning}")
+            new_filename = f"{date}_Flat_{filt}_{temp_str}_{binning}_{seq}.xisf"
+
+        elif 'bias' in imgtyp.lower():
+            # Calibration/Bias/[temp]_[binning]/[filename]
+            subdir = os.path.join("Calibration", "Bias", f"{temp_str}_{binning}")
+            new_filename = f"{date}_Bias_{temp_str}_{binning}_{seq}.xisf"
+
+        else:
+            # Unknown type - put in root with original structure
+            subdir = "Uncategorized"
+            new_filename = original_filename
+
+        return os.path.join(repo_path, subdir, new_filename)
+
     def run(self):
         """Process files and import to database"""
         conn = sqlite3.connect(self.db_path)
@@ -134,15 +269,63 @@ class ImportWorker(QThread):
                 
                 if keywords:
                     filename = os.path.basename(filepath)
-                    
-                    # Process DATE-LOC to subtract 12 hours and get date only
+
+                    # Process date: prefer DATE-LOC, fall back to DATE-OBS with timezone conversion
                     date_loc = self.process_date_loc(keywords.get('DATE-LOC'))
-                    
+                    if date_loc is None and keywords.get('DATE-OBS'):
+                        # DATE-LOC not available, use DATE-OBS with timezone conversion
+                        date_loc = self.process_date_obs(keywords.get('DATE-OBS'), self.timezone)
+
+                    # Determine if this is a calibration frame
+                    imagetyp = keywords.get('IMAGETYP', '')
+                    is_calibration = False
+                    if imagetyp:
+                        imagetyp_lower = imagetyp.lower()
+                        is_calibration = ('dark' in imagetyp_lower or
+                                        'flat' in imagetyp_lower or
+                                        'bias' in imagetyp_lower)
+
+                    # Set object to None for calibration frames (they are not object-specific)
+                    obj = None if is_calibration else keywords.get('OBJECT')
+
+                    # Organize file if requested
+                    if self.organize and self.repo_path:
+                        try:
+                            # Generate organized path
+                            organized_path = self.generate_organized_path(
+                                self.repo_path,
+                                obj,
+                                keywords.get('FILTER'),
+                                keywords.get('IMAGETYP'),
+                                keywords.get('EXPOSURE'),
+                                keywords.get('CCD-TEMP'),
+                                keywords.get('XBINNING'),
+                                keywords.get('YBINNING'),
+                                date_loc,
+                                filename
+                            )
+
+                            # Create directory if needed
+                            os.makedirs(os.path.dirname(organized_path), exist_ok=True)
+
+                            # Copy file to organized location
+                            shutil.copy2(filepath, organized_path)
+
+                            # Update filepath and filename to organized location
+                            filepath = organized_path
+                            filename = os.path.basename(organized_path)
+
+                            self.progress.emit(i + 1, len(self.files), f"Organized: {filename}")
+                        except Exception as e:
+                            # If organization fails, keep original path and log error
+                            self.progress.emit(i + 1, len(self.files), f"⚠️  Organization failed for {basename}: {str(e)} - using original path")
+                            # Don't increment errors, just continue with original path
+
                     # Add to batch
                     batch_data.append((
                         file_hash, filepath, filename,
                         keywords.get('TELESCOP'), keywords.get('INSTRUME'),
-                        keywords.get('OBJECT'), keywords.get('FILTER'),
+                        obj, keywords.get('FILTER'),
                         keywords.get('IMAGETYP'), keywords.get('EXPOSURE'),
                         keywords.get('CCD-TEMP'), keywords.get('XBINNING'),
                         keywords.get('YBINNING'), date_loc
@@ -254,7 +437,38 @@ class XISFCatalogGUI(QMainWindow):
         button_layout.addWidget(self.import_folder_btn)
         
         layout.addLayout(button_layout)
-        
+
+        # Import Mode Selection
+        import_mode_group = QGroupBox("Import Mode")
+        import_mode_layout = QVBoxLayout()
+
+        self.import_mode_button_group = QButtonGroup()
+        self.import_only_radio = QRadioButton("Import only (store original paths)")
+        self.import_organize_radio = QRadioButton("Import and organize (copy to repository)")
+
+        self.import_mode_button_group.addButton(self.import_only_radio, 0)
+        self.import_mode_button_group.addButton(self.import_organize_radio, 1)
+
+        import_mode_layout.addWidget(self.import_only_radio)
+
+        organize_help = QLabel("Copies files to organized folder structure in repository location.")
+        organize_help.setStyleSheet("color: #888888; font-size: 10px; margin-left: 20px;")
+        import_mode_layout.addWidget(self.import_organize_radio)
+        import_mode_layout.addWidget(organize_help)
+
+        # Set default mode from settings
+        import_mode = self.settings.value('import_mode', 'import_only')
+        if import_mode == 'import_organize':
+            self.import_organize_radio.setChecked(True)
+        else:
+            self.import_only_radio.setChecked(True)
+
+        # Connect signal to save setting
+        self.import_mode_button_group.buttonClicked.connect(self.save_import_mode)
+
+        import_mode_group.setLayout(import_mode_layout)
+        layout.addWidget(import_mode_group)
+
         # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
@@ -858,10 +1072,10 @@ class XISFCatalogGUI(QMainWindow):
         
         organize_group.setLayout(organize_layout)
         layout.addWidget(organize_group)
-        
+
         # Add stretch to push everything to the top
         layout.addStretch()
-        
+
         return widget
     
     def on_keyword_changed(self):
@@ -957,7 +1171,7 @@ class XISFCatalogGUI(QMainWindow):
                 conn.close()
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to replace values: {e}')
-    
+
     def preview_organization(self):
         """Preview the file organization plan"""
         repo_path = self.settings.value('repository_path', '')
@@ -1083,8 +1297,10 @@ class XISFCatalogGUI(QMainWindow):
                         shutil.copy2(filepath, new_path)
                         self.organize_log.append(f"✓ Copied: {os.path.basename(new_path)}")
                     
-                    # Update database with new path
-                    cursor.execute('UPDATE xisf_files SET filepath = ? WHERE id = ?', (new_path, file_id))
+                    # Update database with new path and filename
+                    new_filename = os.path.basename(new_path)
+                    cursor.execute('UPDATE xisf_files SET filepath = ?, filename = ? WHERE id = ?',
+                                   (new_path, new_filename, file_id))
                     success_count += 1
                     
                 except Exception as e:
@@ -1120,34 +1336,50 @@ class XISFCatalogGUI(QMainWindow):
         
         # Determine binning string
         if xbin and ybin:
-            binning = f"Bin{int(xbin)}x{int(ybin)}"
+            try:
+                binning = f"Bin{int(float(xbin))}x{int(float(ybin))}"
+            except (ValueError, TypeError):
+                binning = "Bin1x1"
         else:
             binning = "Bin1x1"
         
-        # Determine temp string
-        temp_str = f"{int(temp)}C" if temp is not None else "0C"
-        
+        # Determine temp string (round to nearest degree)
+        if temp is not None:
+            try:
+                temp_float = float(temp)
+                temp_str = f"{int(round(temp_float))}C"
+            except (ValueError, TypeError):
+                temp_str = "0C"
+        else:
+            temp_str = "0C"
+
         # Extract sequence number from original filename if possible
         import re
         seq_match = re.search(r'_(\d+)\.(xisf|fits?)$', original_filename, re.IGNORECASE)
         seq = seq_match.group(1) if seq_match else "001"
-        
+
         # Determine file type and path structure
         if 'light' in imgtyp.lower():
             # Lights/[Object]/[Filter]/[filename]
             subdir = os.path.join("Lights", obj, filt)
-            exp_str = f"{int(exp)}s" if exp else "0s"
+            try:
+                exp_str = f"{int(float(exp))}s" if exp else "0s"
+            except (ValueError, TypeError):
+                exp_str = "0s"
             new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
-            
+
         elif 'dark' in imgtyp.lower():
             # Calibration/Darks/[exp]_[temp]_[binning]/[filename]
-            exp_str = f"{int(exp)}s" if exp else "0s"
+            try:
+                exp_str = f"{int(float(exp))}s" if exp else "0s"
+            except (ValueError, TypeError):
+                exp_str = "0s"
             subdir = os.path.join("Calibration", "Darks", f"{exp_str}_{temp_str}_{binning}")
             new_filename = f"{date}_Dark_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
             
         elif 'flat' in imgtyp.lower():
-            # Calibration/Flats/[filter]_[temp]_[binning]/[filename]
-            subdir = os.path.join("Calibration", "Flats", f"{filt}_{temp_str}_{binning}")
+            # Calibration/Flats/[date]/[filter]_[temp]_[binning]/[filename]
+            subdir = os.path.join("Calibration", "Flats", date, f"{filt}_{temp_str}_{binning}")
             new_filename = f"{date}_Flat_{filt}_{temp_str}_{binning}_{seq}.xisf"
             
         elif 'bias' in imgtyp.lower():
@@ -1195,7 +1427,69 @@ class XISFCatalogGUI(QMainWindow):
         
         repo_group.setLayout(repo_layout)
         layout.addWidget(repo_group)
-        
+
+        # Timezone settings group
+        timezone_group = QGroupBox("Timezone")
+        timezone_layout = QVBoxLayout()
+
+        timezone_info = QLabel("Set your local timezone for DATE-OBS conversion:")
+        timezone_layout.addWidget(timezone_info)
+
+        timezone_help = QLabel("Used to convert UTC timestamps (DATE-OBS) to local time for session grouping.")
+        timezone_help.setStyleSheet("color: #888888; font-size: 10px;")
+        timezone_layout.addWidget(timezone_help)
+
+        timezone_selector_layout = QHBoxLayout()
+        timezone_label = QLabel("Timezone:")
+        timezone_label.setMinimumWidth(120)
+        self.timezone_combo = QComboBox()
+
+        # Common timezones
+        common_timezones = [
+            'UTC',
+            'America/New_York',
+            'America/Chicago',
+            'America/Denver',
+            'America/Los_Angeles',
+            'America/Phoenix',
+            'America/Anchorage',
+            'Pacific/Honolulu',
+            'Europe/London',
+            'Europe/Paris',
+            'Europe/Berlin',
+            'Europe/Rome',
+            'Europe/Madrid',
+            'Europe/Athens',
+            'Asia/Tokyo',
+            'Asia/Shanghai',
+            'Asia/Hong_Kong',
+            'Asia/Singapore',
+            'Asia/Dubai',
+            'Australia/Sydney',
+            'Australia/Melbourne',
+            'Australia/Perth',
+            'Pacific/Auckland'
+        ]
+
+        self.timezone_combo.addItems(common_timezones)
+
+        # Set current timezone
+        current_timezone = self.settings.value('timezone', 'UTC')
+        index = self.timezone_combo.findText(current_timezone)
+        if index >= 0:
+            self.timezone_combo.setCurrentIndex(index)
+
+        save_timezone_btn = QPushButton('Save Timezone')
+        save_timezone_btn.clicked.connect(self.save_timezone_setting)
+
+        timezone_selector_layout.addWidget(timezone_label)
+        timezone_selector_layout.addWidget(self.timezone_combo)
+        timezone_selector_layout.addWidget(save_timezone_btn)
+        timezone_layout.addLayout(timezone_selector_layout)
+
+        timezone_group.setLayout(timezone_layout)
+        layout.addWidget(timezone_group)
+
         # Theme settings group
         theme_group = QGroupBox("Theme")
         theme_layout = QVBoxLayout()
@@ -1252,16 +1546,34 @@ class XISFCatalogGUI(QMainWindow):
                 f'Image repository location set to:\n{directory}'
             )
     
+    def save_timezone_setting(self):
+        """Save the selected timezone"""
+        timezone = self.timezone_combo.currentText()
+        self.settings.setValue('timezone', timezone)
+        QMessageBox.information(
+            self,
+            'Timezone Saved',
+            f'Timezone set to: {timezone}\n\nThis will be used for converting DATE-OBS timestamps.'
+        )
+
+    def save_import_mode(self):
+        """Save the selected import mode"""
+        if self.import_organize_radio.isChecked():
+            mode = 'import_organize'
+        else:
+            mode = 'import_only'
+        self.settings.setValue('import_mode', mode)
+
     def apply_theme_setting(self):
         """Apply the selected theme"""
         if self.standard_theme_radio.isChecked():
             theme = 'standard'
         else:
             theme = 'dark'
-        
+
         # Save theme preference
         self.settings.setValue('theme', theme)
-        
+
         # Show message that restart is needed
         QMessageBox.information(
             self,
@@ -1273,139 +1585,15 @@ class XISFCatalogGUI(QMainWindow):
         """Connect signals after all widgets are created"""
         # Connect column resize signals to save settings
         self.catalog_tree.header().sectionResized.connect(self.save_settings)
-        self.recent_objects_table.horizontalHeader().sectionResized.connect(self.save_settings)
-        self.top_exposure_table.horizontalHeader().sectionResized.connect(self.save_settings)
-        self.top_months_table.horizontalHeader().sectionResized.connect(self.save_settings)
-    
-    def refresh_statistics(self):
-        """Refresh the statistics tables"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Get 10 most recent objects with their telescope and instrument
-            cursor.execute('''
-                SELECT 
-                    f1.object,
-                    f1.date_loc,
-                    f1.telescop,
-                    f1.instrume
-                FROM xisf_files f1
-                INNER JOIN (
-                    SELECT object, MAX(date_loc) as max_date
-                    FROM xisf_files
-                    WHERE object IS NOT NULL AND date_loc IS NOT NULL
-                    GROUP BY object
-                ) f2 ON f1.object = f2.object AND f1.date_loc = f2.max_date
-                WHERE f1.object IS NOT NULL AND f1.date_loc IS NOT NULL
-                GROUP BY f1.object
-                ORDER BY f1.date_loc DESC
-                LIMIT 10
-            ''')
-            
-            recent_objects = cursor.fetchall()
-            
-            # Update recent objects table
-            self.recent_objects_table.setRowCount(len(recent_objects))
-            for i, (obj, date, telescop, instrume) in enumerate(recent_objects):
-                self.recent_objects_table.setItem(i, 0, QTableWidgetItem(obj or 'Unknown'))
-                self.recent_objects_table.setItem(i, 1, QTableWidgetItem(date or 'N/A'))
-                self.recent_objects_table.setItem(i, 2, QTableWidgetItem(telescop or 'N/A'))
-                self.recent_objects_table.setItem(i, 3, QTableWidgetItem(instrume or 'N/A'))
-            
-            self.recent_objects_table.resizeColumnsToContents()
-            
-            # Get top 10 objects by total exposure (Light Frames only)
-            cursor.execute('''
-                SELECT 
-                    f1.object,
-                    SUM(f1.exposure) as total_exposure,
-                    (SELECT telescop FROM xisf_files WHERE object = f1.object LIMIT 1) as telescop,
-                    (SELECT instrume FROM xisf_files WHERE object = f1.object LIMIT 1) as instrume
-                FROM xisf_files f1
-                WHERE f1.object IS NOT NULL 
-                    AND f1.exposure IS NOT NULL 
-                    AND (f1.imagetyp = 'Light Frame' OR f1.imagetyp LIKE '%Light%')
-                GROUP BY f1.object
-                ORDER BY total_exposure DESC
-                LIMIT 10
-            ''')
-            
-            top_exposure_objects = cursor.fetchall()
-            
-            # Update top exposure table
-            self.top_exposure_table.setRowCount(len(top_exposure_objects))
-            for i, (obj, total_exp, telescop, instrume) in enumerate(top_exposure_objects):
-                self.top_exposure_table.setItem(i, 0, QTableWidgetItem(obj or 'Unknown'))
-                self.top_exposure_table.setItem(i, 1, QTableWidgetItem(f'{total_exp/3600:.2f}' if total_exp else '0.00'))
-                self.top_exposure_table.setItem(i, 2, QTableWidgetItem(telescop or 'N/A'))
-                self.top_exposure_table.setItem(i, 3, QTableWidgetItem(instrume or 'N/A'))
-            
-            self.top_exposure_table.resizeColumnsToContents()
-            
-            # Get top 10 months by total exposure (Light Frames only)
-            cursor.execute('''
-                SELECT 
-                    strftime('%Y-%m', date_loc) as month,
-                    SUM(exposure) as total_exposure,
-                    COUNT(DISTINCT date_loc) as session_count
-                FROM xisf_files
-                WHERE date_loc IS NOT NULL 
-                    AND exposure IS NOT NULL
-                    AND (imagetyp = 'Light Frame' OR imagetyp LIKE '%Light%')
-                GROUP BY month
-                ORDER BY total_exposure DESC
-                LIMIT 10
-            ''')
-            
-            top_months = cursor.fetchall()
-            
-            # Update top months table
-            self.top_months_table.setRowCount(len(top_months))
-            for i, (month, total_exp, sessions) in enumerate(top_months):
-                # Format month as "Month Year" (e.g., "October 2024")
-                if month:
-                    year, month_num = month.split('-')
-                    month_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
-                                   'July', 'August', 'September', 'October', 'November', 'December']
-                    formatted_month = f"{month_names[int(month_num)]} {year}"
-                else:
-                    formatted_month = 'Unknown'
-                
-                self.top_months_table.setItem(i, 0, QTableWidgetItem(formatted_month))
-                self.top_months_table.setItem(i, 1, QTableWidgetItem(f'{total_exp/3600:.2f}' if total_exp else '0.00'))
-                self.top_months_table.setItem(i, 2, QTableWidgetItem(str(sessions)))
-            
-            self.top_months_table.resizeColumnsToContents()
-            
-            conn.close()
-            
-        except Exception as e:
-            QMessageBox.critical(self, 'Error', f'Failed to refresh statistics: {e}')
     
     def save_settings(self):
         """Save window size and column widths"""
         # Save window geometry
         self.settings.setValue('geometry', self.saveGeometry())
-        
+
         # Save catalog tree column widths
         for i in range(self.catalog_tree.columnCount()):
             self.settings.setValue(f'catalog_tree_col_{i}', self.catalog_tree.columnWidth(i))
-        
-        # Save recent objects table column widths (all except last which is stretched)
-        for i in range(self.recent_objects_table.columnCount() - 1):
-            width = self.recent_objects_table.columnWidth(i)
-            self.settings.setValue(f'recent_table_col_{i}', width)
-        
-        # Save top exposure table column widths (all except last which is stretched)
-        for i in range(self.top_exposure_table.columnCount() - 1):
-            width = self.top_exposure_table.columnWidth(i)
-            self.settings.setValue(f'exposure_table_col_{i}', width)
-        
-        # Save top months table column widths (all except last which is stretched)
-        for i in range(self.top_months_table.columnCount() - 1):
-            width = self.top_months_table.columnWidth(i)
-            self.settings.setValue(f'months_table_col_{i}', width)
     
     def restore_settings(self):
         """Restore window size and column widths"""
@@ -1413,31 +1601,13 @@ class XISFCatalogGUI(QMainWindow):
         geometry = self.settings.value('geometry')
         if geometry:
             self.restoreGeometry(geometry)
-        
+
         # Restore catalog tree column widths
         for i in range(self.catalog_tree.columnCount()):
             width = self.settings.value(f'catalog_tree_col_{i}')
             if width is not None:
                 self.catalog_tree.setColumnWidth(i, int(width))
-        
-        # Restore recent objects table column widths (all except last which is stretched)
-        for i in range(self.recent_objects_table.columnCount() - 1):
-            width = self.settings.value(f'recent_table_col_{i}')
-            if width is not None:
-                self.recent_objects_table.setColumnWidth(i, int(width))
-        
-        # Restore top exposure table column widths (all except last which is stretched)
-        for i in range(self.top_exposure_table.columnCount() - 1):
-            width = self.settings.value(f'exposure_table_col_{i}')
-            if width is not None:
-                self.top_exposure_table.setColumnWidth(i, int(width))
-        
-        # Restore top months table column widths (all except last which is stretched)
-        for i in range(self.top_months_table.columnCount() - 1):
-            width = self.settings.value(f'months_table_col_{i}')
-            if width is not None:
-                self.top_months_table.setColumnWidth(i, int(width))
-        
+
         # Connect signals after restoring settings to avoid triggering saves during restore
         self.connect_signals()
     
@@ -1511,7 +1681,32 @@ class XISFCatalogGUI(QMainWindow):
         self.progress_bar.setValue(0)
         
         # Create and start worker
-        self.worker = ImportWorker(files, self.db_path)
+        timezone = self.settings.value('timezone', 'UTC')
+
+        # Check import mode
+        import_mode = self.settings.value('import_mode', 'import_only')
+        organize = (import_mode == 'import_organize')
+        repo_path = self.settings.value('repository_path', '') if organize else None
+
+        # Warn if organize mode but no repository path
+        if organize and not repo_path:
+            QMessageBox.warning(
+                self, 'No Repository Path',
+                'Import and organize mode is selected, but repository path is not set.\n\n'
+                'Files will be imported with original paths.\n\n'
+                'Set repository path in Settings tab to enable organization during import.'
+            )
+            organize = False
+            repo_path = None
+
+        # Log import mode
+        if organize:
+            self.log_text.append(f"Import mode: Organize files to repository\n")
+            self.log_text.append(f"Repository: {repo_path}\n")
+        else:
+            self.log_text.append(f"Import mode: Store original paths\n")
+
+        self.worker = ImportWorker(files, self.db_path, timezone, organize, repo_path)
         self.worker.progress.connect(self.on_import_progress)
         self.worker.finished.connect(self.on_import_finished)
         self.worker.start()
@@ -1569,12 +1764,17 @@ class XISFCatalogGUI(QMainWindow):
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
+
             self.catalog_tree.clear()
-            
-            # Get all objects
+
+            # ===== LIGHT FRAMES SECTION =====
+            light_frames_root = QTreeWidgetItem(self.catalog_tree)
+            light_frames_root.setText(0, "Light Frames")
+            light_frames_root.setFlags(light_frames_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+
+            # Get all objects (light frames only)
             cursor.execute('''
-                SELECT 
+                SELECT
                     object,
                     COUNT(*) as file_count,
                     SUM(exposure) as total_exposure
@@ -1583,18 +1783,18 @@ class XISFCatalogGUI(QMainWindow):
                 GROUP BY object
                 ORDER BY object
             ''')
-            
+
             objects = cursor.fetchall()
-            
+
             for obj_name, obj_file_count, obj_total_exp in objects:
                 # Create object node
-                obj_item = QTreeWidgetItem(self.catalog_tree)
+                obj_item = QTreeWidgetItem(light_frames_root)
                 obj_item.setText(0, obj_name or 'Unknown')
                 obj_item.setFlags(obj_item.flags() | Qt.ItemFlag.ItemIsAutoTristate)
-                
+
                 # Get all filters for this object
                 cursor.execute('''
-                    SELECT 
+                    SELECT
                         filter,
                         COUNT(*) as file_count,
                         SUM(exposure) as total_exposure
@@ -1603,17 +1803,17 @@ class XISFCatalogGUI(QMainWindow):
                     GROUP BY filter
                     ORDER BY filter
                 ''', (obj_name,))
-                
+
                 filters = cursor.fetchall()
-                
+
                 for filter_name, filter_file_count, filter_total_exp in filters:
                     # Create filter node
                     filter_item = QTreeWidgetItem(obj_item)
                     filter_item.setText(0, filter_name or 'No Filter')
-                    
+
                     # Get all dates for this object and filter
                     cursor.execute('''
-                        SELECT 
+                        SELECT
                             date_loc,
                             COUNT(*) as file_count,
                             SUM(exposure) as total_exposure
@@ -1622,17 +1822,17 @@ class XISFCatalogGUI(QMainWindow):
                         GROUP BY date_loc
                         ORDER BY date_loc DESC
                     ''', (obj_name, filter_name, filter_name))
-                    
+
                     dates = cursor.fetchall()
-                    
+
                     for date_val, date_file_count, date_total_exp in dates:
                         # Create date node
                         date_item = QTreeWidgetItem(filter_item)
                         date_item.setText(0, date_val or 'No Date')
-                        
+
                         # Get all files for this object, filter, and date
                         cursor.execute('''
-                            SELECT 
+                            SELECT
                                 filename,
                                 imagetyp,
                                 exposure,
@@ -1640,14 +1840,14 @@ class XISFCatalogGUI(QMainWindow):
                                 instrume,
                                 date_loc
                             FROM xisf_files
-                            WHERE object = ? 
+                            WHERE object = ?
                                 AND (filter = ? OR (filter IS NULL AND ? IS NULL))
                                 AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
                             ORDER BY filename
                         ''', (obj_name, filter_name, filter_name, date_val, date_val))
-                        
+
                         files = cursor.fetchall()
-                        
+
                         for filename, imagetyp, exposure, telescop, instrume, date_loc in files:
                             # Create file node
                             file_item = QTreeWidgetItem(date_item)
@@ -1655,1214 +1855,225 @@ class XISFCatalogGUI(QMainWindow):
                             file_item.setText(1, imagetyp or 'N/A')
                             file_item.setText(2, telescop or 'N/A')
                             file_item.setText(3, instrume or 'N/A')
-            
-            conn.close()
-            
-            # Don't expand any items by default - keep everything collapsed
-            
-        except Exception as e:
-            QMessageBox.critical(self, 'Error', f'Failed to refresh view: {e}')
-    
-    def on_tab_changed(self, index):
-        """Handle tab change"""
-        if index == 1:  # View Catalog tab
-            self.refresh_catalog_view()
-        elif index == 2:  # Sessions tab
-            self.refresh_sessions()
-        elif index == 3:  # Statistics tab
-            self.refresh_statistics()
-        elif index == 4:  # Analytics tab
-            self.refresh_analytics()
-        elif index == 5:  # Maintenance tab
-            # Populate current values when maintenance tab is opened
-            keyword = self.keyword_combo.currentText()
-            self.populate_current_values(keyword)
 
-    def refresh_sessions(self):
-        """Refresh the sessions view"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            # ===== CALIBRATION FRAMES SECTION =====
+            calib_root = QTreeWidgetItem(self.catalog_tree)
+            calib_root.setText(0, "Calibration Frames")
+            calib_root.setFlags(calib_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
 
-            self.sessions_tree.clear()
+            # ----- DARK FRAMES: exposure_temp_binning → date → files -----
+            dark_root = QTreeWidgetItem(calib_root)
+            dark_root.setText(0, "Dark Frames")
+            dark_root.setFlags(dark_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
 
-            # Find all unique sessions (date + object + filter combination for light frames)
             cursor.execute('''
                 SELECT
-                    date_loc,
-                    object,
-                    filter,
-                    COUNT(*) as frame_count,
-                    AVG(exposure) as avg_exposure,
-                    AVG(ccd_temp) as avg_temp,
+                    exposure,
+                    ROUND(ccd_temp) as ccd_temp,
                     xbinning,
-                    ybinning
+                    ybinning,
+                    COUNT(*) as file_count
                 FROM xisf_files
-                WHERE imagetyp LIKE '%Light%'
-                    AND date_loc IS NOT NULL
-                    AND object IS NOT NULL
-                GROUP BY date_loc, object, filter
-                ORDER BY date_loc DESC, object, filter
+                WHERE imagetyp LIKE '%Dark%' AND object IS NULL
+                GROUP BY exposure, ROUND(ccd_temp), xbinning, ybinning
+                ORDER BY exposure, ROUND(ccd_temp), xbinning, ybinning
             ''')
 
-            sessions = cursor.fetchall()
-
-            # Statistics counters
-            total_count = 0
-            complete_count = 0
-            partial_count = 0
-            missing_count = 0
-
-            for session_data in sessions:
-                date, obj, filt, frame_count, avg_exp, avg_temp, xbin, ybin = session_data
-
-                # Find matching calibration frames
-                darks_info = self.find_matching_darks(cursor, avg_exp, avg_temp, xbin, ybin)
-                bias_info = self.find_matching_bias(cursor, avg_temp, xbin, ybin)
-                flats_info = self.find_matching_flats(cursor, filt, avg_temp, xbin, ybin, date)
-
-                # Calculate session status
-                status, status_color = self.calculate_session_status(darks_info, bias_info, flats_info)
-
-                # Apply filters
-                status_filter = self.session_status_filter.currentText()
-                if status_filter != 'All' and status != status_filter:
-                    continue
-
-                if self.missing_only_checkbox.isChecked() and status != 'Missing':
-                    continue
-
-                # Update statistics
-                total_count += 1
-                if status == 'Complete':
-                    complete_count += 1
-                elif status == 'Partial':
-                    partial_count += 1
-                elif status == 'Missing':
-                    missing_count += 1
-
-                # Create session tree item
-                session_name = f"{date} - {obj} - {filt or 'No Filter'}"
-                session_item = QTreeWidgetItem(self.sessions_tree)
-                session_item.setText(0, session_name)
-                session_item.setText(1, status)
-                session_item.setText(2, f"{frame_count} frames")
-                session_item.setText(3, darks_info['display'])
-                session_item.setText(4, bias_info['display'])
-                session_item.setText(5, flats_info['display'])
-
-                # Set status color
-                for col in range(6):
-                    session_item.setForeground(col, status_color)
-
-                # Store session data for details view
-                session_item.setData(0, Qt.ItemDataRole.UserRole, {
-                    'date': date,
-                    'object': obj,
-                    'filter': filt,
-                    'frame_count': frame_count,
-                    'avg_exposure': avg_exp,
-                    'avg_temp': avg_temp,
-                    'xbinning': xbin,
-                    'ybinning': ybin,
-                    'darks': darks_info,
-                    'bias': bias_info,
-                    'flats': flats_info,
-                    'status': status
-                })
-
-            conn.close()
-
-            # Update statistics panel
-            self.update_session_statistics(total_count, complete_count, partial_count, missing_count)
-
-            # Resize columns
-            for i in range(6):
-                self.sessions_tree.resizeColumnToContents(i)
-
-        except Exception as e:
-            QMessageBox.critical(self, 'Error', f'Failed to refresh sessions: {e}')
-
-    def find_matching_darks(self, cursor, exposure, temp, xbin, ybin):
-        """Find matching dark frames with temperature tolerance"""
-        include_masters = self.include_masters_checkbox.isChecked()
-
-        # Temperature tolerance: ±1°C
-        temp_min = temp - 1 if temp else -999
-        temp_max = temp + 1 if temp else 999
-
-        # Find regular darks
-        cursor.execute('''
-            SELECT COUNT(*), AVG(ccd_temp)
-            FROM xisf_files
-            WHERE imagetyp LIKE '%Dark%'
-                AND imagetyp NOT LIKE '%Master%'
-                AND ABS(exposure - ?) < 0.1
-                AND ccd_temp BETWEEN ? AND ?
-                AND xbinning = ?
-                AND ybinning = ?
-        ''', (exposure, temp_min, temp_max, xbin, ybin))
-
-        dark_count, dark_temp = cursor.fetchone()
-        dark_count = dark_count or 0
-
-        # Find master darks
-        master_count = 0
-        if include_masters:
-            cursor.execute('''
-                SELECT COUNT(*)
-                FROM xisf_files
-                WHERE imagetyp LIKE '%Master%'
-                    AND imagetyp LIKE '%Dark%'
-                    AND ABS(exposure - ?) < 0.1
-                    AND ccd_temp BETWEEN ? AND ?
-                    AND xbinning = ?
-                    AND ybinning = ?
-            ''', (exposure, temp_min, temp_max, xbin, ybin))
-
-            master_count = cursor.fetchone()[0] or 0
-
-        # Calculate quality score (0-100)
-        quality = min(100, (dark_count / 20) * 100) if dark_count > 0 else 0
-
-        # Determine display text and status
-        if master_count > 0:
-            display = f"✓ {dark_count} + {master_count} Master"
-            has_frames = True
-        elif dark_count >= 10:
-            display = f"✓ {dark_count} frames"
-            has_frames = True
-        elif dark_count > 0:
-            display = f"⚠ {dark_count} frames (need 10+)"
-            has_frames = True
-        else:
-            display = "✗ Missing"
-            has_frames = False
-
-        return {
-            'count': dark_count,
-            'master_count': master_count,
-            'avg_temp': dark_temp,
-            'quality': quality,
-            'display': display,
-            'has_frames': has_frames,
-            'exposure': exposure
-        }
-
-    def find_matching_bias(self, cursor, temp, xbin, ybin):
-        """Find matching bias frames with temperature tolerance"""
-        include_masters = self.include_masters_checkbox.isChecked()
-
-        # Temperature tolerance: ±1°C
-        temp_min = temp - 1 if temp else -999
-        temp_max = temp + 1 if temp else 999
-
-        # Find regular bias
-        cursor.execute('''
-            SELECT COUNT(*), AVG(ccd_temp)
-            FROM xisf_files
-            WHERE imagetyp LIKE '%Bias%'
-                AND imagetyp NOT LIKE '%Master%'
-                AND ccd_temp BETWEEN ? AND ?
-                AND xbinning = ?
-                AND ybinning = ?
-        ''', (temp_min, temp_max, xbin, ybin))
-
-        bias_count, bias_temp = cursor.fetchone()
-        bias_count = bias_count or 0
-
-        # Find master bias
-        master_count = 0
-        if include_masters:
-            cursor.execute('''
-                SELECT COUNT(*)
-                FROM xisf_files
-                WHERE imagetyp LIKE '%Master%'
-                    AND imagetyp LIKE '%Bias%'
-                    AND ccd_temp BETWEEN ? AND ?
-                    AND xbinning = ?
-                    AND ybinning = ?
-            ''', (temp_min, temp_max, xbin, ybin))
-
-            master_count = cursor.fetchone()[0] or 0
-
-        # Calculate quality score (0-100)
-        quality = min(100, (bias_count / 20) * 100) if bias_count > 0 else 0
-
-        # Determine display text and status
-        if master_count > 0:
-            display = f"✓ {bias_count} + {master_count} Master"
-            has_frames = True
-        elif bias_count >= 10:
-            display = f"✓ {bias_count} frames"
-            has_frames = True
-        elif bias_count > 0:
-            display = f"⚠ {bias_count} frames (need 10+)"
-            has_frames = True
-        else:
-            display = "✗ Missing"
-            has_frames = False
-
-        return {
-            'count': bias_count,
-            'master_count': master_count,
-            'avg_temp': bias_temp,
-            'quality': quality,
-            'display': display,
-            'has_frames': has_frames
-        }
-
-    def find_matching_flats(self, cursor, filter_name, temp, xbin, ybin, session_date):
-        """Find matching flat frames with temperature and date tolerance"""
-        include_masters = self.include_masters_checkbox.isChecked()
-
-        # Temperature tolerance: ±3°C for flats
-        temp_min = temp - 3 if temp else -999
-        temp_max = temp + 3 if temp else 999
-
-        # Date tolerance: ±7 days
-        try:
-            session_dt = datetime.strptime(session_date, '%Y-%m-%d')
-            date_min = (session_dt - timedelta(days=7)).strftime('%Y-%m-%d')
-            date_max = (session_dt + timedelta(days=7)).strftime('%Y-%m-%d')
-        except:
-            date_min = '1900-01-01'
-            date_max = '2100-12-31'
-
-        # Find regular flats
-        cursor.execute('''
-            SELECT COUNT(*), AVG(ccd_temp)
-            FROM xisf_files
-            WHERE imagetyp LIKE '%Flat%'
-                AND imagetyp NOT LIKE '%Master%'
-                AND (filter = ? OR (filter IS NULL AND ? IS NULL))
-                AND ccd_temp BETWEEN ? AND ?
-                AND xbinning = ?
-                AND ybinning = ?
-                AND date_loc BETWEEN ? AND ?
-        ''', (filter_name, filter_name, temp_min, temp_max, xbin, ybin, date_min, date_max))
-
-        flat_count, flat_temp = cursor.fetchone()
-        flat_count = flat_count or 0
-
-        # Find master flats
-        master_count = 0
-        if include_masters:
-            cursor.execute('''
-                SELECT COUNT(*)
-                FROM xisf_files
-                WHERE imagetyp LIKE '%Master%'
-                    AND imagetyp LIKE '%Flat%'
-                    AND (filter = ? OR (filter IS NULL AND ? IS NULL))
-                    AND ccd_temp BETWEEN ? AND ?
-                    AND xbinning = ?
-                    AND ybinning = ?
-                    AND date_loc BETWEEN ? AND ?
-            ''', (filter_name, filter_name, temp_min, temp_max, xbin, ybin, date_min, date_max))
-
-            master_count = cursor.fetchone()[0] or 0
-
-        # Calculate quality score (0-100)
-        quality = min(100, (flat_count / 20) * 100) if flat_count > 0 else 0
-
-        # Determine display text and status
-        if master_count > 0:
-            display = f"✓ {flat_count} + {master_count} Master"
-            has_frames = True
-        elif flat_count >= 10:
-            display = f"✓ {flat_count} frames"
-            has_frames = True
-        elif flat_count > 0:
-            display = f"⚠ {flat_count} frames (need 10+)"
-            has_frames = True
-        else:
-            display = "✗ Missing"
-            has_frames = False
-
-        return {
-            'count': flat_count,
-            'master_count': master_count,
-            'avg_temp': flat_temp,
-            'quality': quality,
-            'display': display,
-            'has_frames': has_frames,
-            'filter': filter_name
-        }
-
-    def calculate_session_status(self, darks_info, bias_info, flats_info):
-        """Calculate overall session status"""
-        from PyQt6.QtGui import QColor
-
-        has_darks = darks_info['has_frames']
-        has_bias = bias_info['has_frames']
-        has_flats = flats_info['has_frames']
-
-        # Check if we have master frames
-        has_master = (darks_info['master_count'] > 0 or
-                     bias_info['master_count'] > 0 or
-                     flats_info['master_count'] > 0)
-
-        if has_darks and has_bias and has_flats:
-            if has_master:
-                return 'Complete', QColor(0, 150, 255)  # Blue for complete with masters
-            else:
-                return 'Complete', QColor(0, 200, 0)  # Green for complete
-        elif not has_darks and not has_bias and not has_flats:
-            return 'Missing', QColor(200, 0, 0)  # Red for missing all
-        else:
-            return 'Partial', QColor(255, 165, 0)  # Orange for partial
-
-    def on_session_clicked(self, item, column):
-        """Handle session tree item click"""
-        session_data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not session_data:
-            return
-
-        # Display session details
-        details = []
-        details.append(f"<h3>Session: {session_data['date']} - {session_data['object']}</h3>")
-        details.append(f"<b>Filter:</b> {session_data['filter'] or 'None'}<br>")
-        details.append(f"<b>Light Frames:</b> {session_data['frame_count']}<br>")
-        details.append(f"<b>Average Exposure:</b> {session_data['avg_exposure']:.1f}s<br>")
-        details.append(f"<b>Average Temperature:</b> {session_data['avg_temp']:.1f}°C<br>")
-        details.append(f"<b>Binning:</b> {session_data['xbinning']}x{session_data['ybinning']}<br>")
-        details.append(f"<b>Status:</b> {session_data['status']}<br>")
-
-        details.append("<h4>Calibration Frames:</h4>")
-
-        darks = session_data['darks']
-        details.append(f"<b>Darks ({darks['exposure']:.1f}s):</b> {darks['count']} frames")
-        if darks['master_count'] > 0:
-            details.append(f" + {darks['master_count']} master(s)")
-        details.append(f" (Quality: {darks['quality']:.0f}%)<br>")
-
-        bias = session_data['bias']
-        details.append(f"<b>Bias:</b> {bias['count']} frames")
-        if bias['master_count'] > 0:
-            details.append(f" + {bias['master_count']} master(s)")
-        details.append(f" (Quality: {bias['quality']:.0f}%)<br>")
-
-        flats = session_data['flats']
-        details.append(f"<b>Flats ({flats['filter'] or 'No Filter'}):</b> {flats['count']} frames")
-        if flats['master_count'] > 0:
-            details.append(f" + {flats['master_count']} master(s)")
-        details.append(f" (Quality: {flats['quality']:.0f}%)<br>")
-
-        self.session_details_text.setHtml(''.join(details))
-
-        # Generate recommendations
-        recommendations = self.generate_recommendations(session_data)
-        self.recommendations_text.setPlainText(recommendations)
-
-    def generate_recommendations(self, session_data):
-        """Generate recommendations for missing or incomplete calibration frames"""
-        recommendations = []
-
-        darks = session_data['darks']
-        bias = session_data['bias']
-        flats = session_data['flats']
-
-        if not darks['has_frames']:
-            recommendations.append(f"• Capture dark frames: {session_data['avg_exposure']:.1f}s exposure at ~{session_data['avg_temp']:.0f}°C, {session_data['xbinning']}x{session_data['ybinning']} binning (minimum 10, recommended 20+)")
-        elif darks['count'] < 10 and darks['master_count'] == 0:
-            recommendations.append(f"• Add more dark frames: Currently {darks['count']}, need at least 10 for good calibration")
-
-        if not bias['has_frames']:
-            recommendations.append(f"• Capture bias frames: ~{session_data['avg_temp']:.0f}°C, {session_data['xbinning']}x{session_data['ybinning']} binning (minimum 10, recommended 20+)")
-        elif bias['count'] < 10 and bias['master_count'] == 0:
-            recommendations.append(f"• Add more bias frames: Currently {bias['count']}, need at least 10 for good calibration")
-
-        if not flats['has_frames']:
-            filter_name = session_data['filter'] or 'No Filter'
-            recommendations.append(f"• Capture flat frames: {filter_name}, ~{session_data['avg_temp']:.0f}°C, {session_data['xbinning']}x{session_data['ybinning']} binning (minimum 10, recommended 20+)")
-        elif flats['count'] < 10 and flats['master_count'] == 0:
-            recommendations.append(f"• Add more flat frames: Currently {flats['count']}, need at least 10 for good calibration")
-
-        if not recommendations:
-            if darks['master_count'] > 0 or bias['master_count'] > 0 or flats['master_count'] > 0:
-                recommendations.append("✓ Session has master calibration frames available")
-            else:
-                recommendations.append("✓ All calibration frames are present")
-                recommendations.append("\nOptional improvements:")
-                if darks['count'] < 20:
-                    recommendations.append(f"• Consider adding more darks (currently {darks['count']}, recommended 20+)")
-                if bias['count'] < 20:
-                    recommendations.append(f"• Consider adding more bias (currently {bias['count']}, recommended 20+)")
-                if flats['count'] < 20:
-                    recommendations.append(f"• Consider adding more flats (currently {flats['count']}, recommended 20+)")
-
-        return '\n'.join(recommendations)
-
-    def update_session_statistics(self, total, complete, partial, missing):
-        """Update the session statistics panel"""
-        self.total_sessions_label.setText(f'Total Sessions: {total}')
-        self.complete_sessions_label.setText(f'Complete: {complete}')
-        self.partial_sessions_label.setText(f'Partial: {partial}')
-        self.missing_sessions_label.setText(f'Missing: {missing}')
-
-        if total > 0:
-            completion_rate = (complete / total) * 100
-            self.completion_rate_label.setText(f'Completion Rate: {completion_rate:.1f}%')
-        else:
-            self.completion_rate_label.setText('Completion Rate: 0%')
-
-    def export_session_report(self):
-        """Export session report to text file"""
-        try:
-            filename, _ = QFileDialog.getSaveFileName(
-                self,
-                'Export Session Report',
-                'session_report.txt',
-                'Text Files (*.txt);;All Files (*)'
-            )
-
-            if not filename:
-                return
-
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            # Get all sessions
-            cursor.execute('''
-                SELECT
-                    date_loc,
-                    object,
-                    filter,
-                    COUNT(*) as frame_count,
-                    AVG(exposure) as avg_exposure,
-                    AVG(ccd_temp) as avg_temp,
-                    xbinning,
-                    ybinning
-                FROM xisf_files
-                WHERE imagetyp LIKE '%Light%'
-                    AND date_loc IS NOT NULL
-                    AND object IS NOT NULL
-                GROUP BY date_loc, object, filter
-                ORDER BY date_loc DESC, object, filter
-            ''')
-
-            sessions = cursor.fetchall()
-
-            with open(filename, 'w') as f:
-                f.write("=" * 80 + "\n")
-                f.write("XISF FILE MANAGER - SESSION CALIBRATION REPORT\n")
-                f.write("=" * 80 + "\n\n")
-                f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"Total Sessions: {len(sessions)}\n\n")
-
-                complete_count = 0
-                partial_count = 0
-                missing_count = 0
-
-                for session_data in sessions:
-                    date, obj, filt, frame_count, avg_exp, avg_temp, xbin, ybin = session_data
-
-                    # Find matching calibration frames
-                    darks_info = self.find_matching_darks(cursor, avg_exp, avg_temp, xbin, ybin)
-                    bias_info = self.find_matching_bias(cursor, avg_temp, xbin, ybin)
-                    flats_info = self.find_matching_flats(cursor, filt, avg_temp, xbin, ybin, date)
-
-                    status, _ = self.calculate_session_status(darks_info, bias_info, flats_info)
-
-                    if status == 'Complete':
-                        complete_count += 1
-                    elif status == 'Partial':
-                        partial_count += 1
-                    else:
-                        missing_count += 1
-
-                    f.write("-" * 80 + "\n")
-                    f.write(f"Session: {date} - {obj} - {filt or 'No Filter'}\n")
-                    f.write(f"Status: {status}\n")
-                    f.write(f"Light Frames: {frame_count} | Exposure: {avg_exp:.1f}s | Temp: {avg_temp:.1f}°C | Binning: {xbin}x{ybin}\n\n")
-
-                    f.write(f"  Darks ({avg_exp:.1f}s): {darks_info['count']} frames")
-                    if darks_info['master_count'] > 0:
-                        f.write(f" + {darks_info['master_count']} master(s)")
-                    f.write(f" (Quality: {darks_info['quality']:.0f}%)\n")
-
-                    f.write(f"  Bias: {bias_info['count']} frames")
-                    if bias_info['master_count'] > 0:
-                        f.write(f" + {bias_info['master_count']} master(s)")
-                    f.write(f" (Quality: {bias_info['quality']:.0f}%)\n")
-
-                    f.write(f"  Flats ({filt or 'No Filter'}): {flats_info['count']} frames")
-                    if flats_info['master_count'] > 0:
-                        f.write(f" + {flats_info['master_count']} master(s)")
-                    f.write(f" (Quality: {flats_info['quality']:.0f}%)\n")
-
-                    # Add recommendations if needed
-                    session_dict = {
-                        'avg_exposure': avg_exp,
-                        'avg_temp': avg_temp,
-                        'xbinning': xbin,
-                        'ybinning': ybin,
-                        'filter': filt,
-                        'darks': darks_info,
-                        'bias': bias_info,
-                        'flats': flats_info
-                    }
-                    recommendations = self.generate_recommendations(session_dict)
-                    if recommendations and not recommendations.startswith('✓ All'):
-                        f.write(f"\n  Recommendations:\n")
-                        for line in recommendations.split('\n'):
-                            if line.strip():
-                                f.write(f"    {line}\n")
-
-                    f.write("\n")
-
-                # Summary
-                f.write("=" * 80 + "\n")
-                f.write("SUMMARY\n")
-                f.write("=" * 80 + "\n")
-                f.write(f"Total Sessions: {len(sessions)}\n")
-                f.write(f"Complete: {complete_count}\n")
-                f.write(f"Partial: {partial_count}\n")
-                f.write(f"Missing Calibration: {missing_count}\n")
-                if len(sessions) > 0:
-                    completion_rate = (complete_count / len(sessions)) * 100
-                    f.write(f"Completion Rate: {completion_rate:.1f}%\n")
-
-            conn.close()
-
-            QMessageBox.information(
-                self,
-                'Export Complete',
-                f'Session report exported to:\n{filename}'
-            )
-
-        except Exception as e:
-            QMessageBox.critical(self, 'Export Error', f'Failed to export report: {e}')
-
-
-def main():
-    app = QApplication(sys.argv)
-    
-    # Load theme setting
-    settings = QSettings('XISFCatalog', 'CatalogGUI')
-    theme = settings.value('theme', 'dark')
-    
-    # Apply theme
-    if theme == 'dark':
-        apply_dark_theme(app)
-    else:
-        apply_standard_theme(app)
-    
-    window = XISFCatalogGUI()
-    window.show()
-    sys.exit(app.exec())
-
-
-def apply_dark_theme(app):
-    """Apply dark theme to the application"""
-    app.setStyle('Fusion')
-    
-    dark_palette = app.palette()
-    
-    # Define dark theme colors
-    dark_palette.setColor(dark_palette.ColorRole.Window, Qt.GlobalColor.darkGray)
-    dark_palette.setColor(dark_palette.ColorRole.WindowText, Qt.GlobalColor.white)
-    dark_palette.setColor(dark_palette.ColorRole.Base, Qt.GlobalColor.black)
-    dark_palette.setColor(dark_palette.ColorRole.AlternateBase, Qt.GlobalColor.darkGray)
-    dark_palette.setColor(dark_palette.ColorRole.ToolTipBase, Qt.GlobalColor.white)
-    dark_palette.setColor(dark_palette.ColorRole.ToolTipText, Qt.GlobalColor.white)
-    dark_palette.setColor(dark_palette.ColorRole.Text, Qt.GlobalColor.white)
-    dark_palette.setColor(dark_palette.ColorRole.Button, Qt.GlobalColor.darkGray)
-    dark_palette.setColor(dark_palette.ColorRole.ButtonText, Qt.GlobalColor.white)
-    dark_palette.setColor(dark_palette.ColorRole.BrightText, Qt.GlobalColor.red)
-    dark_palette.setColor(dark_palette.ColorRole.Link, Qt.GlobalColor.blue)
-    dark_palette.setColor(dark_palette.ColorRole.Highlight, Qt.GlobalColor.blue)
-    dark_palette.setColor(dark_palette.ColorRole.HighlightedText, Qt.GlobalColor.black)
-    
-    app.setPalette(dark_palette)
-    
-    # Additional stylesheet for better appearance
-    app.setStyleSheet("""
-        QToolTip {
-            color: #ffffff;
-            background-color: #2a2a2a;
-            border: 1px solid white;
-        }
-        QPushButton {
-            background-color: #404040;
-            border: 1px solid #555555;
-            padding: 5px;
-            border-radius: 3px;
-        }
-        QPushButton:hover {
-            background-color: #505050;
-        }
-        QPushButton:pressed {
-            background-color: #303030;
-        }
-        QTreeWidget, QTableWidget {
-            background-color: #2a2a2a;
-            alternate-background-color: #353535;
-        }
-        QHeaderView::section {
-            background-color: #404040;
-            padding: 4px;
-            border: 1px solid #555555;
-            font-weight: bold;
-        }
-        QProgressBar {
-            border: 1px solid #555555;
-            border-radius: 3px;
-            text-align: center;
-        }
-        QProgressBar::chunk {
-            background-color: #3a7bd5;
-        }
-        QTextEdit {
-            background-color: #2a2a2a;
-            border: 1px solid #555555;
-        }
-        QGroupBox {
-            border: 1px solid #555555;
-            margin-top: 0.5em;
-            padding-top: 0.5em;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            left: 10px;
-            padding: 0 3px 0 3px;
-        }
-    """)
-
-
-def apply_standard_theme(app):
-    """Apply standard theme to the application"""
-    # Use the system default style
-    app.setStyle('Fusion')
-    
-    # Use system default palette - no custom colors
-    app.setPalette(app.style().standardPalette())
-    
-    # Minimal stylesheet for consistency
-    app.setStyleSheet("""
-        QPushButton {
-            padding: 5px;
-        }
-        QProgressBar {
-            border: 1px solid #cccccc;
-            border-radius: 3px;
-            text-align: center;
-        }
-        QProgressBar::chunk {
-            background-color: #0078d4;
-        }
-        QGroupBox {
-            font-weight: bold;
-            border: 1px solid #cccccc;
-            margin-top: 0.5em;
-            padding-top: 0.5em;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            left: 10px;
-            padding: 0 3px 0 3px;
-        }
-    """)
-
-
-if __name__ == '__main__':
-    main()
-
-    def create_settings_tab(self):
-        """Create the settings tab"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        # Image Repository Location
-        repo_group = QGroupBox("Image Repository")
-        repo_layout = QVBoxLayout()
-        
-        repo_info = QLabel("Set the location for your organized XISF files:")
-        repo_layout.addWidget(repo_info)
-        
-        repo_path_layout = QHBoxLayout()
-        repo_path_label = QLabel("Repository Path:")
-        repo_path_label.setMinimumWidth(120)
-        self.repo_path_input = QLineEdit()
-        self.repo_path_input.setReadOnly(True)
-        current_repo = self.settings.value('repository_path', '')
-        self.repo_path_input.setText(current_repo)
-        
-        browse_repo_btn = QPushButton('Browse...')
-        browse_repo_btn.clicked.connect(self.browse_repository)
-        
-        repo_path_layout.addWidget(repo_path_label)
-        repo_path_layout.addWidget(self.repo_path_input)
-        repo_path_layout.addWidget(browse_repo_btn)
-        repo_layout.addLayout(repo_path_layout)
-        
-        repo_group.setLayout(repo_layout)
-        layout.addWidget(repo_group)
-        
-        # Theme settings group
-        theme_group = QGroupBox("Theme")
-        theme_layout = QVBoxLayout()
-        
-        # Radio buttons for theme selection
-        self.theme_button_group = QButtonGroup()
-        self.standard_theme_radio = QRadioButton("Standard Theme")
-        self.dark_theme_radio = QRadioButton("Dark Theme")
-        
-        self.theme_button_group.addButton(self.standard_theme_radio, 0)
-        self.theme_button_group.addButton(self.dark_theme_radio, 1)
-        
-        theme_layout.addWidget(self.standard_theme_radio)
-        theme_layout.addWidget(self.dark_theme_radio)
-        
-        # Set current theme
-        current_theme = self.settings.value('theme', 'dark')
-        if current_theme == 'standard':
-            self.standard_theme_radio.setChecked(True)
-        else:
-            self.dark_theme_radio.setChecked(True)
-        
-        theme_group.setLayout(theme_layout)
-        layout.addWidget(theme_group)
-        
-        # OK button
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        ok_button = QPushButton('Apply Theme')
-        ok_button.clicked.connect(self.apply_theme_setting)
-        button_layout.addWidget(ok_button)
-        layout.addLayout(button_layout)
-        
-        # Add stretch to push everything to the top
-        layout.addStretch()
-        
-        return widget
-    
-    def browse_repository(self):
-        """Browse for repository location"""
-        current_path = self.repo_path_input.text()
-        directory = QFileDialog.getExistingDirectory(
-            self, 'Select Image Repository Location', 
-            current_path if current_path else ''
-        )
-        
-        if directory:
-            # Standardize on forward slashes for consistency
-            directory = directory.replace('\\', '/')
-            self.repo_path_input.setText(directory)
-            self.settings.setValue('repository_path', directory)
-            QMessageBox.information(
-                self, 'Repository Path Updated',
-                f'Image repository location set to:\n{directory}'
-            )
-    
-    def apply_theme_setting(self):
-        """Apply the selected theme"""
-        if self.standard_theme_radio.isChecked():
-            theme = 'standard'
-        else:
-            theme = 'dark'
-        
-        # Save theme preference
-        self.settings.setValue('theme', theme)
-        
-        # Show message that restart is needed
-        QMessageBox.information(
-            self,
-            'Theme Changed',
-            'Theme has been changed. Please restart the application for the changes to take effect.'
-        )
-    
-    def connect_signals(self):
-        """Connect signals after all widgets are created"""
-        # Connect column resize signals to save settings
-        self.catalog_tree.header().sectionResized.connect(self.save_settings)
-        self.recent_objects_table.horizontalHeader().sectionResized.connect(self.save_settings)
-        self.top_exposure_table.horizontalHeader().sectionResized.connect(self.save_settings)
-        self.top_months_table.horizontalHeader().sectionResized.connect(self.save_settings)
-    
-    def refresh_statistics(self):
-        """Refresh the statistics tables"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            # Get 10 most recent objects with their telescope and instrument
-            cursor.execute('''
-                SELECT 
-                    f1.object,
-                    f1.date_loc,
-                    f1.telescop,
-                    f1.instrume
-                FROM xisf_files f1
-                INNER JOIN (
-                    SELECT object, MAX(date_loc) as max_date
-                    FROM xisf_files
-                    WHERE object IS NOT NULL AND date_loc IS NOT NULL
-                    GROUP BY object
-                ) f2 ON f1.object = f2.object AND f1.date_loc = f2.max_date
-                WHERE f1.object IS NOT NULL AND f1.date_loc IS NOT NULL
-                GROUP BY f1.object
-                ORDER BY f1.date_loc DESC
-                LIMIT 10
-            ''')
-            
-            recent_objects = cursor.fetchall()
-            
-            # Update recent objects table
-            self.recent_objects_table.setRowCount(len(recent_objects))
-            for i, (obj, date, telescop, instrume) in enumerate(recent_objects):
-                self.recent_objects_table.setItem(i, 0, QTableWidgetItem(obj or 'Unknown'))
-                self.recent_objects_table.setItem(i, 1, QTableWidgetItem(date or 'N/A'))
-                self.recent_objects_table.setItem(i, 2, QTableWidgetItem(telescop or 'N/A'))
-                self.recent_objects_table.setItem(i, 3, QTableWidgetItem(instrume or 'N/A'))
-            
-            self.recent_objects_table.resizeColumnsToContents()
-            
-            # Get top 10 objects by total exposure (Light Frames only)
-            cursor.execute('''
-                SELECT 
-                    f1.object,
-                    SUM(f1.exposure) as total_exposure,
-                    (SELECT telescop FROM xisf_files WHERE object = f1.object LIMIT 1) as telescop,
-                    (SELECT instrume FROM xisf_files WHERE object = f1.object LIMIT 1) as instrume
-                FROM xisf_files f1
-                WHERE f1.object IS NOT NULL 
-                    AND f1.exposure IS NOT NULL 
-                    AND (f1.imagetyp = 'Light Frame' OR f1.imagetyp LIKE '%Light%')
-                GROUP BY f1.object
-                ORDER BY total_exposure DESC
-                LIMIT 10
-            ''')
-            
-            top_exposure_objects = cursor.fetchall()
-            
-            # Update top exposure table
-            self.top_exposure_table.setRowCount(len(top_exposure_objects))
-            for i, (obj, total_exp, telescop, instrume) in enumerate(top_exposure_objects):
-                self.top_exposure_table.setItem(i, 0, QTableWidgetItem(obj or 'Unknown'))
-                self.top_exposure_table.setItem(i, 1, QTableWidgetItem(f'{total_exp/3600:.2f}' if total_exp else '0.00'))
-                self.top_exposure_table.setItem(i, 2, QTableWidgetItem(telescop or 'N/A'))
-                self.top_exposure_table.setItem(i, 3, QTableWidgetItem(instrume or 'N/A'))
-            
-            self.top_exposure_table.resizeColumnsToContents()
-            
-            # Get top 10 months by total exposure (Light Frames only)
-            cursor.execute('''
-                SELECT 
-                    strftime('%Y-%m', date_loc) as month,
-                    SUM(exposure) as total_exposure,
-                    COUNT(DISTINCT date_loc) as session_count
-                FROM xisf_files
-                WHERE date_loc IS NOT NULL 
-                    AND exposure IS NOT NULL
-                    AND (imagetyp = 'Light Frame' OR imagetyp LIKE '%Light%')
-                GROUP BY month
-                ORDER BY total_exposure DESC
-                LIMIT 10
-            ''')
-            
-            top_months = cursor.fetchall()
-            
-            # Update top months table
-            self.top_months_table.setRowCount(len(top_months))
-            for i, (month, total_exp, sessions) in enumerate(top_months):
-                # Format month as "Month Year" (e.g., "October 2024")
-                if month:
-                    year, month_num = month.split('-')
-                    month_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
-                                   'July', 'August', 'September', 'October', 'November', 'December']
-                    formatted_month = f"{month_names[int(month_num)]} {year}"
-                else:
-                    formatted_month = 'Unknown'
-                
-                self.top_months_table.setItem(i, 0, QTableWidgetItem(formatted_month))
-                self.top_months_table.setItem(i, 1, QTableWidgetItem(f'{total_exp/3600:.2f}' if total_exp else '0.00'))
-                self.top_months_table.setItem(i, 2, QTableWidgetItem(str(sessions)))
-            
-            self.top_months_table.resizeColumnsToContents()
-            
-            conn.close()
-            
-        except Exception as e:
-            QMessageBox.critical(self, 'Error', f'Failed to refresh statistics: {e}')
-    
-    def save_settings(self):
-        """Save window size and column widths"""
-        # Save window geometry
-        self.settings.setValue('geometry', self.saveGeometry())
-        
-        # Save catalog tree column widths
-        for i in range(self.catalog_tree.columnCount()):
-            self.settings.setValue(f'catalog_tree_col_{i}', self.catalog_tree.columnWidth(i))
-        
-        # Save recent objects table column widths (all except last which is stretched)
-        for i in range(self.recent_objects_table.columnCount() - 1):
-            width = self.recent_objects_table.columnWidth(i)
-            self.settings.setValue(f'recent_table_col_{i}', width)
-        
-        # Save top exposure table column widths (all except last which is stretched)
-        for i in range(self.top_exposure_table.columnCount() - 1):
-            width = self.top_exposure_table.columnWidth(i)
-            self.settings.setValue(f'exposure_table_col_{i}', width)
-        
-        # Save top months table column widths (all except last which is stretched)
-        for i in range(self.top_months_table.columnCount() - 1):
-            width = self.top_months_table.columnWidth(i)
-            self.settings.setValue(f'months_table_col_{i}', width)
-    
-    def restore_settings(self):
-        """Restore window size and column widths"""
-        # Restore window geometry
-        geometry = self.settings.value('geometry')
-        if geometry:
-            self.restoreGeometry(geometry)
-        
-        # Restore catalog tree column widths
-        for i in range(self.catalog_tree.columnCount()):
-            width = self.settings.value(f'catalog_tree_col_{i}')
-            if width is not None:
-                self.catalog_tree.setColumnWidth(i, int(width))
-        
-        # Restore recent objects table column widths (all except last which is stretched)
-        for i in range(self.recent_objects_table.columnCount() - 1):
-            width = self.settings.value(f'recent_table_col_{i}')
-            if width is not None:
-                self.recent_objects_table.setColumnWidth(i, int(width))
-        
-        # Restore top exposure table column widths (all except last which is stretched)
-        for i in range(self.top_exposure_table.columnCount() - 1):
-            width = self.settings.value(f'exposure_table_col_{i}')
-            if width is not None:
-                self.top_exposure_table.setColumnWidth(i, int(width))
-        
-        # Restore top months table column widths (all except last which is stretched)
-        for i in range(self.top_months_table.columnCount() - 1):
-            width = self.settings.value(f'months_table_col_{i}')
-            if width is not None:
-                self.top_months_table.setColumnWidth(i, int(width))
-        
-        # Connect signals after restoring settings to avoid triggering saves during restore
-        self.connect_signals()
-    
-    def closeEvent(self, event):
-        """Save settings when closing"""
-        self.save_settings()
-        event.accept()
-    
-    def create_view_tab(self):
-        """Create the view tab"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        # Refresh button
-        refresh_btn = QPushButton('Refresh')
-        refresh_btn.clicked.connect(self.refresh_catalog_view)
-        layout.addWidget(refresh_btn)
-        
-        # Tree widget
-        self.catalog_tree = QTreeWidget()
-        self.catalog_tree.setColumnCount(4)
-        self.catalog_tree.setHeaderLabels([
-            'Name', 'Image Type', 'Telescope', 'Instrument'
-        ])
-        self.catalog_tree.setColumnWidth(0, 300)
-        layout.addWidget(self.catalog_tree)
-        
-        return widget
-    
-    def import_files(self):
-        """Import individual XISF files"""
-        files, _ = QFileDialog.getOpenFileNames(
-            self, 'Select XISF Files', '', 'XISF Files (*.xisf)'
-        )
-        
-        if files:
-            self.start_import(files)
-    
-    def import_folder(self):
-        """Import all XISF files from a folder and its subfolders"""
-        folder = QFileDialog.getExistingDirectory(self, 'Select Folder')
-        
-        if folder:
-            # Recursively find all .xisf files in folder and subfolders
-            files = list(Path(folder).rglob('*.xisf'))
-            if files:
-                self.start_import([str(f) for f in files])
-            else:
-                QMessageBox.warning(self, 'No Files', 'No XISF files found in selected folder or its subfolders.')
-    
-    def start_import(self, files):
-        """Start the import worker thread"""
-        if not os.path.exists(self.db_path):
-            QMessageBox.critical(
-                self, 'Database Error',
-                f'Database not found: {self.db_path}\nPlease create it first.'
-            )
-            return
-        
-        self.log_text.clear()
-        self.log_text.append(f"Starting import of {len(files)} files...\n")
-        
-        # Disable buttons
-        self.import_files_btn.setEnabled(False)
-        self.import_folder_btn.setEnabled(False)
-        self.clear_db_btn.setEnabled(False)
-        
-        # Show progress bar
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setMaximum(len(files))
-        self.progress_bar.setValue(0)
-        
-        # Create and start worker
-        self.worker = ImportWorker(files, self.db_path)
-        self.worker.progress.connect(self.on_import_progress)
-        self.worker.finished.connect(self.on_import_finished)
-        self.worker.start()
-    
-    def on_import_progress(self, current, total, message):
-        """Handle progress updates"""
-        self.progress_bar.setValue(current)
-        self.status_label.setText(f"Processing {current}/{total}")
-        self.log_text.append(message)
-    
-    def on_import_finished(self, processed, errors):
-        """Handle import completion"""
-        self.progress_bar.setVisible(False)
-        self.status_label.setText('')
-        
-        self.log_text.append(f"\n{'='*60}")
-        self.log_text.append(f"Import complete!")
-        self.log_text.append(f"Successfully processed: {processed}")
-        self.log_text.append(f"Errors: {errors}")
-        
-        # Re-enable buttons
-        self.import_files_btn.setEnabled(True)
-        self.import_folder_btn.setEnabled(True)
-        self.clear_db_btn.setEnabled(True)
-        
-        QMessageBox.information(
-            self, 'Import Complete',
-            f'Successfully processed: {processed}\nErrors: {errors}'
-        )
-    
-    def clear_database(self):
-        """Clear all records from the database"""
-        reply = QMessageBox.question(
-            self, 'Confirm Clear',
-            'Are you sure you want to delete all records from the database?',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
-                cursor.execute('DELETE FROM xisf_files')
-                conn.commit()
-                conn.close()
-                
-                self.log_text.append('\nDatabase cleared successfully!')
-                QMessageBox.information(self, 'Success', 'Database cleared successfully!')
-            except Exception as e:
-                QMessageBox.critical(self, 'Error', f'Failed to clear database: {e}')
-    
-    def refresh_catalog_view(self):
-        """Refresh the catalog view tree"""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            self.catalog_tree.clear()
-            
-            # Get all objects
-            cursor.execute('''
-                SELECT 
-                    object,
-                    COUNT(*) as file_count,
-                    SUM(exposure) as total_exposure
-                FROM xisf_files
-                WHERE object IS NOT NULL
-                GROUP BY object
-                ORDER BY object
-            ''')
-            
-            objects = cursor.fetchall()
-            
-            for obj_name, obj_file_count, obj_total_exp in objects:
-                # Create object node
-                obj_item = QTreeWidgetItem(self.catalog_tree)
-                obj_item.setText(0, obj_name or 'Unknown')
-                obj_item.setFlags(obj_item.flags() | Qt.ItemFlag.ItemIsAutoTristate)
-                
-                # Get all filters for this object
+            dark_groups = cursor.fetchall()
+
+            for exp, temp, xbin, ybin, count in dark_groups:
+                # Create dark group node (e.g., "300s_-10C_Bin1x1")
+                exp_str = f"{int(exp)}s" if exp else "0s"
+                temp_str = f"{int(temp)}C" if temp is not None else "0C"
+                binning = f"Bin{int(xbin)}x{int(ybin)}" if xbin and ybin else "Bin1x1"
+                group_name = f"{exp_str}_{temp_str}_{binning}"
+
+                dark_group_item = QTreeWidgetItem(dark_root)
+                dark_group_item.setText(0, group_name)
+
+                # Get dates for this dark group
                 cursor.execute('''
-                    SELECT 
-                        filter,
-                        COUNT(*) as file_count,
-                        SUM(exposure) as total_exposure
+                    SELECT DISTINCT date_loc
                     FROM xisf_files
-                    WHERE object = ?
-                    GROUP BY filter
-                    ORDER BY filter
-                ''', (obj_name,))
-                
-                filters = cursor.fetchall()
-                
-                for filter_name, filter_file_count, filter_total_exp in filters:
-                    # Create filter node
-                    filter_item = QTreeWidgetItem(obj_item)
-                    filter_item.setText(0, filter_name or 'No Filter')
-                    
-                    # Get all dates for this object and filter
+                    WHERE imagetyp LIKE '%Dark%'
+                        AND object IS NULL
+                        AND (exposure = ? OR (exposure IS NULL AND ? IS NULL))
+                        AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                        AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
+                        AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
+                    ORDER BY date_loc DESC
+                ''', (exp, exp, temp, temp, xbin, xbin, ybin, ybin))
+
+                dark_dates = cursor.fetchall()
+
+                for (date_val,) in dark_dates:
+                    date_item = QTreeWidgetItem(dark_group_item)
+                    date_item.setText(0, date_val or 'No Date')
+
+                    # Get files for this dark group and date
                     cursor.execute('''
-                        SELECT 
-                            date_loc,
-                            COUNT(*) as file_count,
-                            SUM(exposure) as total_exposure
+                        SELECT filename, imagetyp, exposure, telescop, instrume
                         FROM xisf_files
-                        WHERE object = ? AND (filter = ? OR (filter IS NULL AND ? IS NULL))
-                        GROUP BY date_loc
-                        ORDER BY date_loc DESC
-                    ''', (obj_name, filter_name, filter_name))
-                    
-                    dates = cursor.fetchall()
-                    
-                    for date_val, date_file_count, date_total_exp in dates:
-                        # Create date node
-                        date_item = QTreeWidgetItem(filter_item)
-                        date_item.setText(0, date_val or 'No Date')
-                        
-                        # Get all files for this object, filter, and date
-                        cursor.execute('''
-                            SELECT 
-                                filename,
-                                imagetyp,
-                                exposure,
-                                telescop,
-                                instrume,
-                                date_loc
-                            FROM xisf_files
-                            WHERE object = ? 
-                                AND (filter = ? OR (filter IS NULL AND ? IS NULL))
-                                AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
-                            ORDER BY filename
-                        ''', (obj_name, filter_name, filter_name, date_val, date_val))
-                        
-                        files = cursor.fetchall()
-                        
-                        for filename, imagetyp, exposure, telescop, instrume, date_loc in files:
-                            # Create file node
-                            file_item = QTreeWidgetItem(date_item)
-                            file_item.setText(0, filename)
-                            file_item.setText(1, imagetyp or 'N/A')
-                            file_item.setText(2, telescop or 'N/A')
-                            file_item.setText(3, instrume or 'N/A')
-            
+                        WHERE imagetyp LIKE '%Dark%'
+                            AND object IS NULL
+                            AND (exposure = ? OR (exposure IS NULL AND ? IS NULL))
+                            AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                            AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
+                            AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
+                            AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
+                        ORDER BY filename
+                    ''', (exp, exp, temp, temp, xbin, xbin, ybin, ybin, date_val, date_val))
+
+                    dark_files = cursor.fetchall()
+
+                    for filename, imagetyp, exposure, telescop, instrume in dark_files:
+                        file_item = QTreeWidgetItem(date_item)
+                        file_item.setText(0, filename)
+                        file_item.setText(1, imagetyp or 'N/A')
+                        file_item.setText(2, telescop or 'N/A')
+                        file_item.setText(3, instrume or 'N/A')
+
+            # ----- FLAT FRAMES: date → filter_temp_binning → files -----
+            flat_root = QTreeWidgetItem(calib_root)
+            flat_root.setText(0, "Flat Frames")
+            flat_root.setFlags(flat_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+
+            cursor.execute('''
+                SELECT DISTINCT date_loc
+                FROM xisf_files
+                WHERE imagetyp LIKE '%Flat%' AND object IS NULL
+                ORDER BY date_loc DESC
+            ''')
+
+            flat_dates = cursor.fetchall()
+
+            for (date_val,) in flat_dates:
+                date_item = QTreeWidgetItem(flat_root)
+                date_item.setText(0, date_val or 'No Date')
+
+                # Get filter/temp/binning groups for this date
+                cursor.execute('''
+                    SELECT
+                        filter,
+                        ROUND(ccd_temp) as ccd_temp,
+                        xbinning,
+                        ybinning,
+                        COUNT(*) as file_count
+                    FROM xisf_files
+                    WHERE imagetyp LIKE '%Flat%'
+                        AND object IS NULL
+                        AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
+                    GROUP BY filter, ROUND(ccd_temp), xbinning, ybinning
+                    ORDER BY filter, ROUND(ccd_temp), xbinning, ybinning
+                ''', (date_val, date_val))
+
+                flat_groups = cursor.fetchall()
+
+                for filt, temp, xbin, ybin, count in flat_groups:
+                    # Create flat group node (e.g., "Ha_-10C_Bin1x1")
+                    filt_str = filt or "NoFilter"
+                    temp_str = f"{int(temp)}C" if temp is not None else "0C"
+                    binning = f"Bin{int(xbin)}x{int(ybin)}" if xbin and ybin else "Bin1x1"
+                    group_name = f"{filt_str}_{temp_str}_{binning}"
+
+                    flat_group_item = QTreeWidgetItem(date_item)
+                    flat_group_item.setText(0, group_name)
+
+                    # Get files for this flat group
+                    cursor.execute('''
+                        SELECT filename, imagetyp, exposure, telescop, instrume
+                        FROM xisf_files
+                        WHERE imagetyp LIKE '%Flat%'
+                            AND object IS NULL
+                            AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
+                            AND (filter = ? OR (filter IS NULL AND ? IS NULL))
+                            AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                            AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
+                            AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
+                        ORDER BY filename
+                    ''', (date_val, date_val, filt, filt, temp, temp, xbin, xbin, ybin, ybin))
+
+                    flat_files = cursor.fetchall()
+
+                    for filename, imagetyp, exposure, telescop, instrume in flat_files:
+                        file_item = QTreeWidgetItem(flat_group_item)
+                        file_item.setText(0, filename)
+                        file_item.setText(1, imagetyp or 'N/A')
+                        file_item.setText(2, telescop or 'N/A')
+                        file_item.setText(3, instrume or 'N/A')
+
+            # ----- BIAS FRAMES: temp_binning → date → files -----
+            bias_root = QTreeWidgetItem(calib_root)
+            bias_root.setText(0, "Bias Frames")
+            bias_root.setFlags(bias_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+
+            cursor.execute('''
+                SELECT
+                    ROUND(ccd_temp) as ccd_temp,
+                    xbinning,
+                    ybinning,
+                    COUNT(*) as file_count
+                FROM xisf_files
+                WHERE imagetyp LIKE '%Bias%' AND object IS NULL
+                GROUP BY ROUND(ccd_temp), xbinning, ybinning
+                ORDER BY ROUND(ccd_temp), xbinning, ybinning
+            ''')
+
+            bias_groups = cursor.fetchall()
+
+            for temp, xbin, ybin, count in bias_groups:
+                # Create bias group node (e.g., "-10C_Bin1x1")
+                temp_str = f"{int(temp)}C" if temp is not None else "0C"
+                binning = f"Bin{int(xbin)}x{int(ybin)}" if xbin and ybin else "Bin1x1"
+                group_name = f"{temp_str}_{binning}"
+
+                bias_group_item = QTreeWidgetItem(bias_root)
+                bias_group_item.setText(0, group_name)
+
+                # Get dates for this bias group
+                cursor.execute('''
+                    SELECT DISTINCT date_loc
+                    FROM xisf_files
+                    WHERE imagetyp LIKE '%Bias%'
+                        AND object IS NULL
+                        AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                        AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
+                        AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
+                    ORDER BY date_loc DESC
+                ''', (temp, temp, xbin, xbin, ybin, ybin))
+
+                bias_dates = cursor.fetchall()
+
+                for (date_val,) in bias_dates:
+                    date_item = QTreeWidgetItem(bias_group_item)
+                    date_item.setText(0, date_val or 'No Date')
+
+                    # Get files for this bias group and date
+                    cursor.execute('''
+                        SELECT filename, imagetyp, exposure, telescop, instrume
+                        FROM xisf_files
+                        WHERE imagetyp LIKE '%Bias%'
+                            AND object IS NULL
+                            AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                            AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
+                            AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
+                            AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
+                        ORDER BY filename
+                    ''', (temp, temp, xbin, xbin, ybin, ybin, date_val, date_val))
+
+                    bias_files = cursor.fetchall()
+
+                    for filename, imagetyp, exposure, telescop, instrume in bias_files:
+                        file_item = QTreeWidgetItem(date_item)
+                        file_item.setText(0, filename)
+                        file_item.setText(1, imagetyp or 'N/A')
+                        file_item.setText(2, telescop or 'N/A')
+                        file_item.setText(3, instrume or 'N/A')
+
             conn.close()
-            
+
             # Don't expand any items by default - keep everything collapsed
-            
+
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to refresh view: {e}')
     
