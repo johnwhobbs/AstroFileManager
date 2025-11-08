@@ -2132,10 +2132,6 @@ class XISFCatalogGUI(QMainWindow):
             # Update statistics panel
             self.update_session_statistics(total_count, complete_count, partial_count, missing_count)
 
-            # Resize columns
-            for i in range(6):
-                self.sessions_tree.resizeColumnToContents(i)
-
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to refresh sessions: {e}')
 
