@@ -17,8 +17,9 @@ from PyQt6.QtWidgets import (
     QPushButton, QFileDialog, QMessageBox, QTabWidget, QTableWidget,
     QTableWidgetItem, QLabel, QProgressBar, QTextEdit, QTreeWidget,
     QTreeWidgetItem, QRadioButton, QButtonGroup, QGroupBox, QComboBox,
-    QLineEdit
+    QLineEdit, QMenu
 )
+from PyQt6.QtGui import QColor, QBrush
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 import xisf
 
@@ -1608,6 +1609,22 @@ class XISFCatalogGUI(QMainWindow):
         self.catalog_search_box.textChanged.connect(self.filter_catalog_tree)
         filter_layout.addWidget(self.catalog_search_box)
 
+        filter_layout.addWidget(QLabel("Image Type:"))
+        self.catalog_imagetype_filter = QComboBox()
+        self.catalog_imagetype_filter.addItems(['All', 'Light', 'Dark', 'Flat', 'Bias', 'Master'])
+        self.catalog_imagetype_filter.currentTextChanged.connect(self.refresh_catalog_view)
+        filter_layout.addWidget(self.catalog_imagetype_filter)
+
+        filter_layout.addWidget(QLabel("Object:"))
+        self.catalog_object_filter = QComboBox()
+        self.catalog_object_filter.addItem('All')
+        self.catalog_object_filter.currentTextChanged.connect(self.refresh_catalog_view)
+        filter_layout.addWidget(self.catalog_object_filter)
+
+        export_btn = QPushButton('Export to CSV')
+        export_btn.clicked.connect(self.export_catalog_to_csv)
+        filter_layout.addWidget(export_btn)
+
         refresh_btn = QPushButton('Refresh')
         refresh_btn.clicked.connect(self.refresh_catalog_view)
         filter_layout.addWidget(refresh_btn)
@@ -1630,6 +1647,11 @@ class XISFCatalogGUI(QMainWindow):
         self.catalog_tree.setColumnWidth(6, 100)
         self.catalog_tree.setColumnWidth(7, 120)
         self.catalog_tree.setColumnWidth(8, 120)
+
+        # Enable context menu
+        self.catalog_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.catalog_tree.customContextMenuRequested.connect(self.show_catalog_context_menu)
+
         layout.addWidget(self.catalog_tree)
 
         return widget
@@ -1682,7 +1704,272 @@ class XISFCatalogGUI(QMainWindow):
         root = self.catalog_tree.invisibleRootItem()
         for i in range(root.childCount()):
             filter_item(root.child(i))
-    
+
+    def show_catalog_context_menu(self, position):
+        """Show context menu for catalog tree items"""
+        item = self.catalog_tree.itemAt(position)
+        if not item:
+            return
+
+        menu = QMenu()
+
+        # Only show file operations if this is a file item (has no children and is not a group node)
+        is_file = item.childCount() == 0 and '(' not in item.text(0)
+
+        if is_file:
+            show_path_action = menu.addAction("Show Full Path")
+            copy_path_action = menu.addAction("Copy Path to Clipboard")
+            open_location_action = menu.addAction("Open File Location")
+            menu.addSeparator()
+            show_details_action = menu.addAction("Show File Details")
+            menu.addSeparator()
+            delete_action = menu.addAction("Delete from Database")
+            reimport_action = menu.addAction("Re-import File")
+
+            action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
+
+            if action == show_path_action:
+                self.show_file_path(item)
+            elif action == copy_path_action:
+                self.copy_file_path_to_clipboard(item)
+            elif action == open_location_action:
+                self.open_file_location(item)
+            elif action == show_details_action:
+                self.show_file_details(item)
+            elif action == delete_action:
+                self.delete_file_from_database(item)
+            elif action == reimport_action:
+                self.reimport_file(item)
+        else:
+            # For group nodes, offer export
+            export_action = menu.addAction("Export This Group to CSV")
+            action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
+
+            if action == export_action:
+                self.export_tree_group_to_csv(item)
+
+    def show_file_path(self, item):
+        """Show the full file path in a message box"""
+        filename = item.text(0)
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT filepath FROM xisf_files WHERE filename = ?', (filename,))
+            result = cursor.fetchone()
+            conn.close()
+
+            if result:
+                QMessageBox.information(self, 'File Path', f'Full path:\n{result[0]}')
+            else:
+                QMessageBox.warning(self, 'Not Found', f'File not found in database: {filename}')
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to retrieve file path: {e}')
+
+    def copy_file_path_to_clipboard(self, item):
+        """Copy file path to clipboard"""
+        filename = item.text(0)
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT filepath FROM xisf_files WHERE filename = ?', (filename,))
+            result = cursor.fetchone()
+            conn.close()
+
+            if result:
+                from PyQt6.QtWidgets import QApplication
+                clipboard = QApplication.clipboard()
+                clipboard.setText(result[0])
+                self.status_label.setText(f'Path copied to clipboard: {filename}')
+            else:
+                QMessageBox.warning(self, 'Not Found', f'File not found in database: {filename}')
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to copy path: {e}')
+
+    def open_file_location(self, item):
+        """Open the file location in file manager"""
+        filename = item.text(0)
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT filepath FROM xisf_files WHERE filename = ?', (filename,))
+            result = cursor.fetchone()
+            conn.close()
+
+            if result:
+                import subprocess
+                import platform
+                filepath = result[0]
+                directory = os.path.dirname(filepath)
+
+                if platform.system() == 'Windows':
+                    subprocess.run(['explorer', '/select,', filepath])
+                elif platform.system() == 'Darwin':  # macOS
+                    subprocess.run(['open', '-R', filepath])
+                else:  # Linux
+                    subprocess.run(['xdg-open', directory])
+            else:
+                QMessageBox.warning(self, 'Not Found', f'File not found in database: {filename}')
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to open file location: {e}')
+
+    def show_file_details(self, item):
+        """Show detailed file information in a dialog"""
+        filename = item.text(0)
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT filepath, telescop, instrume, object, filter, imagetyp,
+                       exposure, ccd_temp, xbinning, ybinning, date_loc, created_at
+                FROM xisf_files
+                WHERE filename = ?
+            ''', (filename,))
+            result = cursor.fetchone()
+            conn.close()
+
+            if result:
+                details = f"""File: {filename}
+Path: {result[0]}
+
+Telescope: {result[1] or 'N/A'}
+Instrument: {result[2] or 'N/A'}
+Object: {result[3] or 'N/A'}
+Filter: {result[4] or 'N/A'}
+Image Type: {result[5] or 'N/A'}
+Exposure: {result[6]:.1f}s if result[6] else 'N/A'
+Temperature: {result[7]:.1f}°C if result[7] is not None else 'N/A'
+Binning: {int(result[8])}x{int(result[9])} if result[8] and result[9] else 'N/A'
+Date: {result[10] or 'N/A'}
+Imported: {result[11] or 'N/A'}
+"""
+                QMessageBox.information(self, 'File Details', details)
+            else:
+                QMessageBox.warning(self, 'Not Found', f'File not found in database: {filename}')
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to retrieve file details: {e}')
+
+    def delete_file_from_database(self, item):
+        """Delete a file from the database"""
+        filename = item.text(0)
+        reply = QMessageBox.question(
+            self, 'Confirm Delete',
+            f'Are you sure you want to delete "{filename}" from the database?\n\nNote: This will not delete the actual file.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM xisf_files WHERE filename = ?', (filename,))
+                conn.commit()
+                conn.close()
+
+                QMessageBox.information(self, 'Success', f'File deleted from database: {filename}')
+                self.refresh_catalog_view()
+            except Exception as e:
+                QMessageBox.critical(self, 'Error', f'Failed to delete file: {e}')
+
+    def reimport_file(self, item):
+        """Re-import a file"""
+        filename = item.text(0)
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT filepath FROM xisf_files WHERE filename = ?', (filename,))
+            result = cursor.fetchone()
+            conn.close()
+
+            if result:
+                filepath = result[0]
+                if os.path.exists(filepath):
+                    self.start_import([filepath])
+                else:
+                    QMessageBox.warning(self, 'File Not Found', f'File does not exist:\n{filepath}')
+            else:
+                QMessageBox.warning(self, 'Not Found', f'File not found in database: {filename}')
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to re-import file: {e}')
+
+    def export_tree_group_to_csv(self, item):
+        """Export a tree group (and its children) to CSV"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self, 'Export Group to CSV', '', 'CSV Files (*.csv)'
+        )
+
+        if not filename:
+            return
+
+        try:
+            import csv
+            with open(filename, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(['Filename', 'Image Type', 'Filter', 'Exposure', 'Temp', 'Binning', 'Date', 'Telescope', 'Instrument'])
+
+                def write_items(tree_item):
+                    # Only write file items (leaf nodes)
+                    if tree_item.childCount() == 0 and '(' not in tree_item.text(0):
+                        row = [tree_item.text(i) for i in range(9)]
+                        writer.writerow(row)
+                    # Recurse to children
+                    for i in range(tree_item.childCount()):
+                        write_items(tree_item.child(i))
+
+                write_items(item)
+
+            QMessageBox.information(self, 'Success', f'Exported group to:\n{filename}')
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to export: {e}')
+
+    def export_catalog_to_csv(self):
+        """Export entire catalog to CSV"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self, 'Export Catalog to CSV', '', 'CSV Files (*.csv)'
+        )
+
+        if not filename:
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT filename, imagetyp, filter, exposure, ccd_temp,
+                       xbinning, ybinning, date_loc, telescop, instrume, filepath, object
+                FROM xisf_files
+                ORDER BY object, filter, date_loc, filename
+            ''')
+            rows = cursor.fetchall()
+            conn.close()
+
+            import csv
+            with open(filename, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(['Filename', 'Image Type', 'Filter', 'Exposure', 'Temp',
+                               'Binning', 'Date', 'Telescope', 'Instrument', 'Filepath', 'Object'])
+
+                for row in rows:
+                    # Format the row
+                    formatted_row = [
+                        row[0],  # filename
+                        row[1] or 'N/A',  # imagetyp
+                        row[2] or 'N/A',  # filter
+                        f"{row[3]:.1f}s" if row[3] else 'N/A',  # exposure
+                        f"{row[4]:.1f}°C" if row[4] is not None else 'N/A',  # temp
+                        f"{int(row[5])}x{int(row[6])}" if row[5] and row[6] else 'N/A',  # binning
+                        row[7] or 'N/A',  # date
+                        row[8] or 'N/A',  # telescope
+                        row[9] or 'N/A',  # instrument
+                        row[10] or 'N/A',  # filepath
+                        row[11] or 'N/A',  # object
+                    ]
+                    writer.writerow(formatted_row)
+
+            QMessageBox.information(self, 'Success', f'Exported {len(rows)} files to:\n{filename}')
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to export: {e}')
+
     def import_files(self):
         """Import individual XISF files"""
         files, _ = QFileDialog.getOpenFileNames(
@@ -1854,6 +2141,29 @@ class XISFCatalogGUI(QMainWindow):
         else:
             self.catalog_date_range_label.setText("N/A")
 
+    def get_item_color(self, imagetyp):
+        """Get color for tree item based on image type"""
+        if not imagetyp:
+            return None
+
+        imagetyp_lower = imagetyp.lower()
+
+        # Master frames - purple/magenta
+        if 'master' in imagetyp_lower:
+            return QColor(200, 150, 255)  # Light purple
+
+        # Regular frames
+        if 'light' in imagetyp_lower:
+            return QColor(200, 255, 200)  # Light green
+        elif 'dark' in imagetyp_lower:
+            return QColor(220, 220, 255)  # Light blue
+        elif 'flat' in imagetyp_lower:
+            return QColor(255, 240, 200)  # Light orange/yellow
+        elif 'bias' in imagetyp_lower:
+            return QColor(255, 220, 220)  # Light red/pink
+
+        return None
+
     def refresh_catalog_view(self):
         """Refresh the catalog view tree"""
         try:
@@ -1863,37 +2173,84 @@ class XISFCatalogGUI(QMainWindow):
             # Update summary statistics
             self.update_catalog_statistics(cursor)
 
+            # Populate object filter dropdown
+            cursor.execute('''
+                SELECT DISTINCT object
+                FROM xisf_files
+                WHERE object IS NOT NULL
+                ORDER BY object
+            ''')
+            objects = [row[0] for row in cursor.fetchall()]
+
+            # Save current selection
+            current_object = self.catalog_object_filter.currentText()
+
+            # Update dropdown
+            self.catalog_object_filter.blockSignals(True)
+            self.catalog_object_filter.clear()
+            self.catalog_object_filter.addItem('All')
+            self.catalog_object_filter.addItems(objects)
+
+            # Restore selection if still available
+            if current_object in ['All'] + objects:
+                self.catalog_object_filter.setCurrentText(current_object)
+
+            self.catalog_object_filter.blockSignals(False)
+
+            # Get filter values
+            imagetype_filter = self.catalog_imagetype_filter.currentText()
+            object_filter = self.catalog_object_filter.currentText()
+
             self.catalog_tree.clear()
 
             # ===== LIGHT FRAMES SECTION =====
-            # Get total light frame counts
-            cursor.execute('''
-                SELECT COUNT(*), SUM(exposure) / 3600.0
-                FROM xisf_files
-                WHERE object IS NOT NULL
-            ''')
-            light_total_count, light_total_exp = cursor.fetchone()
-            light_total_exp = light_total_exp or 0
+            # Skip light frames section if filtering to calibration only
+            if imagetype_filter not in ['Dark', 'Flat', 'Bias', 'Master']:
+                # Build filter conditions
+                where_conditions = ['object IS NOT NULL']
+                params = []
 
-            light_frames_root = QTreeWidgetItem(self.catalog_tree)
-            light_frames_root.setText(0, f"Light Frames ({light_total_count} files, {light_total_exp:.1f}h)")
-            light_frames_root.setFlags(light_frames_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
-            # Make parent nodes bold
-            font = light_frames_root.font(0)
-            font.setBold(True)
-            light_frames_root.setFont(0, font)
+                if object_filter != 'All':
+                    where_conditions.append('object = ?')
+                    params.append(object_filter)
 
-            # Get all objects (light frames only)
-            cursor.execute('''
-                SELECT
-                    object,
-                    COUNT(*) as file_count,
-                    SUM(exposure) as total_exposure
-                FROM xisf_files
-                WHERE object IS NOT NULL
-                GROUP BY object
-                ORDER BY object
-            ''')
+                if imagetype_filter == 'Light':
+                    where_conditions.append('imagetyp LIKE ?')
+                    params.append('%Light%')
+                elif imagetype_filter == 'Master':
+                    where_conditions.append('imagetyp LIKE ?')
+                    params.append('%Master%')
+
+                where_clause = ' AND '.join(where_conditions)
+
+                # Get total light frame counts
+                cursor.execute(f'''
+                    SELECT COUNT(*), SUM(exposure) / 3600.0
+                    FROM xisf_files
+                    WHERE {where_clause}
+                ''', params)
+                light_total_count, light_total_exp = cursor.fetchone()
+                light_total_exp = light_total_exp or 0
+
+                light_frames_root = QTreeWidgetItem(self.catalog_tree)
+                light_frames_root.setText(0, f"Light Frames ({light_total_count} files, {light_total_exp:.1f}h)")
+                light_frames_root.setFlags(light_frames_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+                # Make parent nodes bold
+                font = light_frames_root.font(0)
+                font.setBold(True)
+                light_frames_root.setFont(0, font)
+
+                # Get all objects (light frames only)
+                cursor.execute(f'''
+                    SELECT
+                        object,
+                        COUNT(*) as file_count,
+                        SUM(exposure) as total_exposure
+                    FROM xisf_files
+                    WHERE {where_clause}
+                    GROUP BY object
+                    ORDER BY object
+                ''', params)
 
             objects = cursor.fetchall()
 
@@ -1982,28 +2339,57 @@ class XISFCatalogGUI(QMainWindow):
                             file_item.setText(7, telescop or 'N/A')
                             file_item.setText(8, instrume or 'N/A')
 
+                            # Apply color coding based on image type
+                            color = self.get_item_color(imagetyp)
+                            if color:
+                                for col in range(9):
+                                    file_item.setBackground(col, QBrush(color))
+
             # ===== CALIBRATION FRAMES SECTION =====
-            # Get total calibration counts
-            cursor.execute('''
-                SELECT COUNT(*)
-                FROM xisf_files
-                WHERE object IS NULL
-            ''')
-            calib_total_count = cursor.fetchone()[0]
+            # Skip calibration frames if filtering to Light only
+            if imagetype_filter not in ['Light']:
+                # Get total calibration counts
+                calib_where = []
+                calib_params = []
+                if imagetype_filter in ['Dark', 'Flat', 'Bias', 'Master']:
+                    if imagetype_filter == 'Master':
+                        calib_where.append('imagetyp LIKE ?')
+                        calib_params.append('%Master%')
+                    else:
+                        calib_where.append(f'imagetyp LIKE ?')
+                        calib_params.append(f'%{imagetype_filter}%')
 
-            calib_root = QTreeWidgetItem(self.catalog_tree)
-            calib_root.setText(0, f"Calibration Frames ({calib_total_count} files)")
-            calib_root.setFlags(calib_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
-            font = calib_root.font(0)
-            font.setBold(True)
-            calib_root.setFont(0, font)
+                calib_where_clause = 'object IS NULL'
+                if calib_where:
+                    calib_where_clause += ' AND ' + ' AND '.join(calib_where)
 
-            # ----- DARK FRAMES: exposure_temp_binning → date → files -----
-            cursor.execute('SELECT COUNT(*) FROM xisf_files WHERE imagetyp LIKE "%Dark%" AND object IS NULL')
-            dark_count = cursor.fetchone()[0]
-            dark_root = QTreeWidgetItem(calib_root)
-            dark_root.setText(0, f"Dark Frames ({dark_count} files)")
-            dark_root.setFlags(dark_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+                cursor.execute(f'''
+                    SELECT COUNT(*)
+                    FROM xisf_files
+                    WHERE {calib_where_clause}
+                ''', calib_params)
+                calib_total_count = cursor.fetchone()[0]
+
+                calib_root = QTreeWidgetItem(self.catalog_tree)
+                calib_root.setText(0, f"Calibration Frames ({calib_total_count} files)")
+                calib_root.setFlags(calib_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+                font = calib_root.font(0)
+                font.setBold(True)
+                calib_root.setFont(0, font)
+
+                # ----- DARK FRAMES: exposure_temp_binning → date → files -----
+                if imagetype_filter in ['All', 'Dark', 'Master']:
+                    dark_where = 'imagetyp LIKE "%Dark%" AND object IS NULL'
+                    if imagetype_filter == 'Master':
+                        dark_where = 'imagetyp LIKE "%Master%" AND imagetyp LIKE "%Dark%" AND object IS NULL'
+
+                    cursor.execute(f'SELECT COUNT(*) FROM xisf_files WHERE {dark_where}')
+                    dark_count = cursor.fetchone()[0]
+
+                    if dark_count > 0:
+                        dark_root = QTreeWidgetItem(calib_root)
+                        dark_root.setText(0, f"Dark Frames ({dark_count} files)")
+                        dark_root.setFlags(dark_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
 
             cursor.execute('''
                 SELECT
@@ -2080,6 +2466,12 @@ class XISFCatalogGUI(QMainWindow):
                         file_item.setText(6, date_loc or 'N/A')
                         file_item.setText(7, telescop or 'N/A')
                         file_item.setText(8, instrume or 'N/A')
+
+                        # Apply color coding based on image type
+                        color = self.get_item_color(imagetyp)
+                        if color:
+                            for col in range(9):
+                                file_item.setBackground(col, QBrush(color))
 
             # ----- FLAT FRAMES: date → filter_temp_binning → files -----
             cursor.execute('SELECT COUNT(*) FROM xisf_files WHERE imagetyp LIKE "%Flat%" AND object IS NULL')
@@ -2161,6 +2553,12 @@ class XISFCatalogGUI(QMainWindow):
                         file_item.setText(7, telescop or 'N/A')
                         file_item.setText(8, instrume or 'N/A')
 
+                        # Apply color coding based on image type
+                        color = self.get_item_color(imagetyp)
+                        if color:
+                            for col in range(9):
+                                file_item.setBackground(col, QBrush(color))
+
             # ----- BIAS FRAMES: temp_binning → date → files -----
             cursor.execute('SELECT COUNT(*) FROM xisf_files WHERE imagetyp LIKE "%Bias%" AND object IS NULL')
             bias_count = cursor.fetchone()[0]
@@ -2238,6 +2636,12 @@ class XISFCatalogGUI(QMainWindow):
                         file_item.setText(6, date_loc or 'N/A')
                         file_item.setText(7, telescop or 'N/A')
                         file_item.setText(8, instrume or 'N/A')
+
+                        # Apply color coding based on image type
+                        color = self.get_item_color(imagetyp)
+                        if color:
+                            for col in range(9):
+                                file_item.setBackground(col, QBrush(color))
 
             conn.close()
 
