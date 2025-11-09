@@ -24,30 +24,20 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 import xisf
 import re
 
+# Import constants
+from constants import (
+    TEMP_TOLERANCE_DARKS, TEMP_TOLERANCE_FLATS, TEMP_TOLERANCE_BIAS,
+    EXPOSURE_TOLERANCE, MIN_FRAMES_RECOMMENDED, MIN_FRAMES_ACCEPTABLE,
+    IMPORT_BATCH_SIZE, DATE_OFFSET_HOURS
+)
+
 # Import core business logic modules
 from core.database import DatabaseManager
 from core.calibration import CalibrationMatcher
 
-
-# ============================================================================
-# CONSTANTS
-# ============================================================================
-
-# Calibration matching tolerances
-TEMP_TOLERANCE_DARKS = 1.0      # °C tolerance for dark frame matching
-TEMP_TOLERANCE_FLATS = 3.0      # °C tolerance for flat frame matching
-TEMP_TOLERANCE_BIAS = 1.0       # °C tolerance for bias frame matching
-EXPOSURE_TOLERANCE = 0.1        # seconds tolerance for exposure matching
-
-# Frame count thresholds
-MIN_FRAMES_RECOMMENDED = 20     # Recommended minimum frames for good quality
-MIN_FRAMES_ACCEPTABLE = 10      # Acceptable minimum frames
-
-# Import settings
-IMPORT_BATCH_SIZE = 50          # Number of files to process in a batch
-DATE_OFFSET_HOURS = 12          # Hours to subtract for date normalization
-
-# ============================================================================
+# Import import/export modules
+from import_export.import_worker import ImportWorker
+from import_export.csv_exporter import CSVExporter
 
 
 def generate_organized_path(repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, original_filename):
@@ -116,289 +106,6 @@ def generate_organized_path(repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin,
         new_filename = original_filename
 
     return os.path.join(repo_path, subdir, new_filename)
-
-
-class ImportWorker(QThread):
-    """Worker thread for importing XISF files"""
-    progress = pyqtSignal(int, int, str)  # current, total, message
-    finished = pyqtSignal(int, int)  # processed, errors
-    
-    def __init__(self, files, db_path, timezone='UTC', organize=False, repo_path=None):
-        super().__init__()
-        self.files = files
-        self.db_path = db_path
-        self.timezone = timezone
-        self.organize = organize
-        self.repo_path = repo_path
-        self.processed = 0
-        self.errors = 0
-    
-    def calculate_file_hash(self, filepath):
-        """Calculate SHA256 hash of a file"""
-        hash_obj = hashlib.sha256()
-        with open(filepath, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b''):
-                hash_obj.update(chunk)
-        return hash_obj.hexdigest()
-    
-    def process_date_loc(self, date_str):
-        """Process DATE-LOC: subtract DATE_OFFSET_HOURS and return date only in YYYY-MM-DD format"""
-        if not date_str:
-            return None
-        
-        try:
-            # Convert to string if needed
-            date_str = str(date_str).strip()
-            
-            # Handle fractional seconds that have too many digits (7+ digits instead of 6)
-            # Python's %f expects exactly 6 digits for microseconds
-            if 'T' in date_str and '.' in date_str:
-                parts = date_str.split('.')
-                if len(parts) == 2:
-                    # Truncate fractional seconds to 6 digits
-                    fractional = parts[1][:6]
-                    date_str = f"{parts[0]}.{fractional}"
-            
-            # Try parsing common FITS date formats
-            formats = [
-                '%Y-%m-%dT%H:%M:%S.%f',  # With microseconds
-                '%Y-%m-%dT%H:%M:%S',     # Standard ISO format
-                '%Y-%m-%d %H:%M:%S',     # Space instead of T
-                '%Y-%m-%d',              # Date only
-            ]
-            
-            for fmt in formats:
-                try:
-                    dt = datetime.strptime(date_str, fmt)
-                    # Subtract DATE_OFFSET_HOURS
-                    dt = dt - timedelta(hours=DATE_OFFSET_HOURS)
-                    result = dt.strftime('%Y-%m-%d')
-                    return result
-                except ValueError:
-                    continue
-            
-            return None
-            
-        except Exception:
-            return None
-
-    def process_date_obs(self, date_str, timezone_str):
-        """Process DATE-OBS: convert from UTC to local timezone, subtract DATE_OFFSET_HOURS, return date in YYYY-MM-DD format"""
-        if not date_str:
-            return None
-
-        try:
-            # Convert to string if needed
-            date_str = str(date_str).strip()
-
-            # Handle fractional seconds that have too many digits (7+ digits instead of 6)
-            # Python's %f expects exactly 6 digits for microseconds
-            if 'T' in date_str and '.' in date_str:
-                parts = date_str.split('.')
-                if len(parts) == 2:
-                    # Truncate fractional seconds to 6 digits
-                    fractional = parts[1][:6]
-                    date_str = f"{parts[0]}.{fractional}"
-
-            # Try parsing common FITS date formats
-            formats = [
-                '%Y-%m-%dT%H:%M:%S.%f',  # With microseconds
-                '%Y-%m-%dT%H:%M:%S',     # Standard ISO format
-                '%Y-%m-%d %H:%M:%S',     # Space instead of T
-                '%Y-%m-%d',              # Date only
-            ]
-
-            dt = None
-            for fmt in formats:
-                try:
-                    dt = datetime.strptime(date_str, fmt)
-                    break
-                except ValueError:
-                    continue
-
-            if dt is None:
-                return None
-
-            # DATE-OBS is in UTC, convert to local timezone
-            try:
-                # Add UTC timezone info
-                dt_utc = dt.replace(tzinfo=ZoneInfo('UTC'))
-                # Convert to target timezone
-                target_tz = ZoneInfo(timezone_str)
-                dt_local = dt_utc.astimezone(target_tz)
-                # Subtract DATE_OFFSET_HOURS for session grouping
-                dt_local = dt_local - timedelta(hours=DATE_OFFSET_HOURS)
-                result = dt_local.strftime('%Y-%m-%d')
-                return result
-            except Exception:
-                # If timezone conversion fails, fall back to simple subtraction
-                dt = dt - timedelta(hours=DATE_OFFSET_HOURS)
-                result = dt.strftime('%Y-%m-%d')
-                return result
-
-        except Exception:
-            return None
-
-    def read_fits_keywords(self, filename):
-        """Read FITS keywords from XISF file"""
-        keywords = ['TELESCOP', 'INSTRUME', 'OBJECT', 'FILTER', 'IMAGETYP',
-                    'EXPOSURE', 'EXPTIME', 'CCD-TEMP', 'XBINNING', 'YBINNING', 'DATE-LOC', 'DATE-OBS']
-        try:
-            xisf_file = xisf.XISF(filename)
-            im_data = xisf_file.read_image(0)
-
-            if hasattr(xisf_file, 'fits_keywords'):
-                fits_keywords = xisf_file.fits_keywords
-            elif hasattr(im_data, 'fits_keywords'):
-                fits_keywords = im_data.fits_keywords
-            else:
-                metadata = xisf_file.get_images_metadata()[0]
-                fits_keywords = metadata.get('FITSKeywords', {})
-
-            results = {}
-            for keyword in keywords:
-                if fits_keywords and keyword in fits_keywords:
-                    keyword_data = fits_keywords[keyword]
-                    if isinstance(keyword_data, list) and len(keyword_data) > 0:
-                        results[keyword] = keyword_data[0]['value']
-                    else:
-                        results[keyword] = keyword_data
-                else:
-                    results[keyword] = None
-
-            # Special handling: prefer EXPTIME over EXPOSURE (EXPTIME is FITS standard)
-            # This ensures compatibility with both standard and non-standard keywords
-            if results.get('EXPTIME') is not None:
-                results['EXPOSURE'] = results['EXPTIME']
-
-            return results
-        except Exception as e:
-            return None
-
-    def run(self):
-        """Process files and import to database"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Use batch processing for better performance
-        batch_size = IMPORT_BATCH_SIZE
-        batch_data = []
-        
-        for i, filepath in enumerate(self.files):
-            basename = os.path.basename(filepath)
-            self.progress.emit(i + 1, len(self.files), f"Processing: {basename}")
-            
-            try:
-                # Calculate hash
-                file_hash = self.calculate_file_hash(filepath)
-                
-                # Read FITS keywords
-                keywords = self.read_fits_keywords(filepath)
-                
-                if keywords:
-                    filename = os.path.basename(filepath)
-
-                    # Process date: prefer DATE-LOC, fall back to DATE-OBS with timezone conversion
-                    date_loc = self.process_date_loc(keywords.get('DATE-LOC'))
-                    if date_loc is None and keywords.get('DATE-OBS'):
-                        # DATE-LOC not available, use DATE-OBS with timezone conversion
-                        date_loc = self.process_date_obs(keywords.get('DATE-OBS'), self.timezone)
-
-                    # Determine if this is a calibration frame
-                    imagetyp = keywords.get('IMAGETYP', '')
-                    is_calibration = False
-                    if imagetyp:
-                        imagetyp_lower = imagetyp.lower()
-                        is_calibration = ('dark' in imagetyp_lower or
-                                        'flat' in imagetyp_lower or
-                                        'bias' in imagetyp_lower)
-
-                    # Set object to None for calibration frames (they are not object-specific)
-                    obj = None if is_calibration else keywords.get('OBJECT')
-
-                    # Organize file if requested
-                    if self.organize and self.repo_path:
-                        try:
-                            # Generate organized path
-                            organized_path = generate_organized_path(
-                                self.repo_path,
-                                obj,
-                                keywords.get('FILTER'),
-                                keywords.get('IMAGETYP'),
-                                keywords.get('EXPOSURE'),
-                                keywords.get('CCD-TEMP'),
-                                keywords.get('XBINNING'),
-                                keywords.get('YBINNING'),
-                                date_loc,
-                                filename
-                            )
-
-                            # Create directory if needed
-                            os.makedirs(os.path.dirname(organized_path), exist_ok=True)
-
-                            # Copy file to organized location
-                            shutil.copy2(filepath, organized_path)
-
-                            # Update filepath and filename to organized location
-                            filepath = organized_path
-                            filename = os.path.basename(organized_path)
-
-                            self.progress.emit(i + 1, len(self.files), f"Organized: {filename}")
-                        except Exception as e:
-                            # If organization fails, keep original path and log error
-                            self.progress.emit(i + 1, len(self.files), f"⚠️  Organization failed for {basename}: {str(e)} - using original path")
-                            # Don't increment errors, just continue with original path
-
-                    # Add to batch
-                    batch_data.append((
-                        file_hash, filepath, filename,
-                        keywords.get('TELESCOP'), keywords.get('INSTRUME'),
-                        obj, keywords.get('FILTER'),
-                        keywords.get('IMAGETYP'), keywords.get('EXPOSURE'),
-                        keywords.get('CCD-TEMP'), keywords.get('XBINNING'),
-                        keywords.get('YBINNING'), date_loc
-                    ))
-                    
-                    # Process batch when it reaches batch_size or on last file
-                    if len(batch_data) >= batch_size or i == len(self.files) - 1:
-                        # Insert batch using executemany for better performance
-                        cursor.execute('BEGIN TRANSACTION')
-                        
-                        for data in batch_data:
-                            file_hash = data[0]
-                            
-                            # Check if exists
-                            cursor.execute('SELECT id FROM xisf_files WHERE file_hash = ?', (file_hash,))
-                            existing = cursor.fetchone()
-                            
-                            if existing:
-                                cursor.execute('''
-                                    UPDATE xisf_files
-                                    SET filepath = ?, filename = ?, telescop = ?, instrume = ?, 
-                                        object = ?, filter = ?, imagetyp = ?, exposure = ?,
-                                        ccd_temp = ?, xbinning = ?, ybinning = ?, date_loc = ?,
-                                        updated_at = CURRENT_TIMESTAMP
-                                    WHERE file_hash = ?
-                                ''', data[1:] + (file_hash,))
-                            else:
-                                cursor.execute('''
-                                    INSERT INTO xisf_files 
-                                    (file_hash, filepath, filename, telescop, instrume, object, 
-                                     filter, imagetyp, exposure, ccd_temp, xbinning, ybinning, date_loc)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                ''', data)
-                        
-                        conn.commit()
-                        self.processed += len(batch_data)
-                        batch_data = []
-                else:
-                    self.errors += 1
-                    
-            except Exception as e:
-                self.errors += 1
-        
-        conn.close()
-        self.finished.emit(self.processed, self.errors)
 
 
 class XISFCatalogGUI(QMainWindow):
@@ -1876,22 +1583,7 @@ Imported: {result[11] or 'N/A'}
             return
 
         try:
-            import csv
-            with open(filename, 'w', newline='') as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerow(['Filename', 'Image Type', 'Filter', 'Exposure', 'Temp', 'Binning', 'Date', 'Telescope', 'Instrument'])
-
-                def write_items(tree_item):
-                    # Only write file items (leaf nodes)
-                    if tree_item.childCount() == 0 and '(' not in tree_item.text(0):
-                        row = [tree_item.text(i) for i in range(9)]
-                        writer.writerow(row)
-                    # Recurse to children
-                    for i in range(tree_item.childCount()):
-                        write_items(tree_item.child(i))
-
-                write_items(item)
-
+            CSVExporter.export_tree_group(filename, item)
             QMessageBox.information(self, 'Success', f'Exported group to:\n{filename}')
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to export: {e}')
@@ -1906,41 +1598,8 @@ Imported: {result[11] or 'N/A'}
             return
 
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT filename, imagetyp, filter, exposure, ccd_temp,
-                       xbinning, ybinning, date_loc, telescop, instrume, filepath, object
-                FROM xisf_files
-                ORDER BY object, filter, date_loc, filename
-            ''')
-            rows = cursor.fetchall()
-            conn.close()
-
-            import csv
-            with open(filename, 'w', newline='') as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerow(['Filename', 'Image Type', 'Filter', 'Exposure', 'Temp',
-                               'Binning', 'Date', 'Telescope', 'Instrument', 'Filepath', 'Object'])
-
-                for row in rows:
-                    # Format the row
-                    formatted_row = [
-                        row[0],  # filename
-                        row[1] or 'N/A',  # imagetyp
-                        row[2] or 'N/A',  # filter
-                        f"{row[3]:.1f}s" if row[3] else 'N/A',  # exposure
-                        f"{row[4]:.1f}°C" if row[4] is not None else 'N/A',  # temp
-                        f"{int(row[5])}x{int(row[6])}" if row[5] and row[6] else 'N/A',  # binning
-                        row[7] or 'N/A',  # date
-                        row[8] or 'N/A',  # telescope
-                        row[9] or 'N/A',  # instrument
-                        row[10] or 'N/A',  # filepath
-                        row[11] or 'N/A',  # object
-                    ]
-                    writer.writerow(formatted_row)
-
-            QMessageBox.information(self, 'Success', f'Exported {len(rows)} files to:\n{filename}')
+            row_count = CSVExporter.export_catalog(filename, self.db_path)
+            QMessageBox.information(self, 'Success', f'Exported {row_count} files to:\n{filename}')
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to export: {e}')
 
