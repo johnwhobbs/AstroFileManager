@@ -35,7 +35,7 @@ A PyQt6-based desktop application for cataloging and managing XISF astrophotogra
   - **Smart Calibration Matching**: Finds matching Darks, Bias, and Flats with tolerance-based criteria
     - Darks: Exact exposure (±0.1s), ±1°C temperature, matching binning
     - Bias: ±1°C temperature, matching binning
-    - Flats: Filter match, ±3°C temperature, ±7 days from session, matching binning
+    - Flats: Filter match, ±3°C temperature, exact date match, matching binning
   - **Master Frame Detection**: Identifies and displays master calibration frames
   - **Quality Scoring**: 0-100% quality score based on frame counts (100% = 20+ frames)
   - **Status Indicators**: Visual color-coded status (Complete/Partial/Missing)
@@ -213,7 +213,7 @@ The system uses intelligent tolerance-based matching to find calibration frames:
 **Flat Frames:**
 - Exact filter match (or both NULL for no-filter imaging)
 - Temperature within ±3°C of session average (more flexible for dusk/dawn flats)
-- Date within ±7 days of session (allows using recent flats)
+- Exact date match (must be from same imaging session)
 - Matching X and Y binning
 
 **Master Frame Detection:**
@@ -333,7 +333,7 @@ Light Frames: 25 | Exposure: 300.0s | Temp: -10.2°C | Binning: 1x1
 - Use "Missing Only" filter to focus on sessions needing calibration
 - Export reports before imaging sessions to plan calibration frame acquisition
 - Temperature tolerances account for cooling variations between sessions
-- Flat frames can be from nearby dates (±7 days) as dust patterns change slowly
+- Flat frames must be from the exact same date as the imaging session
 - Aim for 20+ frames per calibration type for optimal results
 - Master frames reduce the need for large frame counts
 
@@ -576,7 +576,7 @@ Settings are stored using Qt's QSettings in platform-specific locations and are 
 - Check that calibration frame temperatures are within tolerance (±1°C for Darks/Bias, ±3°C for Flats)
 - Ensure binning matches exactly (1x1, 2x2, etc.)
 - For Darks: verify exposure times match light frames (within ±0.1s)
-- For Flats: verify filter names match exactly and dates are within ±7 days
+- For Flats: verify filter names match exactly and dates match exactly (same date as session)
 - Click "Refresh Sessions" to update the view
 
 **Sessions tab column widths resetting:**
@@ -616,7 +616,7 @@ Feel free to submit issues or pull requests for improvements.
   - Smart calibration matching with tolerance-based criteria:
     - Darks: Exact exposure (±0.1s), ±1°C temperature, matching binning
     - Bias: ±1°C temperature, matching binning
-    - Flats: Filter match, ±3°C temperature, ±7 days from session, matching binning
+    - Flats: Filter match, ±3°C temperature, exact date match, matching binning
   - Master frame detection and display with special badges
   - Quality scoring system (0-100%) based on frame counts
   - Color-coded status indicators (Complete/Partial/Missing/Complete with Masters)

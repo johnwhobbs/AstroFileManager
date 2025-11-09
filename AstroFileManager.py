@@ -405,10 +405,10 @@ class XISFCatalogGUI(QMainWindow):
         self.maintenance_tab = self.create_maintenance_tab()
         self.settings_tab = self.create_settings_tab()
 
-        tabs.addTab(self.import_tab, "Import Files")
         tabs.addTab(self.view_tab, "View Catalog")
         tabs.addTab(self.sessions_tab, "Sessions")
         tabs.addTab(self.analytics_tab, "Analytics")
+        tabs.addTab(self.import_tab, "Import Files")
         tabs.addTab(self.maintenance_tab, "Maintenance")
         tabs.addTab(self.settings_tab, "Settings")
         
@@ -2024,11 +2024,11 @@ class XISFCatalogGUI(QMainWindow):
     
     def on_tab_changed(self, index):
         """Handle tab change"""
-        if index == 1:  # View Catalog tab
+        if index == 0:  # View Catalog tab
             self.refresh_catalog_view()
-        elif index == 2:  # Sessions tab
+        elif index == 1:  # Sessions tab
             self.refresh_sessions()
-        elif index == 3:  # Analytics tab
+        elif index == 2:  # Analytics tab
             self.refresh_analytics()
         elif index == 4:  # Maintenance tab
             # Populate current values when maintenance tab is opened
@@ -2266,23 +2266,14 @@ class XISFCatalogGUI(QMainWindow):
         }
 
     def find_matching_flats(self, cursor, filter_name, temp, xbin, ybin, session_date):
-        """Find matching flat frames with temperature and date tolerance"""
+        """Find matching flat frames with temperature tolerance and exact date match"""
         include_masters = self.include_masters_checkbox.isChecked()
 
         # Temperature tolerance: ±3°C for flats
         temp_min = temp - 3 if temp else -999
         temp_max = temp + 3 if temp else 999
 
-        # Date tolerance: ±7 days
-        try:
-            session_dt = datetime.strptime(session_date, '%Y-%m-%d')
-            date_min = (session_dt - timedelta(days=7)).strftime('%Y-%m-%d')
-            date_max = (session_dt + timedelta(days=7)).strftime('%Y-%m-%d')
-        except:
-            date_min = '1900-01-01'
-            date_max = '2100-12-31'
-
-        # Find regular flats
+        # Find regular flats (exact date match)
         cursor.execute('''
             SELECT COUNT(*), AVG(ccd_temp)
             FROM xisf_files
@@ -2292,13 +2283,13 @@ class XISFCatalogGUI(QMainWindow):
                 AND ccd_temp BETWEEN ? AND ?
                 AND xbinning = ?
                 AND ybinning = ?
-                AND date_loc BETWEEN ? AND ?
-        ''', (filter_name, filter_name, temp_min, temp_max, xbin, ybin, date_min, date_max))
+                AND date_loc = ?
+        ''', (filter_name, filter_name, temp_min, temp_max, xbin, ybin, session_date))
 
         flat_count, flat_temp = cursor.fetchone()
         flat_count = flat_count or 0
 
-        # Find master flats
+        # Find master flats (exact date match)
         master_count = 0
         if include_masters:
             cursor.execute('''
@@ -2310,8 +2301,8 @@ class XISFCatalogGUI(QMainWindow):
                     AND ccd_temp BETWEEN ? AND ?
                     AND xbinning = ?
                     AND ybinning = ?
-                    AND date_loc BETWEEN ? AND ?
-            ''', (filter_name, filter_name, temp_min, temp_max, xbin, ybin, date_min, date_max))
+                    AND date_loc = ?
+            ''', (filter_name, filter_name, temp_min, temp_max, xbin, ybin, session_date))
 
             master_count = cursor.fetchone()[0] or 0
 
