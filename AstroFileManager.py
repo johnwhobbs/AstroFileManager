@@ -2122,8 +2122,8 @@ Imported: {result[11] or 'N/A'}
             self.refresh_analytics()
         elif index == 4:  # Maintenance tab
             # Populate current values when maintenance tab is opened
-            keyword = self.keyword_combo.currentText()
-            self.populate_current_values(keyword)
+            keyword = self.maintenance_tab.keyword_combo.currentText()
+            self.maintenance_tab.populate_current_values(keyword)
 
     def refresh_sessions(self):
         """Refresh the sessions view"""
