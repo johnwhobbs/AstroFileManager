@@ -22,6 +22,96 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QColor, QBrush
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 import xisf
+import re
+
+
+# ============================================================================
+# CONSTANTS
+# ============================================================================
+
+# Calibration matching tolerances
+TEMP_TOLERANCE_DARKS = 1.0      # °C tolerance for dark frame matching
+TEMP_TOLERANCE_FLATS = 3.0      # °C tolerance for flat frame matching
+TEMP_TOLERANCE_BIAS = 1.0       # °C tolerance for bias frame matching
+EXPOSURE_TOLERANCE = 0.1        # seconds tolerance for exposure matching
+
+# Frame count thresholds
+MIN_FRAMES_RECOMMENDED = 20     # Recommended minimum frames for good quality
+MIN_FRAMES_ACCEPTABLE = 10      # Acceptable minimum frames
+
+# Import settings
+IMPORT_BATCH_SIZE = 50          # Number of files to process in a batch
+DATE_OFFSET_HOURS = 12          # Hours to subtract for date normalization
+
+# ============================================================================
+
+
+def generate_organized_path(repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, original_filename):
+    """Generate the organized path and filename for a file"""
+    # Sanitize values
+    obj = obj or "Unknown"
+    filt = filt or "NoFilter"
+    imgtyp = imgtyp or "Unknown"
+    date = date or "0000-00-00"
+
+    # Determine binning string
+    if xbin and ybin:
+        try:
+            binning = f"Bin{int(float(xbin))}x{int(float(ybin))}"
+        except (ValueError, TypeError):
+            binning = "Bin1x1"
+    else:
+        binning = "Bin1x1"
+
+    # Determine temp string (round to nearest degree)
+    if temp is not None:
+        try:
+            temp_float = float(temp)
+            temp_str = f"{int(round(temp_float))}C"
+        except (ValueError, TypeError):
+            temp_str = "0C"
+    else:
+        temp_str = "0C"
+
+    # Extract sequence number from original filename if possible
+    seq_match = re.search(r'_(\d+)\.(xisf|fits?)$', original_filename, re.IGNORECASE)
+    seq = seq_match.group(1) if seq_match else "001"
+
+    # Determine file type and path structure
+    if 'light' in imgtyp.lower():
+        # Lights/[Object]/[Filter]/[filename]
+        subdir = os.path.join("Lights", obj, filt)
+        try:
+            exp_str = f"{int(float(exp))}s" if exp else "0s"
+        except (ValueError, TypeError):
+            exp_str = "0s"
+        new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+
+    elif 'dark' in imgtyp.lower():
+        # Calibration/Darks/[exp]_[temp]_[binning]/[filename]
+        try:
+            exp_str = f"{int(float(exp))}s" if exp else "0s"
+        except (ValueError, TypeError):
+            exp_str = "0s"
+        subdir = os.path.join("Calibration", "Darks", f"{exp_str}_{temp_str}_{binning}")
+        new_filename = f"{date}_Dark_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+
+    elif 'flat' in imgtyp.lower():
+        # Calibration/Flats/[date]/[filter]_[temp]_[binning]/[filename]
+        subdir = os.path.join("Calibration", "Flats", date, f"{filt}_{temp_str}_{binning}")
+        new_filename = f"{date}_Flat_{filt}_{temp_str}_{binning}_{seq}.xisf"
+
+    elif 'bias' in imgtyp.lower():
+        # Calibration/Bias/[temp]_[binning]/[filename]
+        subdir = os.path.join("Calibration", "Bias", f"{temp_str}_{binning}")
+        new_filename = f"{date}_Bias_{temp_str}_{binning}_{seq}.xisf"
+
+    else:
+        # Unknown type - put in root with original structure
+        subdir = "Uncategorized"
+        new_filename = original_filename
+
+    return os.path.join(repo_path, subdir, new_filename)
 
 
 class ImportWorker(QThread):
@@ -48,7 +138,7 @@ class ImportWorker(QThread):
         return hash_obj.hexdigest()
     
     def process_date_loc(self, date_str):
-        """Process DATE-LOC: subtract 12 hours and return date only in YYYY-MM-DD format"""
+        """Process DATE-LOC: subtract DATE_OFFSET_HOURS and return date only in YYYY-MM-DD format"""
         if not date_str:
             return None
         
@@ -76,8 +166,8 @@ class ImportWorker(QThread):
             for fmt in formats:
                 try:
                     dt = datetime.strptime(date_str, fmt)
-                    # Subtract 12 hours
-                    dt = dt - timedelta(hours=12)
+                    # Subtract DATE_OFFSET_HOURS
+                    dt = dt - timedelta(hours=DATE_OFFSET_HOURS)
                     result = dt.strftime('%Y-%m-%d')
                     return result
                 except ValueError:
@@ -89,7 +179,7 @@ class ImportWorker(QThread):
             return None
 
     def process_date_obs(self, date_str, timezone_str):
-        """Process DATE-OBS: convert from UTC to local timezone, subtract 12 hours, return date in YYYY-MM-DD format"""
+        """Process DATE-OBS: convert from UTC to local timezone, subtract DATE_OFFSET_HOURS, return date in YYYY-MM-DD format"""
         if not date_str:
             return None
 
@@ -132,13 +222,13 @@ class ImportWorker(QThread):
                 # Convert to target timezone
                 target_tz = ZoneInfo(timezone_str)
                 dt_local = dt_utc.astimezone(target_tz)
-                # Subtract 12 hours for session grouping
-                dt_local = dt_local - timedelta(hours=12)
+                # Subtract DATE_OFFSET_HOURS for session grouping
+                dt_local = dt_local - timedelta(hours=DATE_OFFSET_HOURS)
                 result = dt_local.strftime('%Y-%m-%d')
                 return result
             except Exception:
                 # If timezone conversion fails, fall back to simple subtraction
-                dt = dt - timedelta(hours=12)
+                dt = dt - timedelta(hours=DATE_OFFSET_HOURS)
                 result = dt.strftime('%Y-%m-%d')
                 return result
 
@@ -181,81 +271,13 @@ class ImportWorker(QThread):
         except Exception as e:
             return None
 
-    def generate_organized_path(self, repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, original_filename):
-        """Generate the organized path and filename for a file"""
-        # Sanitize values
-        obj = obj or "Unknown"
-        filt = filt or "NoFilter"
-        imgtyp = imgtyp or "Unknown"
-        date = date or "0000-00-00"
-
-        # Determine binning string
-        if xbin and ybin:
-            try:
-                binning = f"Bin{int(float(xbin))}x{int(float(ybin))}"
-            except (ValueError, TypeError):
-                binning = "Bin1x1"
-        else:
-            binning = "Bin1x1"
-
-        # Determine temp string (round to nearest degree)
-        if temp is not None:
-            try:
-                temp_float = float(temp)
-                temp_str = f"{int(round(temp_float))}C"
-            except (ValueError, TypeError):
-                temp_str = "0C"
-        else:
-            temp_str = "0C"
-
-        # Extract sequence number from original filename if possible
-        import re
-        seq_match = re.search(r'_(\d+)\.(xisf|fits?)$', original_filename, re.IGNORECASE)
-        seq = seq_match.group(1) if seq_match else "001"
-
-        # Determine file type and path structure
-        if 'light' in imgtyp.lower():
-            # Lights/[Object]/[Filter]/[filename]
-            subdir = os.path.join("Lights", obj, filt)
-            try:
-                exp_str = f"{int(float(exp))}s" if exp else "0s"
-            except (ValueError, TypeError):
-                exp_str = "0s"
-            new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
-
-        elif 'dark' in imgtyp.lower():
-            # Calibration/Darks/[exp]_[temp]_[binning]/[filename]
-            try:
-                exp_str = f"{int(float(exp))}s" if exp else "0s"
-            except (ValueError, TypeError):
-                exp_str = "0s"
-            subdir = os.path.join("Calibration", "Darks", f"{exp_str}_{temp_str}_{binning}")
-            new_filename = f"{date}_Dark_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
-
-        elif 'flat' in imgtyp.lower():
-            # Calibration/Flats/[date]/[filter]_[temp]_[binning]/[filename]
-            subdir = os.path.join("Calibration", "Flats", date, f"{filt}_{temp_str}_{binning}")
-            new_filename = f"{date}_Flat_{filt}_{temp_str}_{binning}_{seq}.xisf"
-
-        elif 'bias' in imgtyp.lower():
-            # Calibration/Bias/[temp]_[binning]/[filename]
-            subdir = os.path.join("Calibration", "Bias", f"{temp_str}_{binning}")
-            new_filename = f"{date}_Bias_{temp_str}_{binning}_{seq}.xisf"
-
-        else:
-            # Unknown type - put in root with original structure
-            subdir = "Uncategorized"
-            new_filename = original_filename
-
-        return os.path.join(repo_path, subdir, new_filename)
-
     def run(self):
         """Process files and import to database"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         # Use batch processing for better performance
-        batch_size = 50
+        batch_size = IMPORT_BATCH_SIZE
         batch_data = []
         
         for i, filepath in enumerate(self.files):
@@ -294,7 +316,7 @@ class ImportWorker(QThread):
                     if self.organize and self.repo_path:
                         try:
                             # Generate organized path
-                            organized_path = self.generate_organized_path(
+                            organized_path = generate_organized_path(
                                 self.repo_path,
                                 obj,
                                 keywords.get('FILTER'),
@@ -1146,7 +1168,7 @@ class XISFCatalogGUI(QMainWindow):
             self.organize_log.append("Sample organization plan (showing first 10):\n")
             
             for i, (filepath, filename, obj, filt, imgtyp, exp, temp, xbin, ybin, date) in enumerate(files[:10]):
-                new_path = self.generate_organized_path(
+                new_path = generate_organized_path(
                     repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, filename
                 )
                 self.organize_log.append(f"\nFrom: {filepath}")
@@ -1220,7 +1242,7 @@ class XISFCatalogGUI(QMainWindow):
                         continue
                     
                     # Generate new path and filename
-                    new_path = self.generate_organized_path(
+                    new_path = generate_organized_path(
                         repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, filename
                     )
                     
@@ -1262,75 +1284,7 @@ class XISFCatalogGUI(QMainWindow):
         except Exception as e:
             self.organize_log.append(f"\nFatal error: {e}")
             QMessageBox.critical(self, 'Error', f'Failed to organize files: {e}')
-    
-    def generate_organized_path(self, repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, original_filename):
-        """Generate the organized path and filename for a file"""
-        # Sanitize values
-        obj = obj or "Unknown"
-        filt = filt or "NoFilter"
-        imgtyp = imgtyp or "Unknown"
-        date = date or "0000-00-00"
-        
-        # Determine binning string
-        if xbin and ybin:
-            try:
-                binning = f"Bin{int(float(xbin))}x{int(float(ybin))}"
-            except (ValueError, TypeError):
-                binning = "Bin1x1"
-        else:
-            binning = "Bin1x1"
-        
-        # Determine temp string (round to nearest degree)
-        if temp is not None:
-            try:
-                temp_float = float(temp)
-                temp_str = f"{int(round(temp_float))}C"
-            except (ValueError, TypeError):
-                temp_str = "0C"
-        else:
-            temp_str = "0C"
 
-        # Extract sequence number from original filename if possible
-        import re
-        seq_match = re.search(r'_(\d+)\.(xisf|fits?)$', original_filename, re.IGNORECASE)
-        seq = seq_match.group(1) if seq_match else "001"
-
-        # Determine file type and path structure
-        if 'light' in imgtyp.lower():
-            # Lights/[Object]/[Filter]/[filename]
-            subdir = os.path.join("Lights", obj, filt)
-            try:
-                exp_str = f"{int(float(exp))}s" if exp else "0s"
-            except (ValueError, TypeError):
-                exp_str = "0s"
-            new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
-
-        elif 'dark' in imgtyp.lower():
-            # Calibration/Darks/[exp]_[temp]_[binning]/[filename]
-            try:
-                exp_str = f"{int(float(exp))}s" if exp else "0s"
-            except (ValueError, TypeError):
-                exp_str = "0s"
-            subdir = os.path.join("Calibration", "Darks", f"{exp_str}_{temp_str}_{binning}")
-            new_filename = f"{date}_Dark_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
-            
-        elif 'flat' in imgtyp.lower():
-            # Calibration/Flats/[date]/[filter]_[temp]_[binning]/[filename]
-            subdir = os.path.join("Calibration", "Flats", date, f"{filt}_{temp_str}_{binning}")
-            new_filename = f"{date}_Flat_{filt}_{temp_str}_{binning}_{seq}.xisf"
-            
-        elif 'bias' in imgtyp.lower():
-            # Calibration/Bias/[temp]_[binning]/[filename]
-            subdir = os.path.join("Calibration", "Bias", f"{temp_str}_{binning}")
-            new_filename = f"{date}_Bias_{temp_str}_{binning}_{seq}.xisf"
-            
-        else:
-            # Unknown type - put in root with original structure
-            subdir = "Uncategorized"
-            new_filename = original_filename
-        
-        return os.path.join(repo_path, subdir, new_filename)
-    
     def create_settings_tab(self):
         """Create the settings tab"""
         widget = QWidget()
@@ -2770,17 +2724,17 @@ Imported: {result[11] or 'N/A'}
         """Find matching dark frames with temperature tolerance"""
         include_masters = self.include_masters_checkbox.isChecked()
 
-        # Temperature tolerance: ±1°C
-        temp_min = temp - 1 if temp else -999
-        temp_max = temp + 1 if temp else 999
+        # Temperature tolerance
+        temp_min = temp - TEMP_TOLERANCE_DARKS if temp else -999
+        temp_max = temp + TEMP_TOLERANCE_DARKS if temp else 999
 
         # Find regular darks
-        cursor.execute('''
+        cursor.execute(f'''
             SELECT COUNT(*), AVG(ccd_temp)
             FROM xisf_files
             WHERE imagetyp LIKE '%Dark%'
                 AND imagetyp NOT LIKE '%Master%'
-                AND ABS(exposure - ?) < 0.1
+                AND ABS(exposure - ?) < {EXPOSURE_TOLERANCE}
                 AND ccd_temp BETWEEN ? AND ?
                 AND xbinning = ?
                 AND ybinning = ?
@@ -2792,12 +2746,12 @@ Imported: {result[11] or 'N/A'}
         # Find master darks
         master_count = 0
         if include_masters:
-            cursor.execute('''
+            cursor.execute(f'''
                 SELECT COUNT(*)
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Master%'
                     AND imagetyp LIKE '%Dark%'
-                    AND ABS(exposure - ?) < 0.1
+                    AND ABS(exposure - ?) < {EXPOSURE_TOLERANCE}
                     AND ccd_temp BETWEEN ? AND ?
                     AND xbinning = ?
                     AND ybinning = ?
@@ -2806,17 +2760,17 @@ Imported: {result[11] or 'N/A'}
             master_count = cursor.fetchone()[0] or 0
 
         # Calculate quality score (0-100)
-        quality = min(100, (dark_count / 20) * 100) if dark_count > 0 else 0
+        quality = min(100, (dark_count / MIN_FRAMES_RECOMMENDED) * 100) if dark_count > 0 else 0
 
         # Determine display text and status
         if master_count > 0:
             display = f"✓ {dark_count} + {master_count} Master"
             has_frames = True
-        elif dark_count >= 10:
+        elif dark_count >= MIN_FRAMES_ACCEPTABLE:
             display = f"✓ {dark_count} frames"
             has_frames = True
         elif dark_count > 0:
-            display = f"⚠ {dark_count} frames (need 10+)"
+            display = f"⚠ {dark_count} frames (need {MIN_FRAMES_ACCEPTABLE}+)"
             has_frames = True
         else:
             display = "✗ Missing"
@@ -2836,9 +2790,9 @@ Imported: {result[11] or 'N/A'}
         """Find matching bias frames with temperature tolerance"""
         include_masters = self.include_masters_checkbox.isChecked()
 
-        # Temperature tolerance: ±1°C
-        temp_min = temp - 1 if temp else -999
-        temp_max = temp + 1 if temp else 999
+        # Temperature tolerance
+        temp_min = temp - TEMP_TOLERANCE_BIAS if temp else -999
+        temp_max = temp + TEMP_TOLERANCE_BIAS if temp else 999
 
         # Find regular bias
         cursor.execute('''
@@ -2870,17 +2824,17 @@ Imported: {result[11] or 'N/A'}
             master_count = cursor.fetchone()[0] or 0
 
         # Calculate quality score (0-100)
-        quality = min(100, (bias_count / 20) * 100) if bias_count > 0 else 0
+        quality = min(100, (bias_count / MIN_FRAMES_RECOMMENDED) * 100) if bias_count > 0 else 0
 
         # Determine display text and status
         if master_count > 0:
             display = f"✓ {bias_count} + {master_count} Master"
             has_frames = True
-        elif bias_count >= 10:
+        elif bias_count >= MIN_FRAMES_ACCEPTABLE:
             display = f"✓ {bias_count} frames"
             has_frames = True
         elif bias_count > 0:
-            display = f"⚠ {bias_count} frames (need 10+)"
+            display = f"⚠ {bias_count} frames (need {MIN_FRAMES_ACCEPTABLE}+)"
             has_frames = True
         else:
             display = "✗ Missing"
@@ -2899,9 +2853,9 @@ Imported: {result[11] or 'N/A'}
         """Find matching flat frames with temperature tolerance and exact date match"""
         include_masters = self.include_masters_checkbox.isChecked()
 
-        # Temperature tolerance: ±3°C for flats
-        temp_min = temp - 3 if temp else -999
-        temp_max = temp + 3 if temp else 999
+        # Temperature tolerance for flats
+        temp_min = temp - TEMP_TOLERANCE_FLATS if temp else -999
+        temp_max = temp + TEMP_TOLERANCE_FLATS if temp else 999
 
         # Find regular flats (exact date match)
         cursor.execute('''
@@ -2937,17 +2891,17 @@ Imported: {result[11] or 'N/A'}
             master_count = cursor.fetchone()[0] or 0
 
         # Calculate quality score (0-100)
-        quality = min(100, (flat_count / 20) * 100) if flat_count > 0 else 0
+        quality = min(100, (flat_count / MIN_FRAMES_RECOMMENDED) * 100) if flat_count > 0 else 0
 
         # Determine display text and status
         if master_count > 0:
             display = f"✓ {flat_count} + {master_count} Master"
             has_frames = True
-        elif flat_count >= 10:
+        elif flat_count >= MIN_FRAMES_ACCEPTABLE:
             display = f"✓ {flat_count} frames"
             has_frames = True
         elif flat_count > 0:
-            display = f"⚠ {flat_count} frames (need 10+)"
+            display = f"⚠ {flat_count} frames (need {MIN_FRAMES_ACCEPTABLE}+)"
             has_frames = True
         else:
             display = "✗ Missing"
@@ -3037,20 +2991,20 @@ Imported: {result[11] or 'N/A'}
         flats = session_data['flats']
 
         if not darks['has_frames']:
-            recommendations.append(f"• Capture dark frames: {session_data['avg_exposure']:.1f}s exposure at ~{session_data['avg_temp']:.0f}°C, {session_data['xbinning']}x{session_data['ybinning']} binning (minimum 10, recommended 20+)")
-        elif darks['count'] < 10 and darks['master_count'] == 0:
-            recommendations.append(f"• Add more dark frames: Currently {darks['count']}, need at least 10 for good calibration")
+            recommendations.append(f"• Capture dark frames: {session_data['avg_exposure']:.1f}s exposure at ~{session_data['avg_temp']:.0f}°C, {session_data['xbinning']}x{session_data['ybinning']} binning (minimum {MIN_FRAMES_ACCEPTABLE}, recommended {MIN_FRAMES_RECOMMENDED}+)")
+        elif darks['count'] < MIN_FRAMES_ACCEPTABLE and darks['master_count'] == 0:
+            recommendations.append(f"• Add more dark frames: Currently {darks['count']}, need at least {MIN_FRAMES_ACCEPTABLE} for good calibration")
 
         if not bias['has_frames']:
-            recommendations.append(f"• Capture bias frames: ~{session_data['avg_temp']:.0f}°C, {session_data['xbinning']}x{session_data['ybinning']} binning (minimum 10, recommended 20+)")
-        elif bias['count'] < 10 and bias['master_count'] == 0:
-            recommendations.append(f"• Add more bias frames: Currently {bias['count']}, need at least 10 for good calibration")
+            recommendations.append(f"• Capture bias frames: ~{session_data['avg_temp']:.0f}°C, {session_data['xbinning']}x{session_data['ybinning']} binning (minimum {MIN_FRAMES_ACCEPTABLE}, recommended {MIN_FRAMES_RECOMMENDED}+)")
+        elif bias['count'] < MIN_FRAMES_ACCEPTABLE and bias['master_count'] == 0:
+            recommendations.append(f"• Add more bias frames: Currently {bias['count']}, need at least {MIN_FRAMES_ACCEPTABLE} for good calibration")
 
         if not flats['has_frames']:
             filter_name = session_data['filter'] or 'No Filter'
-            recommendations.append(f"• Capture flat frames: {filter_name}, ~{session_data['avg_temp']:.0f}°C, {session_data['xbinning']}x{session_data['ybinning']} binning (minimum 10, recommended 20+)")
-        elif flats['count'] < 10 and flats['master_count'] == 0:
-            recommendations.append(f"• Add more flat frames: Currently {flats['count']}, need at least 10 for good calibration")
+            recommendations.append(f"• Capture flat frames: {filter_name}, ~{session_data['avg_temp']:.0f}°C, {session_data['xbinning']}x{session_data['ybinning']} binning (minimum {MIN_FRAMES_ACCEPTABLE}, recommended {MIN_FRAMES_RECOMMENDED}+)")
+        elif flats['count'] < MIN_FRAMES_ACCEPTABLE and flats['master_count'] == 0:
+            recommendations.append(f"• Add more flat frames: Currently {flats['count']}, need at least {MIN_FRAMES_ACCEPTABLE} for good calibration")
 
         if not recommendations:
             if darks['master_count'] > 0 or bias['master_count'] > 0 or flats['master_count'] > 0:
@@ -3058,12 +3012,12 @@ Imported: {result[11] or 'N/A'}
             else:
                 recommendations.append("✓ All calibration frames are present")
                 recommendations.append("\nOptional improvements:")
-                if darks['count'] < 20:
-                    recommendations.append(f"• Consider adding more darks (currently {darks['count']}, recommended 20+)")
-                if bias['count'] < 20:
-                    recommendations.append(f"• Consider adding more bias (currently {bias['count']}, recommended 20+)")
-                if flats['count'] < 20:
-                    recommendations.append(f"• Consider adding more flats (currently {flats['count']}, recommended 20+)")
+                if darks['count'] < MIN_FRAMES_RECOMMENDED:
+                    recommendations.append(f"• Consider adding more darks (currently {darks['count']}, recommended {MIN_FRAMES_RECOMMENDED}+)")
+                if bias['count'] < MIN_FRAMES_RECOMMENDED:
+                    recommendations.append(f"• Consider adding more bias (currently {bias['count']}, recommended {MIN_FRAMES_RECOMMENDED}+)")
+                if flats['count'] < MIN_FRAMES_RECOMMENDED:
+                    recommendations.append(f"• Consider adding more flats (currently {flats['count']}, recommended {MIN_FRAMES_RECOMMENDED}+)")
 
         return '\n'.join(recommendations)
 
