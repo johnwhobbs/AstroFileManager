@@ -1565,22 +1565,123 @@ class XISFCatalogGUI(QMainWindow):
         """Create the view tab"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        
-        # Refresh button
+
+        # Summary statistics panel
+        stats_group = QGroupBox("Database Summary")
+        stats_layout = QHBoxLayout()
+
+        # Statistics cards
+        self.catalog_total_files_label = QLabel("0")
+        self.catalog_total_files_label.setStyleSheet("font-size: 24px; font-weight: bold;")
+        self.catalog_total_files_card = self.create_stat_card("Total Files", self.catalog_total_files_label)
+        stats_layout.addWidget(self.catalog_total_files_card)
+
+        self.catalog_total_exposure_label = QLabel("0.0 hrs")
+        self.catalog_total_exposure_label.setStyleSheet("font-size: 24px; font-weight: bold;")
+        self.catalog_total_exposure_card = self.create_stat_card("Total Exposure", self.catalog_total_exposure_label)
+        stats_layout.addWidget(self.catalog_total_exposure_card)
+
+        self.catalog_objects_label = QLabel("0")
+        self.catalog_objects_label.setStyleSheet("font-size: 24px; font-weight: bold;")
+        self.catalog_objects_card = self.create_stat_card("Objects", self.catalog_objects_label)
+        stats_layout.addWidget(self.catalog_objects_card)
+
+        self.catalog_breakdown_label = QLabel("L:0 D:0 F:0 B:0")
+        self.catalog_breakdown_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        self.catalog_breakdown_card = self.create_stat_card("Frame Breakdown", self.catalog_breakdown_label)
+        stats_layout.addWidget(self.catalog_breakdown_card)
+
+        self.catalog_date_range_label = QLabel("N/A")
+        self.catalog_date_range_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        self.catalog_date_range_card = self.create_stat_card("Date Range", self.catalog_date_range_label)
+        stats_layout.addWidget(self.catalog_date_range_card)
+
+        stats_group.setLayout(stats_layout)
+        layout.addWidget(stats_group)
+
+        # Search and filter controls
+        filter_layout = QHBoxLayout()
+
+        filter_layout.addWidget(QLabel("Search:"))
+        self.catalog_search_box = QLineEdit()
+        self.catalog_search_box.setPlaceholderText("Filter by name, object, filter...")
+        self.catalog_search_box.textChanged.connect(self.filter_catalog_tree)
+        filter_layout.addWidget(self.catalog_search_box)
+
         refresh_btn = QPushButton('Refresh')
         refresh_btn.clicked.connect(self.refresh_catalog_view)
-        layout.addWidget(refresh_btn)
-        
-        # Tree widget
+        filter_layout.addWidget(refresh_btn)
+
+        layout.addLayout(filter_layout)
+
+        # Tree widget with expanded columns
         self.catalog_tree = QTreeWidget()
-        self.catalog_tree.setColumnCount(4)
+        self.catalog_tree.setColumnCount(9)
         self.catalog_tree.setHeaderLabels([
-            'Name', 'Image Type', 'Telescope', 'Instrument'
+            'Name', 'Image Type', 'Filter', 'Exposure', 'Temp', 'Binning', 'Date', 'Telescope', 'Instrument'
         ])
+        # Set initial column widths
         self.catalog_tree.setColumnWidth(0, 300)
+        self.catalog_tree.setColumnWidth(1, 120)
+        self.catalog_tree.setColumnWidth(2, 80)
+        self.catalog_tree.setColumnWidth(3, 80)
+        self.catalog_tree.setColumnWidth(4, 60)
+        self.catalog_tree.setColumnWidth(5, 70)
+        self.catalog_tree.setColumnWidth(6, 100)
+        self.catalog_tree.setColumnWidth(7, 120)
+        self.catalog_tree.setColumnWidth(8, 120)
         layout.addWidget(self.catalog_tree)
-        
+
         return widget
+
+    def create_stat_card(self, title, value_label):
+        """Create a statistics card widget"""
+        card = QWidget()
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(10, 10, 10, 10)
+
+        title_label = QLabel(title)
+        title_label.setStyleSheet("color: #888888; font-size: 11px;")
+        card_layout.addWidget(title_label)
+
+        card_layout.addWidget(value_label)
+
+        # Add border and background
+        card.setStyleSheet("""
+            QWidget {
+                background-color: #f5f5f5;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+            }
+        """)
+
+        return card
+
+    def filter_catalog_tree(self):
+        """Filter the catalog tree based on search text"""
+        search_text = self.catalog_search_box.text().lower()
+
+        def filter_item(item):
+            """Recursively filter tree items"""
+            # Check if this item matches
+            item_text = ' '.join([item.text(i).lower() for i in range(item.columnCount())])
+            matches = search_text in item_text
+
+            # Check children
+            child_visible = False
+            for i in range(item.childCount()):
+                if filter_item(item.child(i)):
+                    child_visible = True
+
+            # Show item if it matches or has visible children
+            visible = matches or child_visible
+            item.setHidden(not visible)
+            return visible
+
+        # Filter all top-level items
+        root = self.catalog_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            filter_item(root.child(i))
     
     def import_files(self):
         """Import individual XISF files"""
@@ -1703,19 +1804,84 @@ class XISFCatalogGUI(QMainWindow):
                 QMessageBox.information(self, 'Success', 'Database cleared successfully!')
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to clear database: {e}')
-    
+
+    def update_catalog_statistics(self, cursor):
+        """Update the catalog statistics panel"""
+        # Total files
+        cursor.execute('SELECT COUNT(*) FROM xisf_files')
+        total_files = cursor.fetchone()[0]
+        self.catalog_total_files_label.setText(str(total_files))
+
+        # Total exposure (light frames only)
+        cursor.execute('''
+            SELECT SUM(exposure) / 3600.0
+            FROM xisf_files
+            WHERE (imagetyp = 'Light Frame' OR imagetyp LIKE '%Light%')
+                AND exposure IS NOT NULL
+        ''')
+        total_exposure = cursor.fetchone()[0] or 0
+        self.catalog_total_exposure_label.setText(f"{total_exposure:.1f} hrs")
+
+        # Total objects
+        cursor.execute('SELECT COUNT(DISTINCT object) FROM xisf_files WHERE object IS NOT NULL')
+        total_objects = cursor.fetchone()[0]
+        self.catalog_objects_label.setText(str(total_objects))
+
+        # Frame breakdown
+        cursor.execute('''
+            SELECT
+                SUM(CASE WHEN imagetyp LIKE '%Light%' THEN 1 ELSE 0 END) as lights,
+                SUM(CASE WHEN imagetyp LIKE '%Dark%' THEN 1 ELSE 0 END) as darks,
+                SUM(CASE WHEN imagetyp LIKE '%Flat%' THEN 1 ELSE 0 END) as flats,
+                SUM(CASE WHEN imagetyp LIKE '%Bias%' THEN 1 ELSE 0 END) as bias
+            FROM xisf_files
+        ''')
+        lights, darks, flats, bias = cursor.fetchone()
+        self.catalog_breakdown_label.setText(f"L:{lights or 0} D:{darks or 0} F:{flats or 0} B:{bias or 0}")
+
+        # Date range
+        cursor.execute('''
+            SELECT MIN(date_loc), MAX(date_loc)
+            FROM xisf_files
+            WHERE date_loc IS NOT NULL
+        ''')
+        min_date, max_date = cursor.fetchone()
+        if min_date and max_date:
+            if min_date == max_date:
+                self.catalog_date_range_label.setText(min_date)
+            else:
+                self.catalog_date_range_label.setText(f"{min_date} to {max_date}")
+        else:
+            self.catalog_date_range_label.setText("N/A")
+
     def refresh_catalog_view(self):
         """Refresh the catalog view tree"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
+            # Update summary statistics
+            self.update_catalog_statistics(cursor)
+
             self.catalog_tree.clear()
 
             # ===== LIGHT FRAMES SECTION =====
+            # Get total light frame counts
+            cursor.execute('''
+                SELECT COUNT(*), SUM(exposure) / 3600.0
+                FROM xisf_files
+                WHERE object IS NOT NULL
+            ''')
+            light_total_count, light_total_exp = cursor.fetchone()
+            light_total_exp = light_total_exp or 0
+
             light_frames_root = QTreeWidgetItem(self.catalog_tree)
-            light_frames_root.setText(0, "Light Frames")
+            light_frames_root.setText(0, f"Light Frames ({light_total_count} files, {light_total_exp:.1f}h)")
             light_frames_root.setFlags(light_frames_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+            # Make parent nodes bold
+            font = light_frames_root.font(0)
+            font.setBold(True)
+            light_frames_root.setFont(0, font)
 
             # Get all objects (light frames only)
             cursor.execute('''
@@ -1732,9 +1898,10 @@ class XISFCatalogGUI(QMainWindow):
             objects = cursor.fetchall()
 
             for obj_name, obj_file_count, obj_total_exp in objects:
-                # Create object node
+                # Create object node with aggregate info
+                obj_exp_hrs = (obj_total_exp or 0) / 3600.0
                 obj_item = QTreeWidgetItem(light_frames_root)
-                obj_item.setText(0, obj_name or 'Unknown')
+                obj_item.setText(0, f"{obj_name or 'Unknown'} ({obj_file_count} files, {obj_exp_hrs:.1f}h)")
                 obj_item.setFlags(obj_item.flags() | Qt.ItemFlag.ItemIsAutoTristate)
 
                 # Get all filters for this object
@@ -1752,9 +1919,11 @@ class XISFCatalogGUI(QMainWindow):
                 filters = cursor.fetchall()
 
                 for filter_name, filter_file_count, filter_total_exp in filters:
-                    # Create filter node
+                    # Create filter node with aggregate info
+                    filter_exp_hrs = (filter_total_exp or 0) / 3600.0
                     filter_item = QTreeWidgetItem(obj_item)
-                    filter_item.setText(0, filter_name or 'No Filter')
+                    filter_item.setText(0, f"{filter_name or 'No Filter'} ({filter_file_count} files, {filter_exp_hrs:.1f}h)")
+                    filter_item.setText(2, filter_name or 'No Filter')  # Show filter in Filter column too
 
                     # Get all dates for this object and filter
                     cursor.execute('''
@@ -1771,9 +1940,11 @@ class XISFCatalogGUI(QMainWindow):
                     dates = cursor.fetchall()
 
                     for date_val, date_file_count, date_total_exp in dates:
-                        # Create date node
+                        # Create date node with aggregate info
+                        date_exp_hrs = (date_total_exp or 0) / 3600.0
                         date_item = QTreeWidgetItem(filter_item)
-                        date_item.setText(0, date_val or 'No Date')
+                        date_item.setText(0, f"{date_val or 'No Date'} ({date_file_count} files, {date_exp_hrs:.1f}h)")
+                        date_item.setText(6, date_val or 'No Date')  # Show date in Date column too
 
                         # Get all files for this object, filter, and date
                         cursor.execute('''
@@ -1783,7 +1954,11 @@ class XISFCatalogGUI(QMainWindow):
                                 exposure,
                                 telescop,
                                 instrume,
-                                date_loc
+                                date_loc,
+                                filter,
+                                ccd_temp,
+                                xbinning,
+                                ybinning
                             FROM xisf_files
                             WHERE object = ?
                                 AND (filter = ? OR (filter IS NULL AND ? IS NULL))
@@ -1793,22 +1968,41 @@ class XISFCatalogGUI(QMainWindow):
 
                         files = cursor.fetchall()
 
-                        for filename, imagetyp, exposure, telescop, instrume, date_loc in files:
-                            # Create file node
+                        for filename, imagetyp, exposure, telescop, instrume, date_loc, filt, temp, xbin, ybin in files:
+                            # Create file node with all columns
                             file_item = QTreeWidgetItem(date_item)
                             file_item.setText(0, filename)
                             file_item.setText(1, imagetyp or 'N/A')
-                            file_item.setText(2, telescop or 'N/A')
-                            file_item.setText(3, instrume or 'N/A')
+                            file_item.setText(2, filt or 'N/A')
+                            file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
+                            file_item.setText(4, f"{temp:.1f}°C" if temp is not None else 'N/A')
+                            binning = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
+                            file_item.setText(5, binning)
+                            file_item.setText(6, date_loc or 'N/A')
+                            file_item.setText(7, telescop or 'N/A')
+                            file_item.setText(8, instrume or 'N/A')
 
             # ===== CALIBRATION FRAMES SECTION =====
+            # Get total calibration counts
+            cursor.execute('''
+                SELECT COUNT(*)
+                FROM xisf_files
+                WHERE object IS NULL
+            ''')
+            calib_total_count = cursor.fetchone()[0]
+
             calib_root = QTreeWidgetItem(self.catalog_tree)
-            calib_root.setText(0, "Calibration Frames")
+            calib_root.setText(0, f"Calibration Frames ({calib_total_count} files)")
             calib_root.setFlags(calib_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+            font = calib_root.font(0)
+            font.setBold(True)
+            calib_root.setFont(0, font)
 
             # ----- DARK FRAMES: exposure_temp_binning → date → files -----
+            cursor.execute('SELECT COUNT(*) FROM xisf_files WHERE imagetyp LIKE "%Dark%" AND object IS NULL')
+            dark_count = cursor.fetchone()[0]
             dark_root = QTreeWidgetItem(calib_root)
-            dark_root.setText(0, "Dark Frames")
+            dark_root.setText(0, f"Dark Frames ({dark_count} files)")
             dark_root.setFlags(dark_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
 
             cursor.execute('''
@@ -1827,14 +2021,17 @@ class XISFCatalogGUI(QMainWindow):
             dark_groups = cursor.fetchall()
 
             for exp, temp, xbin, ybin, count in dark_groups:
-                # Create dark group node (e.g., "300s_-10C_Bin1x1")
+                # Create dark group node (e.g., "300s_-10C_Bin1x1 (25 files)")
                 exp_str = f"{int(exp)}s" if exp else "0s"
                 temp_str = f"{int(temp)}C" if temp is not None else "0C"
                 binning = f"Bin{int(xbin)}x{int(ybin)}" if xbin and ybin else "Bin1x1"
-                group_name = f"{exp_str}_{temp_str}_{binning}"
+                group_name = f"{exp_str}_{temp_str}_{binning} ({count} files)"
 
                 dark_group_item = QTreeWidgetItem(dark_root)
                 dark_group_item.setText(0, group_name)
+                dark_group_item.setText(3, exp_str)  # Exposure column
+                dark_group_item.setText(4, temp_str)  # Temp column
+                dark_group_item.setText(5, binning)  # Binning column
 
                 # Get dates for this dark group
                 cursor.execute('''
@@ -1857,7 +2054,7 @@ class XISFCatalogGUI(QMainWindow):
 
                     # Get files for this dark group and date
                     cursor.execute('''
-                        SELECT filename, imagetyp, exposure, telescop, instrume
+                        SELECT filename, imagetyp, exposure, telescop, instrume, date_loc, filter, ccd_temp, xbinning, ybinning
                         FROM xisf_files
                         WHERE imagetyp LIKE '%Dark%'
                             AND object IS NULL
@@ -1871,16 +2068,24 @@ class XISFCatalogGUI(QMainWindow):
 
                     dark_files = cursor.fetchall()
 
-                    for filename, imagetyp, exposure, telescop, instrume in dark_files:
+                    for filename, imagetyp, exposure, telescop, instrume, date_loc, filt, temp_val, xb, yb in dark_files:
                         file_item = QTreeWidgetItem(date_item)
                         file_item.setText(0, filename)
                         file_item.setText(1, imagetyp or 'N/A')
-                        file_item.setText(2, telescop or 'N/A')
-                        file_item.setText(3, instrume or 'N/A')
+                        file_item.setText(2, filt or 'N/A')
+                        file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
+                        file_item.setText(4, f"{temp_val:.1f}°C" if temp_val is not None else 'N/A')
+                        binning_str = f"{int(xb)}x{int(yb)}" if xb and yb else 'N/A'
+                        file_item.setText(5, binning_str)
+                        file_item.setText(6, date_loc or 'N/A')
+                        file_item.setText(7, telescop or 'N/A')
+                        file_item.setText(8, instrume or 'N/A')
 
             # ----- FLAT FRAMES: date → filter_temp_binning → files -----
+            cursor.execute('SELECT COUNT(*) FROM xisf_files WHERE imagetyp LIKE "%Flat%" AND object IS NULL')
+            flat_count = cursor.fetchone()[0]
             flat_root = QTreeWidgetItem(calib_root)
-            flat_root.setText(0, "Flat Frames")
+            flat_root.setText(0, f"Flat Frames ({flat_count} files)")
             flat_root.setFlags(flat_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
 
             cursor.execute('''
@@ -1915,18 +2120,21 @@ class XISFCatalogGUI(QMainWindow):
                 flat_groups = cursor.fetchall()
 
                 for filt, temp, xbin, ybin, count in flat_groups:
-                    # Create flat group node (e.g., "Ha_-10C_Bin1x1")
+                    # Create flat group node (e.g., "Ha_-10C_Bin1x1 (30 files)")
                     filt_str = filt or "NoFilter"
                     temp_str = f"{int(temp)}C" if temp is not None else "0C"
                     binning = f"Bin{int(xbin)}x{int(ybin)}" if xbin and ybin else "Bin1x1"
-                    group_name = f"{filt_str}_{temp_str}_{binning}"
+                    group_name = f"{filt_str}_{temp_str}_{binning} ({count} files)"
 
                     flat_group_item = QTreeWidgetItem(date_item)
                     flat_group_item.setText(0, group_name)
+                    flat_group_item.setText(2, filt_str)  # Filter column
+                    flat_group_item.setText(4, temp_str)  # Temp column
+                    flat_group_item.setText(5, binning)  # Binning column
 
                     # Get files for this flat group
                     cursor.execute('''
-                        SELECT filename, imagetyp, exposure, telescop, instrume
+                        SELECT filename, imagetyp, exposure, telescop, instrume, date_loc, filter, ccd_temp, xbinning, ybinning
                         FROM xisf_files
                         WHERE imagetyp LIKE '%Flat%'
                             AND object IS NULL
@@ -1940,16 +2148,24 @@ class XISFCatalogGUI(QMainWindow):
 
                     flat_files = cursor.fetchall()
 
-                    for filename, imagetyp, exposure, telescop, instrume in flat_files:
+                    for filename, imagetyp, exposure, telescop, instrume, date_loc, filt_val, temp_val, xb, yb in flat_files:
                         file_item = QTreeWidgetItem(flat_group_item)
                         file_item.setText(0, filename)
                         file_item.setText(1, imagetyp or 'N/A')
-                        file_item.setText(2, telescop or 'N/A')
-                        file_item.setText(3, instrume or 'N/A')
+                        file_item.setText(2, filt_val or 'N/A')
+                        file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
+                        file_item.setText(4, f"{temp_val:.1f}°C" if temp_val is not None else 'N/A')
+                        binning_str = f"{int(xb)}x{int(yb)}" if xb and yb else 'N/A'
+                        file_item.setText(5, binning_str)
+                        file_item.setText(6, date_loc or 'N/A')
+                        file_item.setText(7, telescop or 'N/A')
+                        file_item.setText(8, instrume or 'N/A')
 
             # ----- BIAS FRAMES: temp_binning → date → files -----
+            cursor.execute('SELECT COUNT(*) FROM xisf_files WHERE imagetyp LIKE "%Bias%" AND object IS NULL')
+            bias_count = cursor.fetchone()[0]
             bias_root = QTreeWidgetItem(calib_root)
-            bias_root.setText(0, "Bias Frames")
+            bias_root.setText(0, f"Bias Frames ({bias_count} files)")
             bias_root.setFlags(bias_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
 
             cursor.execute('''
@@ -1967,13 +2183,15 @@ class XISFCatalogGUI(QMainWindow):
             bias_groups = cursor.fetchall()
 
             for temp, xbin, ybin, count in bias_groups:
-                # Create bias group node (e.g., "-10C_Bin1x1")
+                # Create bias group node (e.g., "-10C_Bin1x1 (50 files)")
                 temp_str = f"{int(temp)}C" if temp is not None else "0C"
                 binning = f"Bin{int(xbin)}x{int(ybin)}" if xbin and ybin else "Bin1x1"
-                group_name = f"{temp_str}_{binning}"
+                group_name = f"{temp_str}_{binning} ({count} files)"
 
                 bias_group_item = QTreeWidgetItem(bias_root)
                 bias_group_item.setText(0, group_name)
+                bias_group_item.setText(4, temp_str)  # Temp column
+                bias_group_item.setText(5, binning)  # Binning column
 
                 # Get dates for this bias group
                 cursor.execute('''
@@ -1995,7 +2213,7 @@ class XISFCatalogGUI(QMainWindow):
 
                     # Get files for this bias group and date
                     cursor.execute('''
-                        SELECT filename, imagetyp, exposure, telescop, instrume
+                        SELECT filename, imagetyp, exposure, telescop, instrume, date_loc, filter, ccd_temp, xbinning, ybinning
                         FROM xisf_files
                         WHERE imagetyp LIKE '%Bias%'
                             AND object IS NULL
@@ -2008,12 +2226,18 @@ class XISFCatalogGUI(QMainWindow):
 
                     bias_files = cursor.fetchall()
 
-                    for filename, imagetyp, exposure, telescop, instrume in bias_files:
+                    for filename, imagetyp, exposure, telescop, instrume, date_loc, filt, temp_val, xb, yb in bias_files:
                         file_item = QTreeWidgetItem(date_item)
                         file_item.setText(0, filename)
                         file_item.setText(1, imagetyp or 'N/A')
-                        file_item.setText(2, telescop or 'N/A')
-                        file_item.setText(3, instrume or 'N/A')
+                        file_item.setText(2, filt or 'N/A')
+                        file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
+                        file_item.setText(4, f"{temp_val:.1f}°C" if temp_val is not None else 'N/A')
+                        binning_str = f"{int(xb)}x{int(yb)}" if xb and yb else 'N/A'
+                        file_item.setText(5, binning_str)
+                        file_item.setText(6, date_loc or 'N/A')
+                        file_item.setText(7, telescop or 'N/A')
+                        file_item.setText(8, instrume or 'N/A')
 
             conn.close()
 
