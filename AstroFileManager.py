@@ -383,7 +383,9 @@ class XISFCatalogGUI(QMainWindow):
         self.init_ui()
         # Restore settings after all UI is created
         self.restore_settings()
-    
+        # Populate the View Catalog tab on startup (fixes Issue #44)
+        self.refresh_catalog_view()
+
     def init_ui(self):
         """Initialize the user interface"""
         self.setWindowTitle('AstroFileManager')
