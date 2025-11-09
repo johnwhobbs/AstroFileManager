@@ -36,8 +36,10 @@ from core.database import DatabaseManager
 from core.calibration import CalibrationMatcher
 
 # Import import/export modules
-from import_export.import_worker import ImportWorker
 from import_export.csv_exporter import CSVExporter
+
+# Import UI modules
+from ui.import_tab import ImportTab
 
 
 def generate_organized_path(repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, original_filename):
@@ -148,12 +150,15 @@ class XISFCatalogGUI(QMainWindow):
         layout.addWidget(tabs)
         
         # Create tabs
-        self.import_tab = self.create_import_tab()
+        self.import_tab = ImportTab(self.db_path, self.settings)
         self.view_tab = self.create_view_tab()
         self.sessions_tab = self.create_sessions_tab()
         self.analytics_tab = self.create_analytics_tab()
         self.maintenance_tab = self.create_maintenance_tab()
         self.settings_tab = self.create_settings_tab()
+
+        # Set cross-tab dependencies after all tabs are created
+        self.import_tab.clear_db_btn = self.clear_db_btn
 
         tabs.addTab(self.view_tab, "View Catalog")
         tabs.addTab(self.sessions_tab, "Sessions")
@@ -165,77 +170,6 @@ class XISFCatalogGUI(QMainWindow):
         # Connect tab change to refresh
         tabs.currentChanged.connect(self.on_tab_changed)
     
-    def create_import_tab(self):
-        """Create the import tab"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        # Database info
-        db_label = QLabel(f"Database: {self.db_path}")
-        layout.addWidget(db_label)
-        
-        # Buttons
-        button_layout = QHBoxLayout()
-        
-        self.import_files_btn = QPushButton('Import XISF Files')
-        self.import_files_btn.clicked.connect(self.import_files)
-        button_layout.addWidget(self.import_files_btn)
-        
-        self.import_folder_btn = QPushButton('Import Folder')
-        self.import_folder_btn.clicked.connect(self.import_folder)
-        button_layout.addWidget(self.import_folder_btn)
-        
-        layout.addLayout(button_layout)
-
-        # Import Mode Selection
-        import_mode_group = QGroupBox("Import Mode")
-        import_mode_layout = QVBoxLayout()
-
-        self.import_mode_button_group = QButtonGroup()
-        self.import_only_radio = QRadioButton("Import only (store original paths)")
-        self.import_organize_radio = QRadioButton("Import and organize (copy to repository)")
-
-        self.import_mode_button_group.addButton(self.import_only_radio, 0)
-        self.import_mode_button_group.addButton(self.import_organize_radio, 1)
-
-        import_mode_layout.addWidget(self.import_only_radio)
-
-        organize_help = QLabel("Copies files to organized folder structure in repository location.")
-        organize_help.setStyleSheet("color: #888888; font-size: 10px; margin-left: 20px;")
-        import_mode_layout.addWidget(self.import_organize_radio)
-        import_mode_layout.addWidget(organize_help)
-
-        # Set default mode from settings
-        import_mode = self.settings.value('import_mode', 'import_only')
-        if import_mode == 'import_organize':
-            self.import_organize_radio.setChecked(True)
-        else:
-            self.import_only_radio.setChecked(True)
-
-        # Connect signal to save setting
-        self.import_mode_button_group.buttonClicked.connect(self.save_import_mode)
-
-        import_mode_group.setLayout(import_mode_layout)
-        layout.addWidget(import_mode_group)
-
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
-        
-        # Status label
-        self.status_label = QLabel('')
-        layout.addWidget(self.status_label)
-        
-        # Log area
-        log_label = QLabel('Import Log:')
-        layout.addWidget(log_label)
-        
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        layout.addWidget(self.log_text)
-        
-        return widget
 
     def create_sessions_tab(self):
         """Create the sessions tab"""
@@ -1172,14 +1106,6 @@ class XISFCatalogGUI(QMainWindow):
             f'Timezone set to: {timezone}\n\nThis will be used for converting DATE-OBS timestamps.'
         )
 
-    def save_import_mode(self):
-        """Save the selected import mode"""
-        if self.import_organize_radio.isChecked():
-            mode = 'import_organize'
-        else:
-            mode = 'import_only'
-        self.settings.setValue('import_mode', mode)
-
     def apply_theme_setting(self):
         """Apply the selected theme"""
         if self.standard_theme_radio.isChecked():
@@ -1603,106 +1529,6 @@ Imported: {result[11] or 'N/A'}
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to export: {e}')
 
-    def import_files(self):
-        """Import individual XISF files"""
-        files, _ = QFileDialog.getOpenFileNames(
-            self, 'Select XISF Files', '', 'XISF Files (*.xisf)'
-        )
-        
-        if files:
-            self.start_import(files)
-    
-    def import_folder(self):
-        """Import all XISF files from a folder and its subfolders"""
-        folder = QFileDialog.getExistingDirectory(self, 'Select Folder')
-        
-        if folder:
-            # Recursively find all .xisf files in folder and subfolders
-            files = list(Path(folder).rglob('*.xisf'))
-            if files:
-                self.start_import([str(f) for f in files])
-            else:
-                QMessageBox.warning(self, 'No Files', 'No XISF files found in selected folder or its subfolders.')
-    
-    def start_import(self, files):
-        """Start the import worker thread"""
-        if not os.path.exists(self.db_path):
-            QMessageBox.critical(
-                self, 'Database Error',
-                f'Database not found: {self.db_path}\nPlease create it first.'
-            )
-            return
-        
-        self.log_text.clear()
-        self.log_text.append(f"Starting import of {len(files)} files...\n")
-        
-        # Disable buttons
-        self.import_files_btn.setEnabled(False)
-        self.import_folder_btn.setEnabled(False)
-        self.clear_db_btn.setEnabled(False)
-        
-        # Show progress bar
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setMaximum(len(files))
-        self.progress_bar.setValue(0)
-        
-        # Create and start worker
-        timezone = self.settings.value('timezone', 'UTC')
-
-        # Check import mode
-        import_mode = self.settings.value('import_mode', 'import_only')
-        organize = (import_mode == 'import_organize')
-        repo_path = self.settings.value('repository_path', '') if organize else None
-
-        # Warn if organize mode but no repository path
-        if organize and not repo_path:
-            QMessageBox.warning(
-                self, 'No Repository Path',
-                'Import and organize mode is selected, but repository path is not set.\n\n'
-                'Files will be imported with original paths.\n\n'
-                'Set repository path in Settings tab to enable organization during import.'
-            )
-            organize = False
-            repo_path = None
-
-        # Log import mode
-        if organize:
-            self.log_text.append(f"Import mode: Organize files to repository\n")
-            self.log_text.append(f"Repository: {repo_path}\n")
-        else:
-            self.log_text.append(f"Import mode: Store original paths\n")
-
-        self.worker = ImportWorker(files, self.db_path, timezone, organize, repo_path)
-        self.worker.progress.connect(self.on_import_progress)
-        self.worker.finished.connect(self.on_import_finished)
-        self.worker.start()
-    
-    def on_import_progress(self, current, total, message):
-        """Handle progress updates"""
-        self.progress_bar.setValue(current)
-        self.status_label.setText(f"Processing {current}/{total}")
-        self.log_text.append(message)
-    
-    def on_import_finished(self, processed, errors):
-        """Handle import completion"""
-        self.progress_bar.setVisible(False)
-        self.status_label.setText('')
-        
-        self.log_text.append(f"\n{'='*60}")
-        self.log_text.append(f"Import complete!")
-        self.log_text.append(f"Successfully processed: {processed}")
-        self.log_text.append(f"Errors: {errors}")
-        
-        # Re-enable buttons
-        self.import_files_btn.setEnabled(True)
-        self.import_folder_btn.setEnabled(True)
-        self.clear_db_btn.setEnabled(True)
-        
-        QMessageBox.information(
-            self, 'Import Complete',
-            f'Successfully processed: {processed}\nErrors: {errors}'
-        )
-    
     def clear_database(self):
         """Clear all records from the database"""
         reply = QMessageBox.question(
