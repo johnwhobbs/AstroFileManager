@@ -24,6 +24,10 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 import xisf
 import re
 
+# Import core business logic modules
+from core.database import DatabaseManager
+from core.calibration import CalibrationMatcher
+
 
 # ============================================================================
 # CONSTANTS
@@ -402,6 +406,20 @@ class XISFCatalogGUI(QMainWindow):
         super().__init__()
         self.db_path = 'xisf_catalog.db'
         self.settings = QSettings('AstroFileManager', 'AstroFileManager')
+
+        # Initialize core business logic components
+        self.db = DatabaseManager(self.db_path)
+        self.calibration = CalibrationMatcher(
+            self.db,
+            include_masters=True,
+            temp_tolerance_darks=TEMP_TOLERANCE_DARKS,
+            temp_tolerance_flats=TEMP_TOLERANCE_FLATS,
+            temp_tolerance_bias=TEMP_TOLERANCE_BIAS,
+            exposure_tolerance=EXPOSURE_TOLERANCE,
+            min_frames_recommended=MIN_FRAMES_RECOMMENDED,
+            min_frames_acceptable=MIN_FRAMES_ACCEPTABLE
+        )
+
         self.init_ui()
         # Restore settings after all UI is created
         self.restore_settings()
@@ -2721,224 +2739,29 @@ Imported: {result[11] or 'N/A'}
             QMessageBox.critical(self, 'Error', f'Failed to refresh sessions: {e}')
 
     def find_matching_darks(self, cursor, exposure, temp, xbin, ybin):
-        """Find matching dark frames with temperature tolerance"""
-        include_masters = self.include_masters_checkbox.isChecked()
-
-        # Temperature tolerance
-        temp_min = temp - TEMP_TOLERANCE_DARKS if temp else -999
-        temp_max = temp + TEMP_TOLERANCE_DARKS if temp else 999
-
-        # Find regular darks
-        cursor.execute(f'''
-            SELECT COUNT(*), AVG(ccd_temp)
-            FROM xisf_files
-            WHERE imagetyp LIKE '%Dark%'
-                AND imagetyp NOT LIKE '%Master%'
-                AND ABS(exposure - ?) < {EXPOSURE_TOLERANCE}
-                AND ccd_temp BETWEEN ? AND ?
-                AND xbinning = ?
-                AND ybinning = ?
-        ''', (exposure, temp_min, temp_max, xbin, ybin))
-
-        dark_count, dark_temp = cursor.fetchone()
-        dark_count = dark_count or 0
-
-        # Find master darks
-        master_count = 0
-        if include_masters:
-            cursor.execute(f'''
-                SELECT COUNT(*)
-                FROM xisf_files
-                WHERE imagetyp LIKE '%Master%'
-                    AND imagetyp LIKE '%Dark%'
-                    AND ABS(exposure - ?) < {EXPOSURE_TOLERANCE}
-                    AND ccd_temp BETWEEN ? AND ?
-                    AND xbinning = ?
-                    AND ybinning = ?
-            ''', (exposure, temp_min, temp_max, xbin, ybin))
-
-            master_count = cursor.fetchone()[0] or 0
-
-        # Calculate quality score (0-100)
-        quality = min(100, (dark_count / MIN_FRAMES_RECOMMENDED) * 100) if dark_count > 0 else 0
-
-        # Determine display text and status
-        if master_count > 0:
-            display = f"✓ {dark_count} + {master_count} Master"
-            has_frames = True
-        elif dark_count >= MIN_FRAMES_ACCEPTABLE:
-            display = f"✓ {dark_count} frames"
-            has_frames = True
-        elif dark_count > 0:
-            display = f"⚠ {dark_count} frames (need {MIN_FRAMES_ACCEPTABLE}+)"
-            has_frames = True
-        else:
-            display = "✗ Missing"
-            has_frames = False
-
-        return {
-            'count': dark_count,
-            'master_count': master_count,
-            'avg_temp': dark_temp,
-            'quality': quality,
-            'display': display,
-            'has_frames': has_frames,
-            'exposure': exposure
-        }
+        """Find matching dark frames with temperature tolerance (delegates to CalibrationMatcher)"""
+        # Update include_masters from checkbox state
+        self.calibration.include_masters = self.include_masters_checkbox.isChecked()
+        # Delegate to CalibrationMatcher
+        return self.calibration.find_matching_darks(exposure, temp, xbin, ybin)
 
     def find_matching_bias(self, cursor, temp, xbin, ybin):
-        """Find matching bias frames with temperature tolerance"""
-        include_masters = self.include_masters_checkbox.isChecked()
-
-        # Temperature tolerance
-        temp_min = temp - TEMP_TOLERANCE_BIAS if temp else -999
-        temp_max = temp + TEMP_TOLERANCE_BIAS if temp else 999
-
-        # Find regular bias
-        cursor.execute('''
-            SELECT COUNT(*), AVG(ccd_temp)
-            FROM xisf_files
-            WHERE imagetyp LIKE '%Bias%'
-                AND imagetyp NOT LIKE '%Master%'
-                AND ccd_temp BETWEEN ? AND ?
-                AND xbinning = ?
-                AND ybinning = ?
-        ''', (temp_min, temp_max, xbin, ybin))
-
-        bias_count, bias_temp = cursor.fetchone()
-        bias_count = bias_count or 0
-
-        # Find master bias
-        master_count = 0
-        if include_masters:
-            cursor.execute('''
-                SELECT COUNT(*)
-                FROM xisf_files
-                WHERE imagetyp LIKE '%Master%'
-                    AND imagetyp LIKE '%Bias%'
-                    AND ccd_temp BETWEEN ? AND ?
-                    AND xbinning = ?
-                    AND ybinning = ?
-            ''', (temp_min, temp_max, xbin, ybin))
-
-            master_count = cursor.fetchone()[0] or 0
-
-        # Calculate quality score (0-100)
-        quality = min(100, (bias_count / MIN_FRAMES_RECOMMENDED) * 100) if bias_count > 0 else 0
-
-        # Determine display text and status
-        if master_count > 0:
-            display = f"✓ {bias_count} + {master_count} Master"
-            has_frames = True
-        elif bias_count >= MIN_FRAMES_ACCEPTABLE:
-            display = f"✓ {bias_count} frames"
-            has_frames = True
-        elif bias_count > 0:
-            display = f"⚠ {bias_count} frames (need {MIN_FRAMES_ACCEPTABLE}+)"
-            has_frames = True
-        else:
-            display = "✗ Missing"
-            has_frames = False
-
-        return {
-            'count': bias_count,
-            'master_count': master_count,
-            'avg_temp': bias_temp,
-            'quality': quality,
-            'display': display,
-            'has_frames': has_frames
-        }
+        """Find matching bias frames with temperature tolerance (delegates to CalibrationMatcher)"""
+        # Update include_masters from checkbox state
+        self.calibration.include_masters = self.include_masters_checkbox.isChecked()
+        # Delegate to CalibrationMatcher
+        return self.calibration.find_matching_bias(temp, xbin, ybin)
 
     def find_matching_flats(self, cursor, filter_name, temp, xbin, ybin, session_date):
-        """Find matching flat frames with temperature tolerance and exact date match"""
-        include_masters = self.include_masters_checkbox.isChecked()
-
-        # Temperature tolerance for flats
-        temp_min = temp - TEMP_TOLERANCE_FLATS if temp else -999
-        temp_max = temp + TEMP_TOLERANCE_FLATS if temp else 999
-
-        # Find regular flats (exact date match)
-        cursor.execute('''
-            SELECT COUNT(*), AVG(ccd_temp)
-            FROM xisf_files
-            WHERE imagetyp LIKE '%Flat%'
-                AND imagetyp NOT LIKE '%Master%'
-                AND (filter = ? OR (filter IS NULL AND ? IS NULL))
-                AND ccd_temp BETWEEN ? AND ?
-                AND xbinning = ?
-                AND ybinning = ?
-                AND date_loc = ?
-        ''', (filter_name, filter_name, temp_min, temp_max, xbin, ybin, session_date))
-
-        flat_count, flat_temp = cursor.fetchone()
-        flat_count = flat_count or 0
-
-        # Find master flats (exact date match)
-        master_count = 0
-        if include_masters:
-            cursor.execute('''
-                SELECT COUNT(*)
-                FROM xisf_files
-                WHERE imagetyp LIKE '%Master%'
-                    AND imagetyp LIKE '%Flat%'
-                    AND (filter = ? OR (filter IS NULL AND ? IS NULL))
-                    AND ccd_temp BETWEEN ? AND ?
-                    AND xbinning = ?
-                    AND ybinning = ?
-                    AND date_loc = ?
-            ''', (filter_name, filter_name, temp_min, temp_max, xbin, ybin, session_date))
-
-            master_count = cursor.fetchone()[0] or 0
-
-        # Calculate quality score (0-100)
-        quality = min(100, (flat_count / MIN_FRAMES_RECOMMENDED) * 100) if flat_count > 0 else 0
-
-        # Determine display text and status
-        if master_count > 0:
-            display = f"✓ {flat_count} + {master_count} Master"
-            has_frames = True
-        elif flat_count >= MIN_FRAMES_ACCEPTABLE:
-            display = f"✓ {flat_count} frames"
-            has_frames = True
-        elif flat_count > 0:
-            display = f"⚠ {flat_count} frames (need {MIN_FRAMES_ACCEPTABLE}+)"
-            has_frames = True
-        else:
-            display = "✗ Missing"
-            has_frames = False
-
-        return {
-            'count': flat_count,
-            'master_count': master_count,
-            'avg_temp': flat_temp,
-            'quality': quality,
-            'display': display,
-            'has_frames': has_frames,
-            'filter': filter_name
-        }
+        """Find matching flat frames with temperature tolerance and exact date match (delegates to CalibrationMatcher)"""
+        # Update include_masters from checkbox state
+        self.calibration.include_masters = self.include_masters_checkbox.isChecked()
+        # Delegate to CalibrationMatcher
+        return self.calibration.find_matching_flats(filter_name, temp, xbin, ybin, session_date)
 
     def calculate_session_status(self, darks_info, bias_info, flats_info):
-        """Calculate overall session status"""
-        from PyQt6.QtGui import QColor
-
-        has_darks = darks_info['has_frames']
-        has_bias = bias_info['has_frames']
-        has_flats = flats_info['has_frames']
-
-        # Check if we have master frames
-        has_master = (darks_info['master_count'] > 0 or
-                     bias_info['master_count'] > 0 or
-                     flats_info['master_count'] > 0)
-
-        if has_darks and has_bias and has_flats:
-            if has_master:
-                return 'Complete', QColor(0, 150, 255)  # Blue for complete with masters
-            else:
-                return 'Complete', QColor(0, 200, 0)  # Green for complete
-        elif not has_darks and not has_bias and not has_flats:
-            return 'Missing', QColor(200, 0, 0)  # Red for missing all
-        else:
-            return 'Partial', QColor(255, 165, 0)  # Orange for partial
+        """Calculate overall session status (delegates to CalibrationMatcher)"""
+        return self.calibration.calculate_session_status(darks_info, bias_info, flats_info)
 
     def on_session_clicked(self, item, column):
         """Handle session tree item click"""
@@ -2983,43 +2806,8 @@ Imported: {result[11] or 'N/A'}
         self.recommendations_text.setPlainText(recommendations)
 
     def generate_recommendations(self, session_data):
-        """Generate recommendations for missing or incomplete calibration frames"""
-        recommendations = []
-
-        darks = session_data['darks']
-        bias = session_data['bias']
-        flats = session_data['flats']
-
-        if not darks['has_frames']:
-            recommendations.append(f"• Capture dark frames: {session_data['avg_exposure']:.1f}s exposure at ~{session_data['avg_temp']:.0f}°C, {session_data['xbinning']}x{session_data['ybinning']} binning (minimum {MIN_FRAMES_ACCEPTABLE}, recommended {MIN_FRAMES_RECOMMENDED}+)")
-        elif darks['count'] < MIN_FRAMES_ACCEPTABLE and darks['master_count'] == 0:
-            recommendations.append(f"• Add more dark frames: Currently {darks['count']}, need at least {MIN_FRAMES_ACCEPTABLE} for good calibration")
-
-        if not bias['has_frames']:
-            recommendations.append(f"• Capture bias frames: ~{session_data['avg_temp']:.0f}°C, {session_data['xbinning']}x{session_data['ybinning']} binning (minimum {MIN_FRAMES_ACCEPTABLE}, recommended {MIN_FRAMES_RECOMMENDED}+)")
-        elif bias['count'] < MIN_FRAMES_ACCEPTABLE and bias['master_count'] == 0:
-            recommendations.append(f"• Add more bias frames: Currently {bias['count']}, need at least {MIN_FRAMES_ACCEPTABLE} for good calibration")
-
-        if not flats['has_frames']:
-            filter_name = session_data['filter'] or 'No Filter'
-            recommendations.append(f"• Capture flat frames: {filter_name}, ~{session_data['avg_temp']:.0f}°C, {session_data['xbinning']}x{session_data['ybinning']} binning (minimum {MIN_FRAMES_ACCEPTABLE}, recommended {MIN_FRAMES_RECOMMENDED}+)")
-        elif flats['count'] < MIN_FRAMES_ACCEPTABLE and flats['master_count'] == 0:
-            recommendations.append(f"• Add more flat frames: Currently {flats['count']}, need at least {MIN_FRAMES_ACCEPTABLE} for good calibration")
-
-        if not recommendations:
-            if darks['master_count'] > 0 or bias['master_count'] > 0 or flats['master_count'] > 0:
-                recommendations.append("✓ Session has master calibration frames available")
-            else:
-                recommendations.append("✓ All calibration frames are present")
-                recommendations.append("\nOptional improvements:")
-                if darks['count'] < MIN_FRAMES_RECOMMENDED:
-                    recommendations.append(f"• Consider adding more darks (currently {darks['count']}, recommended {MIN_FRAMES_RECOMMENDED}+)")
-                if bias['count'] < MIN_FRAMES_RECOMMENDED:
-                    recommendations.append(f"• Consider adding more bias (currently {bias['count']}, recommended {MIN_FRAMES_RECOMMENDED}+)")
-                if flats['count'] < MIN_FRAMES_RECOMMENDED:
-                    recommendations.append(f"• Consider adding more flats (currently {flats['count']}, recommended {MIN_FRAMES_RECOMMENDED}+)")
-
-        return '\n'.join(recommendations)
+        """Generate recommendations for missing or incomplete calibration frames (delegates to CalibrationMatcher)"""
+        return self.calibration.generate_recommendations(session_data)
 
     def update_session_statistics(self, total, complete, partial, missing):
         """Update the session statistics panel"""
