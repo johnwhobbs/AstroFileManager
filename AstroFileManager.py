@@ -40,6 +40,8 @@ from import_export.csv_exporter import CSVExporter
 
 # Import UI modules
 from ui.import_tab import ImportTab
+from ui.settings_tab import SettingsTab
+from ui.maintenance_tab import MaintenanceTab
 
 
 def generate_organized_path(repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, original_filename):
@@ -151,14 +153,15 @@ class XISFCatalogGUI(QMainWindow):
         
         # Create tabs
         self.import_tab = ImportTab(self.db_path, self.settings)
+        self.settings_tab = SettingsTab(self.settings)
+        self.maintenance_tab = MaintenanceTab(self.db_path, self.settings, self.import_tab.log_text)
         self.view_tab = self.create_view_tab()
         self.sessions_tab = self.create_sessions_tab()
         self.analytics_tab = self.create_analytics_tab()
-        self.maintenance_tab = self.create_maintenance_tab()
-        self.settings_tab = self.create_settings_tab()
 
         # Set cross-tab dependencies after all tabs are created
-        self.import_tab.clear_db_btn = self.clear_db_btn
+        self.import_tab.clear_db_btn = self.maintenance_tab.clear_db_btn
+        self.clear_db_btn = self.maintenance_tab.clear_db_btn  # For backward compatibility
 
         tabs.addTab(self.view_tab, "View Catalog")
         tabs.addTab(self.sessions_tab, "Sessions")
@@ -591,7 +594,7 @@ class XISFCatalogGUI(QMainWindow):
         else:
             return 4
     
-    def create_maintenance_tab(self):
+    def create_maintenance_tab_DEPRECATED(self):
         """Create the maintenance tab"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
