@@ -2396,14 +2396,14 @@ Imported: {result[11] or 'N/A'}
             cursor.execute('''
                 SELECT
                     exposure,
-                    ROUND(ccd_temp) as ccd_temp,
+                    ROUND(ccd_temp / 2.0) * 2 as ccd_temp,
                     xbinning,
                     ybinning,
                     COUNT(*) as file_count
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Dark%' AND object IS NULL
-                GROUP BY exposure, ROUND(ccd_temp), xbinning, ybinning
-                ORDER BY exposure, ROUND(ccd_temp), xbinning, ybinning
+                GROUP BY exposure, ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning
+                ORDER BY exposure, ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning
             ''')
 
             dark_groups = cursor.fetchall()
@@ -2499,7 +2499,7 @@ Imported: {result[11] or 'N/A'}
                 cursor.execute('''
                     SELECT
                         filter,
-                        ROUND(ccd_temp) as ccd_temp,
+                        ROUND(ccd_temp / 2.0) * 2 as ccd_temp,
                         xbinning,
                         ybinning,
                         COUNT(*) as file_count
@@ -2507,8 +2507,8 @@ Imported: {result[11] or 'N/A'}
                     WHERE imagetyp LIKE '%Flat%'
                         AND object IS NULL
                         AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
-                    GROUP BY filter, ROUND(ccd_temp), xbinning, ybinning
-                    ORDER BY filter, ROUND(ccd_temp), xbinning, ybinning
+                    GROUP BY filter, ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning
+                    ORDER BY filter, ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning
                 ''', (date_val, date_val))
 
                 flat_groups = cursor.fetchall()
@@ -2570,14 +2570,14 @@ Imported: {result[11] or 'N/A'}
 
             cursor.execute('''
                 SELECT
-                    ROUND(ccd_temp) as ccd_temp,
+                    ROUND(ccd_temp / 2.0) * 2 as ccd_temp,
                     xbinning,
                     ybinning,
                     COUNT(*) as file_count
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Bias%' AND object IS NULL
-                GROUP BY ROUND(ccd_temp), xbinning, ybinning
-                ORDER BY ROUND(ccd_temp), xbinning, ybinning
+                GROUP BY ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning
+                ORDER BY ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning
             ''')
 
             bias_groups = cursor.fetchall()
