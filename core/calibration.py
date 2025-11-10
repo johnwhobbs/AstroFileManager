@@ -315,16 +315,8 @@ class CalibrationMatcher:
         has_bias = bias_info['has_frames']
         has_flats = flats_info['has_frames']
 
-        # Check if we have master frames
-        has_master = (darks_info['master_count'] > 0 or
-                     bias_info['master_count'] > 0 or
-                     flats_info['master_count'] > 0)
-
         if has_darks and has_bias and has_flats:
-            if has_master:
-                return 'Complete', QColor(0, 150, 255)  # Blue for complete with masters
-            else:
-                return 'Complete', QColor(0, 200, 0)  # Green for complete
+            return 'Complete', QColor(0, 200, 0)  # Green for complete
         elif not has_darks and not has_bias and not has_flats:
             return 'Missing', QColor(200, 0, 0)  # Red for missing all
         else:
