@@ -164,10 +164,10 @@ class XISFCatalogGUI(QMainWindow):
 
 def main() -> None:
     app = QApplication(sys.argv)
-    
+
     # Load theme setting
     settings = QSettings('AstroFileManager', 'AstroFileManager')
-    theme = settings.value('theme', 'dark')
+    theme = settings.value('theme', 'standard')
     
     # Apply theme
     if theme == 'dark':
