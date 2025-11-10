@@ -141,7 +141,7 @@ class SettingsTab(QWidget):
         theme_layout.addWidget(self.dark_theme_radio)
 
         # Set current theme
-        current_theme = self.settings.value('theme', 'dark')
+        current_theme = self.settings.value('theme', 'standard')
         if current_theme == 'standard':
             self.standard_theme_radio.setChecked(True)
         else:

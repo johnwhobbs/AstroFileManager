@@ -11,9 +11,9 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
     QLabel, QTextEdit, QGroupBox, QComboBox, QRadioButton,
-    QTreeWidget, QTreeWidgetItem, QFileDialog
+    QTreeWidget, QTreeWidgetItem, QFileDialog, QSplitter
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSettings
 
 from core.database import DatabaseManager
 from core.calibration import CalibrationMatcher
@@ -23,7 +23,7 @@ class SessionsTab(QWidget):
     """Sessions tab for session planning and calibration analysis."""
 
     def __init__(self, db_path: str, db_manager: DatabaseManager,
-                 calibration_matcher: CalibrationMatcher) -> None:
+                 calibration_matcher: CalibrationMatcher, settings: QSettings) -> None:
         """
         Initialize Sessions tab.
 
@@ -31,11 +31,13 @@ class SessionsTab(QWidget):
             db_path: Path to SQLite database
             db_manager: DatabaseManager instance
             calibration_matcher: CalibrationMatcher instance
+            settings: QSettings instance for saving/restoring UI state
         """
         super().__init__()
         self.db_path = db_path
         self.db = db_manager
         self.calibration = calibration_matcher
+        self.settings = settings
 
         self.init_ui()
 
@@ -115,23 +117,37 @@ class SessionsTab(QWidget):
         self.sessions_tree.itemClicked.connect(self.on_session_clicked)
         layout.addWidget(self.sessions_tree)
 
-        # Session details panel
+        # Session details and recommendations panel with resizable splitter
         details_group = QGroupBox("Session Details")
         details_layout = QVBoxLayout()
 
+        # Create a vertical splitter for resizable panels
+        self.details_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Session details panel
         self.session_details_text = QTextEdit()
         self.session_details_text.setReadOnly(True)
-        self.session_details_text.setMaximumHeight(200)
-        details_layout.addWidget(self.session_details_text)
+        self.details_splitter.addWidget(self.session_details_text)
 
-        # Recommendations panel
+        # Recommendations panel with label
+        recommendations_widget = QWidget()
+        rec_layout = QVBoxLayout(recommendations_widget)
+        rec_layout.setContentsMargins(0, 0, 0, 0)
+        rec_layout.addWidget(QLabel('Recommendations:'))
         self.recommendations_text = QTextEdit()
         self.recommendations_text.setReadOnly(True)
-        self.recommendations_text.setMaximumHeight(150)
         self.recommendations_text.setPlaceholderText('Recommendations will appear here...')
-        details_layout.addWidget(QLabel('Recommendations:'))
-        details_layout.addWidget(self.recommendations_text)
+        rec_layout.addWidget(self.recommendations_text)
 
+        self.details_splitter.addWidget(recommendations_widget)
+
+        # Set initial proportions (200:150 ratio from original fixed heights)
+        self.details_splitter.setSizes([200, 150])
+
+        # Connect splitter movement to save settings
+        self.details_splitter.splitterMoved.connect(self.save_splitter_state)
+
+        details_layout.addWidget(self.details_splitter)
         details_group.setLayout(details_layout)
         layout.addWidget(details_group)
 
@@ -429,3 +445,16 @@ class SessionsTab(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to export report: {e}')
+
+    def save_splitter_state(self) -> None:
+        """Save the splitter sizes to settings."""
+        sizes = self.details_splitter.sizes()
+        self.settings.setValue('sessions_details_splitter_sizes', sizes)
+
+    def restore_splitter_state(self) -> None:
+        """Restore the splitter sizes from settings."""
+        saved_sizes = self.settings.value('sessions_details_splitter_sizes')
+        if saved_sizes:
+            # Convert to integers (QSettings may return strings)
+            sizes = [int(s) for s in saved_sizes]
+            self.details_splitter.setSizes(sizes)

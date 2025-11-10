@@ -72,7 +72,7 @@ class XISFCatalogGUI(QMainWindow):
         self.import_tab = ImportTab(self.db_path, self.settings)
         self.settings_tab = SettingsTab(self.settings)
         self.maintenance_tab = MaintenanceTab(self.db_path, self.settings, self.import_tab.log_text)
-        self.sessions_tab = SessionsTab(self.db_path, self.db, self.calibration)
+        self.sessions_tab = SessionsTab(self.db_path, self.db, self.calibration, self.settings)
         self.view_tab = ViewCatalogTab(
             db_path=self.db_path,
             settings=self.settings,
@@ -113,6 +113,9 @@ class XISFCatalogGUI(QMainWindow):
         # Save sessions tree column widths
         for i in range(self.sessions_tab.sessions_tree.columnCount()):
             self.settings.setValue(f'sessions_tree_col_{i}', self.sessions_tab.sessions_tree.columnWidth(i))
+
+        # Save sessions tab splitter state
+        self.sessions_tab.save_splitter_state()
     
     def restore_settings(self) -> None:
         """Restore window size and column widths"""
@@ -132,6 +135,9 @@ class XISFCatalogGUI(QMainWindow):
             width = self.settings.value(f'sessions_tree_col_{i}')
             if width is not None:
                 self.sessions_tab.sessions_tree.setColumnWidth(i, int(width))
+
+        # Restore sessions tab splitter state
+        self.sessions_tab.restore_splitter_state()
 
         # Connect signals after restoring settings to avoid triggering saves during restore
         self.connect_signals()
@@ -158,10 +164,10 @@ class XISFCatalogGUI(QMainWindow):
 
 def main() -> None:
     app = QApplication(sys.argv)
-    
+
     # Load theme setting
     settings = QSettings('AstroFileManager', 'AstroFileManager')
-    theme = settings.value('theme', 'dark')
+    theme = settings.value('theme', 'standard')
     
     # Apply theme
     if theme == 'dark':
