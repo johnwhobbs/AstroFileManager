@@ -237,10 +237,7 @@ class MaintenanceTab(QWidget):
 
     def preview_organization(self) -> None:
         """Preview the file organization plan."""
-        # Import at function level to avoid circular import
-        import sys
-        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-        from AstroFileManager import generate_organized_path
+        from utils.file_organizer import generate_organized_path
 
         repo_path = self.settings.value('repository_path', '')
 
@@ -294,10 +291,7 @@ class MaintenanceTab(QWidget):
 
     def execute_organization(self) -> None:
         """Execute the file organization."""
-        # Import at function level to avoid circular import
-        import sys
-        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-        from AstroFileManager import generate_organized_path
+        from utils.file_organizer import generate_organized_path
 
         repo_path = self.settings.value('repository_path', '')
 
