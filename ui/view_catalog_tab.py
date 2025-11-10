@@ -6,7 +6,7 @@ import os
 import sqlite3
 import subprocess
 import platform
-from typing import Callable
+from typing import Callable, List, Optional
 
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QColor, QBrush
@@ -25,7 +25,7 @@ class ViewCatalogTab(QWidget):
 
     def __init__(self, db_path: str, settings: QSettings,
                  status_callback: Callable[[str], None],
-                 reimport_callback: Callable[[list], None]):
+                 reimport_callback: Callable[[List[str]], None]) -> None:
         """
         Initialize the View Catalog tab.
 
@@ -42,7 +42,7 @@ class ViewCatalogTab(QWidget):
         self.reimport_callback = reimport_callback
         self.init_ui()
 
-    def init_ui(self):
+    def init_ui(self) -> None:
         """Create the view tab UI."""
         layout = QVBoxLayout(self)
 
@@ -133,7 +133,7 @@ class ViewCatalogTab(QWidget):
 
         layout.addWidget(self.catalog_tree)
 
-    def create_stat_card(self, title, value_label):
+    def create_stat_card(self, title: str, value_label: QLabel) -> QWidget:
         """Create a statistics card widget."""
         card = QWidget()
         card_layout = QVBoxLayout(card)
@@ -156,11 +156,11 @@ class ViewCatalogTab(QWidget):
 
         return card
 
-    def filter_catalog_tree(self):
+    def filter_catalog_tree(self) -> None:
         """Filter the catalog tree based on search text."""
         search_text = self.catalog_search_box.text().lower()
 
-        def filter_item(item):
+        def filter_item(item: QTreeWidgetItem) -> bool:
             """Recursively filter tree items."""
             # Check if this item matches
             item_text = ' '.join([item.text(i).lower() for i in range(item.columnCount())])
@@ -182,7 +182,7 @@ class ViewCatalogTab(QWidget):
         for i in range(root.childCount()):
             filter_item(root.child(i))
 
-    def show_catalog_context_menu(self, position):
+    def show_catalog_context_menu(self, position) -> None:
         """Show context menu for catalog tree items."""
         item = self.catalog_tree.itemAt(position)
         if not item:
@@ -225,7 +225,7 @@ class ViewCatalogTab(QWidget):
             if action == export_action:
                 self.export_tree_group_to_csv(item)
 
-    def show_file_path(self, item):
+    def show_file_path(self, item: QTreeWidgetItem) -> None:
         """Show the full file path in a message box."""
         filename = item.text(0)
         try:
@@ -242,7 +242,7 @@ class ViewCatalogTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to retrieve file path: {e}')
 
-    def copy_file_path_to_clipboard(self, item):
+    def copy_file_path_to_clipboard(self, item: QTreeWidgetItem) -> None:
         """Copy file path to clipboard."""
         filename = item.text(0)
         try:
@@ -261,7 +261,7 @@ class ViewCatalogTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to copy path: {e}')
 
-    def open_file_location(self, item):
+    def open_file_location(self, item: QTreeWidgetItem) -> None:
         """Open the file location in file manager."""
         filename = item.text(0)
         try:
@@ -286,7 +286,7 @@ class ViewCatalogTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to open file location: {e}')
 
-    def show_file_details(self, item):
+    def show_file_details(self, item: QTreeWidgetItem) -> None:
         """Show detailed file information in a dialog."""
         filename = item.text(0)
         try:
@@ -326,7 +326,7 @@ Imported: {result[11] or 'N/A'}
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to retrieve file details: {e}')
 
-    def delete_file_from_database(self, item):
+    def delete_file_from_database(self, item: QTreeWidgetItem) -> None:
         """Delete a file from the database."""
         filename = item.text(0)
         reply = QMessageBox.question(
@@ -349,7 +349,7 @@ Imported: {result[11] or 'N/A'}
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to delete file: {e}')
 
-    def reimport_file(self, item):
+    def reimport_file(self, item: QTreeWidgetItem) -> None:
         """Re-import a file."""
         filename = item.text(0)
         try:
@@ -370,7 +370,7 @@ Imported: {result[11] or 'N/A'}
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to re-import file: {e}')
 
-    def export_tree_group_to_csv(self, item):
+    def export_tree_group_to_csv(self, item: QTreeWidgetItem) -> None:
         """Export a tree group (and its children) to CSV."""
         filename, _ = QFileDialog.getSaveFileName(
             self, 'Export Group to CSV', '', 'CSV Files (*.csv)'
@@ -385,7 +385,7 @@ Imported: {result[11] or 'N/A'}
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to export: {e}')
 
-    def export_catalog_to_csv(self):
+    def export_catalog_to_csv(self) -> None:
         """Export entire catalog to CSV."""
         filename, _ = QFileDialog.getSaveFileName(
             self, 'Export Catalog to CSV', '', 'CSV Files (*.csv)'
@@ -400,7 +400,7 @@ Imported: {result[11] or 'N/A'}
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to export: {e}')
 
-    def update_catalog_statistics(self, cursor):
+    def update_catalog_statistics(self, cursor) -> None:
         """Update the catalog statistics panel."""
         # Total files
         cursor.execute('SELECT COUNT(*) FROM xisf_files')
@@ -449,7 +449,7 @@ Imported: {result[11] or 'N/A'}
         else:
             self.catalog_date_range_label.setText("N/A")
 
-    def get_item_color(self, imagetyp):
+    def get_item_color(self, imagetyp: Optional[str]) -> Optional[QColor]:
         """Get color for tree item based on image type."""
         if not imagetyp:
             return None
@@ -472,7 +472,7 @@ Imported: {result[11] or 'N/A'}
 
         return None
 
-    def refresh_catalog_view(self):
+    def refresh_catalog_view(self) -> None:
         """Refresh the catalog view tree."""
         try:
             conn = sqlite3.connect(self.db_path)

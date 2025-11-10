@@ -6,6 +6,7 @@ including repository location, timezone, and theme preferences.
 """
 
 import os
+from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog,
     QMessageBox, QLabel, QLineEdit, QGroupBox, QComboBox,
@@ -17,7 +18,7 @@ from PyQt6.QtCore import QSettings
 class SettingsTab(QWidget):
     """Settings tab for application configuration."""
 
-    def __init__(self, settings: QSettings):
+    def __init__(self, settings: QSettings) -> None:
         """
         Initialize Settings tab.
 
@@ -29,7 +30,7 @@ class SettingsTab(QWidget):
 
         self.init_ui()
 
-    def init_ui(self):
+    def init_ui(self) -> None:
         """Initialize the UI components."""
         layout = QVBoxLayout(self)
 
@@ -160,7 +161,7 @@ class SettingsTab(QWidget):
         # Add stretch to push everything to the top
         layout.addStretch()
 
-    def browse_repository(self):
+    def browse_repository(self) -> None:
         """Browse for repository location."""
         current_path = self.repo_path_input.text()
         directory = QFileDialog.getExistingDirectory(
@@ -178,7 +179,7 @@ class SettingsTab(QWidget):
                 f'Image repository location set to:\n{directory}'
             )
 
-    def save_timezone_setting(self):
+    def save_timezone_setting(self) -> None:
         """Save the selected timezone."""
         timezone = self.timezone_combo.currentText()
         self.settings.setValue('timezone', timezone)
@@ -188,7 +189,7 @@ class SettingsTab(QWidget):
             f'Timezone set to: {timezone}\n\nThis will be used for converting DATE-OBS timestamps.'
         )
 
-    def apply_theme_setting(self):
+    def apply_theme_setting(self) -> None:
         """Apply the selected theme."""
         if self.standard_theme_radio.isChecked():
             theme = 'standard'

@@ -7,6 +7,7 @@ for importing XISF files into the database.
 
 import os
 from pathlib import Path
+from typing import Optional, List
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog,
     QMessageBox, QProgressBar, QLabel, QTextEdit, QGroupBox,
@@ -20,7 +21,7 @@ from import_export.import_worker import ImportWorker
 class ImportTab(QWidget):
     """Import tab for XISF file import functionality."""
 
-    def __init__(self, db_path: str, settings: QSettings, clear_db_btn=None):
+    def __init__(self, db_path: str, settings: QSettings, clear_db_btn: Optional[QPushButton] = None) -> None:
         """
         Initialize Import tab.
 
@@ -37,7 +38,7 @@ class ImportTab(QWidget):
 
         self.init_ui()
 
-    def init_ui(self):
+    def init_ui(self) -> None:
         """Initialize the UI components."""
         layout = QVBoxLayout(self)
 
@@ -106,7 +107,7 @@ class ImportTab(QWidget):
         self.log_text.setReadOnly(True)
         layout.addWidget(self.log_text)
 
-    def save_import_mode(self):
+    def save_import_mode(self) -> None:
         """Save the selected import mode."""
         if self.import_organize_radio.isChecked():
             mode = 'import_organize'
@@ -114,7 +115,7 @@ class ImportTab(QWidget):
             mode = 'import_only'
         self.settings.setValue('import_mode', mode)
 
-    def import_files(self):
+    def import_files(self) -> None:
         """Import individual XISF files."""
         files, _ = QFileDialog.getOpenFileNames(
             self, 'Select XISF Files', '', 'XISF Files (*.xisf)'
@@ -123,7 +124,7 @@ class ImportTab(QWidget):
         if files:
             self.start_import(files)
 
-    def import_folder(self):
+    def import_folder(self) -> None:
         """Import all XISF files from a folder and its subfolders."""
         folder = QFileDialog.getExistingDirectory(self, 'Select Folder')
 
@@ -135,7 +136,7 @@ class ImportTab(QWidget):
             else:
                 QMessageBox.warning(self, 'No Files', 'No XISF files found in selected folder or its subfolders.')
 
-    def start_import(self, files):
+    def start_import(self, files: List[str]) -> None:
         """Start the import worker thread."""
         if not os.path.exists(self.db_path):
             QMessageBox.critical(
@@ -189,13 +190,13 @@ class ImportTab(QWidget):
         self.worker.finished.connect(self.on_import_finished)
         self.worker.start()
 
-    def on_import_progress(self, current, total, message):
+    def on_import_progress(self, current: int, total: int, message: str) -> None:
         """Handle progress updates."""
         self.progress_bar.setValue(current)
         self.status_label.setText(f"Processing {current}/{total}")
         self.log_text.append(message)
 
-    def on_import_finished(self, processed, errors):
+    def on_import_finished(self, processed: int, errors: int) -> None:
         """Handle import completion."""
         self.progress_bar.setVisible(False)
         self.status_label.setText('')

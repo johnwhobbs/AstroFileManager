@@ -11,6 +11,7 @@ import hashlib
 import shutil
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from typing import List, Optional, Any, Dict
 from PyQt6.QtCore import QThread, pyqtSignal
 import xisf
 
@@ -24,7 +25,18 @@ if parent_dir not in sys.path:
 from constants import IMPORT_BATCH_SIZE, DATE_OFFSET_HOURS
 
 
-def generate_organized_path(repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, original_filename):
+def generate_organized_path(
+    repo_path: str,
+    obj: Optional[str],
+    filt: Optional[str],
+    imgtyp: Optional[str],
+    exp: Optional[float],
+    temp: Optional[float],
+    xbin: Optional[float],
+    ybin: Optional[float],
+    date: Optional[str],
+    original_filename: str
+) -> str:
     """
     Generate the organized path and filename for a file.
 
@@ -104,7 +116,14 @@ class ImportWorker(QThread):
     progress = pyqtSignal(int, int, str)  # current, total, message
     finished = pyqtSignal(int, int)  # processed, errors
 
-    def __init__(self, files, db_path, timezone='UTC', organize=False, repo_path=None):
+    def __init__(
+        self,
+        files: List[str],
+        db_path: str,
+        timezone: str = 'UTC',
+        organize: bool = False,
+        repo_path: Optional[str] = None
+    ) -> None:
         super().__init__()
         self.files = files
         self.db_path = db_path
@@ -114,7 +133,7 @@ class ImportWorker(QThread):
         self.processed = 0
         self.errors = 0
 
-    def calculate_file_hash(self, filepath):
+    def calculate_file_hash(self, filepath: str) -> str:
         """Calculate SHA256 hash of a file"""
         hash_obj = hashlib.sha256()
         with open(filepath, 'rb') as f:
@@ -122,7 +141,7 @@ class ImportWorker(QThread):
                 hash_obj.update(chunk)
         return hash_obj.hexdigest()
 
-    def process_date_loc(self, date_str):
+    def process_date_loc(self, date_str: Optional[str]) -> Optional[str]:
         """Process DATE-LOC: subtract DATE_OFFSET_HOURS and return date only in YYYY-MM-DD format"""
         if not date_str:
             return None
@@ -163,7 +182,7 @@ class ImportWorker(QThread):
         except Exception:
             return None
 
-    def process_date_obs(self, date_str, timezone_str):
+    def process_date_obs(self, date_str: Optional[str], timezone_str: str) -> Optional[str]:
         """Process DATE-OBS: convert from UTC to local timezone, subtract DATE_OFFSET_HOURS, return date in YYYY-MM-DD format"""
         if not date_str:
             return None
@@ -220,7 +239,7 @@ class ImportWorker(QThread):
         except Exception:
             return None
 
-    def read_fits_keywords(self, filename):
+    def read_fits_keywords(self, filename: str) -> Optional[Dict[str, Any]]:
         """Read FITS keywords from XISF file"""
         keywords = ['TELESCOP', 'INSTRUME', 'OBJECT', 'FILTER', 'IMAGETYP',
                     'EXPOSURE', 'EXPTIME', 'CCD-TEMP', 'XBINNING', 'YBINNING', 'DATE-LOC', 'DATE-OBS']
@@ -256,7 +275,7 @@ class ImportWorker(QThread):
         except Exception as e:
             return None
 
-    def run(self):
+    def run(self) -> None:
         """Process files and import to database"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()

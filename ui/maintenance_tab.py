@@ -8,6 +8,7 @@ operations including clearing data, search and replace, and file organization.
 import os
 import sqlite3
 import shutil
+from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
     QLabel, QTextEdit, QGroupBox, QComboBox, QLineEdit
@@ -18,7 +19,7 @@ from PyQt6.QtCore import QSettings
 class MaintenanceTab(QWidget):
     """Maintenance tab for database and file management operations."""
 
-    def __init__(self, db_path: str, settings: QSettings, import_log_widget=None):
+    def __init__(self, db_path: str, settings: QSettings, import_log_widget: Optional[QTextEdit] = None) -> None:
         """
         Initialize Maintenance tab.
 
@@ -35,7 +36,7 @@ class MaintenanceTab(QWidget):
 
         self.init_ui()
 
-    def init_ui(self):
+    def init_ui(self) -> None:
         """Initialize the UI components."""
         layout = QVBoxLayout(self)
 
@@ -140,12 +141,12 @@ class MaintenanceTab(QWidget):
         # Populate initial values
         self.on_keyword_changed()
 
-    def on_keyword_changed(self):
+    def on_keyword_changed(self) -> None:
         """Update the current value dropdown when keyword selection changes."""
         keyword = self.keyword_combo.currentText()
         self.populate_current_values(keyword)
 
-    def populate_current_values(self, keyword):
+    def populate_current_values(self, keyword: str) -> None:
         """Populate the current value dropdown with existing values from the database."""
         try:
             conn = sqlite3.connect(self.db_path)
@@ -173,7 +174,7 @@ class MaintenanceTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to load values: {e}')
 
-    def replace_values(self):
+    def replace_values(self) -> None:
         """Replace values in the database."""
         keyword = self.keyword_combo.currentText()
         current_value = self.current_value_combo.currentText()
@@ -234,7 +235,7 @@ class MaintenanceTab(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to replace values: {e}')
 
-    def preview_organization(self):
+    def preview_organization(self) -> None:
         """Preview the file organization plan."""
         # Import at function level to avoid circular import
         import sys
@@ -291,7 +292,7 @@ class MaintenanceTab(QWidget):
         except Exception as e:
             self.organize_log.append(f"\nError generating preview: {e}")
 
-    def execute_organization(self):
+    def execute_organization(self) -> None:
         """Execute the file organization."""
         # Import at function level to avoid circular import
         import sys
@@ -396,7 +397,7 @@ class MaintenanceTab(QWidget):
             self.organize_log.append(f"\nFatal error: {e}")
             QMessageBox.critical(self, 'Error', f'Failed to organize files: {e}')
 
-    def clear_database(self):
+    def clear_database(self) -> None:
         """Clear all records from the database."""
         reply = QMessageBox.question(
             self, 'Confirm Clear',
