@@ -43,6 +43,8 @@ from ui.import_tab import ImportTab
 from ui.settings_tab import SettingsTab
 from ui.maintenance_tab import MaintenanceTab
 from ui.sessions_tab import SessionsTab
+from ui.analytics_tab import AnalyticsTab
+from ui.view_catalog_tab import ViewCatalogTab
 
 
 def generate_organized_path(repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, original_filename):
@@ -136,7 +138,7 @@ class XISFCatalogGUI(QMainWindow):
         # Restore settings after all UI is created
         self.restore_settings()
         # Populate the View Catalog tab on startup (fixes Issue #44)
-        self.refresh_catalog_view()
+        self.view_tab.refresh_catalog_view()
 
     def init_ui(self):
         """Initialize the user interface"""
@@ -157,8 +159,13 @@ class XISFCatalogGUI(QMainWindow):
         self.settings_tab = SettingsTab(self.settings)
         self.maintenance_tab = MaintenanceTab(self.db_path, self.settings, self.import_tab.log_text)
         self.sessions_tab = SessionsTab(self.db_path, self.db, self.calibration)
-        self.view_tab = self.create_view_tab()
-        self.analytics_tab = self.create_analytics_tab()
+        self.view_tab = ViewCatalogTab(
+            db_path=self.db_path,
+            settings=self.settings,
+            status_callback=self.statusBar().showMessage,
+            reimport_callback=self.import_tab.start_import
+        )
+        self.analytics_tab = AnalyticsTab(self.db_path, self.settings)
 
         # Set cross-tab dependencies after all tabs are created
         self.import_tab.clear_db_btn = self.maintenance_tab.clear_db_btn
@@ -1130,7 +1137,7 @@ class XISFCatalogGUI(QMainWindow):
     def connect_signals(self):
         """Connect signals after all widgets are created"""
         # Connect column resize signals to save settings
-        self.catalog_tree.header().sectionResized.connect(self.save_settings)
+        self.view_tab.catalog_tree.header().sectionResized.connect(self.save_settings)
         self.sessions_tab.sessions_tree.header().sectionResized.connect(self.save_settings)
     
     def save_settings(self):
@@ -1139,8 +1146,8 @@ class XISFCatalogGUI(QMainWindow):
         self.settings.setValue('geometry', self.saveGeometry())
 
         # Save catalog tree column widths
-        for i in range(self.catalog_tree.columnCount()):
-            self.settings.setValue(f'catalog_tree_col_{i}', self.catalog_tree.columnWidth(i))
+        for i in range(self.view_tab.catalog_tree.columnCount()):
+            self.settings.setValue(f'catalog_tree_col_{i}', self.view_tab.catalog_tree.columnWidth(i))
 
         # Save sessions tree column widths
         for i in range(self.sessions_tab.sessions_tree.columnCount()):
@@ -1154,10 +1161,10 @@ class XISFCatalogGUI(QMainWindow):
             self.restoreGeometry(geometry)
 
         # Restore catalog tree column widths
-        for i in range(self.catalog_tree.columnCount()):
+        for i in range(self.view_tab.catalog_tree.columnCount()):
             width = self.settings.value(f'catalog_tree_col_{i}')
             if width is not None:
-                self.catalog_tree.setColumnWidth(i, int(width))
+                self.view_tab.catalog_tree.setColumnWidth(i, int(width))
 
         # Restore sessions tree column widths
         for i in range(self.sessions_tab.sessions_tree.columnCount()):
@@ -2116,11 +2123,11 @@ Imported: {result[11] or 'N/A'}
     def on_tab_changed(self, index):
         """Handle tab change"""
         if index == 0:  # View Catalog tab
-            self.refresh_catalog_view()
+            self.view_tab.refresh_catalog_view()
         elif index == 1:  # Sessions tab
             self.sessions_tab.refresh_sessions()
         elif index == 2:  # Analytics tab
-            self.refresh_analytics()
+            self.analytics_tab.refresh_analytics()
         elif index == 4:  # Maintenance tab
             # Populate current values when maintenance tab is opened
             keyword = self.maintenance_tab.keyword_combo.currentText()
