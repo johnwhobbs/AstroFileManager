@@ -7,6 +7,7 @@ calibration frame analysis.
 
 import sqlite3
 from datetime import datetime
+from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
     QLabel, QTextEdit, QGroupBox, QComboBox, QRadioButton,
@@ -22,7 +23,7 @@ class SessionsTab(QWidget):
     """Sessions tab for session planning and calibration analysis."""
 
     def __init__(self, db_path: str, db_manager: DatabaseManager,
-                 calibration_matcher: CalibrationMatcher):
+                 calibration_matcher: CalibrationMatcher) -> None:
         """
         Initialize Sessions tab.
 
@@ -38,7 +39,7 @@ class SessionsTab(QWidget):
 
         self.init_ui()
 
-    def init_ui(self):
+    def init_ui(self) -> None:
         """Initialize the UI components."""
         layout = QVBoxLayout(self)
 
@@ -134,7 +135,7 @@ class SessionsTab(QWidget):
         details_group.setLayout(details_layout)
         layout.addWidget(details_group)
 
-    def refresh_sessions(self):
+    def refresh_sessions(self) -> None:
         """Refresh the sessions view."""
         try:
             conn = sqlite3.connect(self.db_path)
@@ -238,7 +239,7 @@ class SessionsTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to refresh sessions: {e}')
 
-    def on_session_clicked(self, item, column):
+    def on_session_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         """Handle session tree item click."""
         session_data = item.data(0, Qt.ItemDataRole.UserRole)
         if not session_data:
@@ -290,7 +291,7 @@ class SessionsTab(QWidget):
         recommendations = self.calibration.generate_recommendations(session_data)
         self.recommendations_text.setPlainText(recommendations)
 
-    def update_session_statistics(self, total, complete, partial, missing):
+    def update_session_statistics(self, total: int, complete: int, partial: int, missing: int) -> None:
         """Update the session statistics panel."""
         self.total_sessions_label.setText(f'Total Sessions: {total}')
         self.complete_sessions_label.setText(f'Complete: {complete}')
@@ -303,7 +304,7 @@ class SessionsTab(QWidget):
         else:
             self.completion_rate_label.setText('Completion Rate: 0%')
 
-    def export_session_report(self):
+    def export_session_report(self) -> None:
         """Export session report to text file."""
         try:
             filename, _ = QFileDialog.getSaveFileName(

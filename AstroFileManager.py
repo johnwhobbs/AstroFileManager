@@ -11,6 +11,7 @@ import hashlib
 import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
+from typing import Optional, Any
 from zoneinfo import ZoneInfo
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -47,7 +48,10 @@ from ui.analytics_tab import AnalyticsTab
 from ui.view_catalog_tab import ViewCatalogTab
 
 
-def generate_organized_path(repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, original_filename):
+def generate_organized_path(repo_path: str, obj: Optional[str], filt: Optional[str],
+                           imgtyp: Optional[str], exp: Optional[float], temp: Optional[float],
+                           xbin: Optional[int], ybin: Optional[int], date: Optional[str],
+                           original_filename: str) -> str:
     """Generate the organized path and filename for a file"""
     # Sanitize values
     obj = obj or "Unknown"
@@ -116,7 +120,7 @@ def generate_organized_path(repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin,
 
 
 class XISFCatalogGUI(QMainWindow):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.db_path = 'xisf_catalog.db'
         self.settings = QSettings('AstroFileManager', 'AstroFileManager')
@@ -140,7 +144,7 @@ class XISFCatalogGUI(QMainWindow):
         # Populate the View Catalog tab on startup (fixes Issue #44)
         self.view_tab.refresh_catalog_view()
 
-    def init_ui(self):
+    def init_ui(self) -> None:
         """Initialize the user interface"""
         self.setWindowTitle('AstroFileManager')
         self.setGeometry(100, 100, 1000, 600)
@@ -182,12 +186,12 @@ class XISFCatalogGUI(QMainWindow):
         tabs.currentChanged.connect(self.on_tab_changed)
     
 
-    def on_keyword_changed(self):
+    def on_keyword_changed(self) -> None:
         """Update the current value dropdown when keyword selection changes"""
         keyword = self.keyword_combo.currentText()
         self.populate_current_values(keyword)
-    
-    def populate_current_values(self, keyword):
+
+    def populate_current_values(self, keyword: str) -> None:
         """Populate the current value dropdown with existing values from the database"""
         try:
             conn = sqlite3.connect(self.db_path)
@@ -215,7 +219,7 @@ class XISFCatalogGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to load values: {e}')
     
-    def replace_values(self):
+    def replace_values(self) -> None:
         """Replace values in the database"""
         keyword = self.keyword_combo.currentText()
         current_value = self.current_value_combo.currentText()
@@ -276,7 +280,7 @@ class XISFCatalogGUI(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to replace values: {e}')
 
-    def preview_organization(self):
+    def preview_organization(self) -> None:
         """Preview the file organization plan"""
         repo_path = self.settings.value('repository_path', '')
         
@@ -328,7 +332,7 @@ class XISFCatalogGUI(QMainWindow):
         except Exception as e:
             self.organize_log.append(f"\nError generating preview: {e}")
     
-    def execute_organization(self):
+    def execute_organization(self) -> None:
         """Execute the file organization"""
         repo_path = self.settings.value('repository_path', '')
         
@@ -430,7 +434,7 @@ class XISFCatalogGUI(QMainWindow):
             self.organize_log.append(f"\nFatal error: {e}")
             QMessageBox.critical(self, 'Error', f'Failed to organize files: {e}')
 
-    def create_settings_tab(self):
+    def create_settings_tab(self) -> QWidget:
         """Create the settings tab"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -564,7 +568,7 @@ class XISFCatalogGUI(QMainWindow):
         
         return widget
     
-    def browse_repository(self):
+    def browse_repository(self) -> None:
         """Browse for repository location"""
         current_path = self.repo_path_input.text()
         directory = QFileDialog.getExistingDirectory(
@@ -582,7 +586,7 @@ class XISFCatalogGUI(QMainWindow):
                 f'Image repository location set to:\n{directory}'
             )
     
-    def save_timezone_setting(self):
+    def save_timezone_setting(self) -> None:
         """Save the selected timezone"""
         timezone = self.timezone_combo.currentText()
         self.settings.setValue('timezone', timezone)
@@ -592,7 +596,7 @@ class XISFCatalogGUI(QMainWindow):
             f'Timezone set to: {timezone}\n\nThis will be used for converting DATE-OBS timestamps.'
         )
 
-    def apply_theme_setting(self):
+    def apply_theme_setting(self) -> None:
         """Apply the selected theme"""
         if self.standard_theme_radio.isChecked():
             theme = 'standard'
@@ -609,13 +613,13 @@ class XISFCatalogGUI(QMainWindow):
             'Theme has been changed. Please restart the application for the changes to take effect.'
         )
     
-    def connect_signals(self):
+    def connect_signals(self) -> None:
         """Connect signals after all widgets are created"""
         # Connect column resize signals to save settings
         self.view_tab.catalog_tree.header().sectionResized.connect(self.save_settings)
         self.sessions_tab.sessions_tree.header().sectionResized.connect(self.save_settings)
     
-    def save_settings(self):
+    def save_settings(self) -> None:
         """Save window size and column widths"""
         # Save window geometry
         self.settings.setValue('geometry', self.saveGeometry())
@@ -628,7 +632,7 @@ class XISFCatalogGUI(QMainWindow):
         for i in range(self.sessions_tab.sessions_tree.columnCount()):
             self.settings.setValue(f'sessions_tree_col_{i}', self.sessions_tab.sessions_tree.columnWidth(i))
     
-    def restore_settings(self):
+    def restore_settings(self) -> None:
         """Restore window size and column widths"""
         # Restore window geometry
         geometry = self.settings.value('geometry')
@@ -650,12 +654,12 @@ class XISFCatalogGUI(QMainWindow):
         # Connect signals after restoring settings to avoid triggering saves during restore
         self.connect_signals()
     
-    def closeEvent(self, event):
+    def closeEvent(self, event: Any) -> None:
         """Save settings when closing"""
         self.save_settings()
         event.accept()
     
-    def on_tab_changed(self, index):
+    def on_tab_changed(self, index: int) -> None:
         """Handle tab change"""
         if index == 0:  # View Catalog tab
             self.view_tab.refresh_catalog_view()
@@ -670,7 +674,7 @@ class XISFCatalogGUI(QMainWindow):
 
 
 
-def main():
+def main() -> None:
     app = QApplication(sys.argv)
     
     # Load theme setting
@@ -688,7 +692,7 @@ def main():
     sys.exit(app.exec())
 
 
-def apply_dark_theme(app):
+def apply_dark_theme(app: QApplication) -> None:
     """Apply dark theme to the application"""
     app.setStyle('Fusion')
     
@@ -765,7 +769,7 @@ def apply_dark_theme(app):
     """)
 
 
-def apply_standard_theme(app):
+def apply_standard_theme(app: QApplication) -> None:
     """Apply standard theme to the application"""
     # Use the system default style
     app.setStyle('Fusion')

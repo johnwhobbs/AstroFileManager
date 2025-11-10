@@ -7,14 +7,14 @@ XISF file catalog data to CSV format.
 
 import csv
 import sqlite3
-from typing import Optional
+from typing import Optional, Any
 
 
 class CSVExporter:
     """Handles CSV export operations for XISF file catalog."""
 
     @staticmethod
-    def export_tree_group(filepath: str, tree_item) -> None:
+    def export_tree_group(filepath: str, tree_item: Any) -> None:
         """
         Export a tree group (and its children) to CSV.
 

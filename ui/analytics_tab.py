@@ -9,6 +9,7 @@ Displays imaging activity analytics with:
 
 import sqlite3
 from datetime import datetime, timedelta
+from typing import Dict
 
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtWidgets import (
@@ -20,7 +21,7 @@ from PyQt6.QtWidgets import (
 class AnalyticsTab(QWidget):
     """Analytics tab widget showing imaging activity statistics and heatmap."""
 
-    def __init__(self, db_path: str, settings: QSettings):
+    def __init__(self, db_path: str, settings: QSettings) -> None:
         """Initialize the analytics tab.
 
         Args:
@@ -32,7 +33,7 @@ class AnalyticsTab(QWidget):
         self.settings = settings
         self.init_ui()
 
-    def init_ui(self):
+    def init_ui(self) -> None:
         """Create the analytics tab with activity heatmap"""
         layout = QVBoxLayout(self)
 
@@ -85,7 +86,7 @@ class AnalyticsTab(QWidget):
 
         layout.addStretch()
 
-    def get_heatmap_color_style(self, level):
+    def get_heatmap_color_style(self, level: int) -> str:
         """Get stylesheet for heatmap cell based on activity level"""
         # Check current theme
         current_theme = self.settings.value('theme', 'dark')
@@ -111,7 +112,7 @@ class AnalyticsTab(QWidget):
 
         return f"background-color: {colors.get(level, colors[0])}; border-radius: 2px;"
 
-    def refresh_analytics(self):
+    def refresh_analytics(self) -> None:
         """Refresh the analytics view"""
         try:
             conn = sqlite3.connect(self.db_path)
@@ -239,7 +240,8 @@ class AnalyticsTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to refresh analytics: {e}')
 
-    def update_analytics_stats(self, sessions, total_hours, avg_hours, streak, month, month_sessions, days_since):
+    def update_analytics_stats(self, sessions: int, total_hours: float, avg_hours: float,
+                               streak: int, month: str, month_sessions: int, days_since: int) -> None:
         """Update the analytics statistics cards"""
         # Clear existing cards
         while self.analytics_stats_layout.count():
@@ -288,7 +290,7 @@ class AnalyticsTab(QWidget):
 
             self.analytics_stats_layout.addWidget(card)
 
-    def update_heatmap(self, year, activity_data):
+    def update_heatmap(self, year: str, activity_data: Dict[str, float]) -> None:
         """Update the heatmap visualization"""
         # Clear existing heatmap
         while self.heatmap_layout.count():
@@ -337,7 +339,7 @@ class AnalyticsTab(QWidget):
         if current_week:
             self.heatmap_layout.addWidget(current_week)
 
-    def get_activity_level(self, hours):
+    def get_activity_level(self, hours: float) -> int:
         """Determine activity level based on hours"""
         if hours == 0:
             return 0
