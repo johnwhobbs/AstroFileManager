@@ -1131,7 +1131,7 @@ class XISFCatalogGUI(QMainWindow):
         """Connect signals after all widgets are created"""
         # Connect column resize signals to save settings
         self.catalog_tree.header().sectionResized.connect(self.save_settings)
-        self.sessions_tree.header().sectionResized.connect(self.save_settings)
+        self.sessions_tab.sessions_tree.header().sectionResized.connect(self.save_settings)
     
     def save_settings(self):
         """Save window size and column widths"""
@@ -1143,8 +1143,8 @@ class XISFCatalogGUI(QMainWindow):
             self.settings.setValue(f'catalog_tree_col_{i}', self.catalog_tree.columnWidth(i))
 
         # Save sessions tree column widths
-        for i in range(self.sessions_tree.columnCount()):
-            self.settings.setValue(f'sessions_tree_col_{i}', self.sessions_tree.columnWidth(i))
+        for i in range(self.sessions_tab.sessions_tree.columnCount()):
+            self.settings.setValue(f'sessions_tree_col_{i}', self.sessions_tab.sessions_tree.columnWidth(i))
     
     def restore_settings(self):
         """Restore window size and column widths"""
@@ -1160,10 +1160,10 @@ class XISFCatalogGUI(QMainWindow):
                 self.catalog_tree.setColumnWidth(i, int(width))
 
         # Restore sessions tree column widths
-        for i in range(self.sessions_tree.columnCount()):
+        for i in range(self.sessions_tab.sessions_tree.columnCount()):
             width = self.settings.value(f'sessions_tree_col_{i}')
             if width is not None:
-                self.sessions_tree.setColumnWidth(i, int(width))
+                self.sessions_tab.sessions_tree.setColumnWidth(i, int(width))
 
         # Connect signals after restoring settings to avoid triggering saves during restore
         self.connect_signals()
