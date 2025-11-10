@@ -249,30 +249,40 @@ class SessionsTab(QWidget):
         details.append(f"<h3>Session: {session_data['date']} - {session_data['object']}</h3>")
         details.append(f"<b>Filter:</b> {session_data['filter'] or 'None'}<br>")
         details.append(f"<b>Light Frames:</b> {session_data['frame_count']}<br>")
-        details.append(f"<b>Average Exposure:</b> {session_data['avg_exposure']:.1f}s<br>")
-        details.append(f"<b>Average Temperature:</b> {session_data['avg_temp']:.1f}°C<br>")
+
+        # Handle None values for numeric fields
+        avg_exp = session_data['avg_exposure']
+        details.append(f"<b>Average Exposure:</b> {avg_exp:.1f}s<br>" if avg_exp is not None else "<b>Average Exposure:</b> N/A<br>")
+
+        avg_temp = session_data['avg_temp']
+        details.append(f"<b>Average Temperature:</b> {avg_temp:.1f}°C<br>" if avg_temp is not None else "<b>Average Temperature:</b> N/A<br>")
+
         details.append(f"<b>Binning:</b> {session_data['xbinning']}x{session_data['ybinning']}<br>")
         details.append(f"<b>Status:</b> {session_data['status']}<br>")
 
         details.append("<h4>Calibration Frames:</h4>")
 
         darks = session_data['darks']
-        details.append(f"<b>Darks ({darks['exposure']:.1f}s):</b> {darks['count']} frames")
+        dark_exp = darks['exposure']
+        details.append(f"<b>Darks ({dark_exp:.1f}s):</b> {darks['count']} frames" if dark_exp is not None else f"<b>Darks:</b> {darks['count']} frames")
         if darks['master_count'] > 0:
             details.append(f" + {darks['master_count']} master(s)")
-        details.append(f" (Quality: {darks['quality']:.0f}%)<br>")
+        dark_quality = darks['quality']
+        details.append(f" (Quality: {dark_quality:.0f}%)<br>" if dark_quality is not None else " (Quality: N/A)<br>")
 
         bias = session_data['bias']
         details.append(f"<b>Bias:</b> {bias['count']} frames")
         if bias['master_count'] > 0:
             details.append(f" + {bias['master_count']} master(s)")
-        details.append(f" (Quality: {bias['quality']:.0f}%)<br>")
+        bias_quality = bias['quality']
+        details.append(f" (Quality: {bias_quality:.0f}%)<br>" if bias_quality is not None else " (Quality: N/A)<br>")
 
         flats = session_data['flats']
         details.append(f"<b>Flats ({flats['filter'] or 'No Filter'}):</b> {flats['count']} frames")
         if flats['master_count'] > 0:
             details.append(f" + {flats['master_count']} master(s)")
-        details.append(f" (Quality: {flats['quality']:.0f}%)<br>")
+        flat_quality = flats['quality']
+        details.append(f" (Quality: {flat_quality:.0f}%)<br>" if flat_quality is not None else " (Quality: N/A)<br>")
 
         self.session_details_text.setHtml(''.join(details))
 
