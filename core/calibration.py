@@ -104,7 +104,11 @@ class CalibrationMatcher:
                 master_count = cursor.fetchone()[0] or 0
 
             # Calculate quality score (0-100)
-            quality = min(100, (dark_count / self.min_frames_recommended) * 100) if dark_count > 0 else 0
+            # If master frame is present, quality is 100%
+            if master_count > 0:
+                quality = 100
+            else:
+                quality = min(100, (dark_count / self.min_frames_recommended) * 100) if dark_count > 0 else 0
 
             # Determine display text and status
             if master_count > 0:
@@ -179,7 +183,11 @@ class CalibrationMatcher:
                 master_count = cursor.fetchone()[0] or 0
 
             # Calculate quality score (0-100)
-            quality = min(100, (bias_count / self.min_frames_recommended) * 100) if bias_count > 0 else 0
+            # If master frame is present, quality is 100%
+            if master_count > 0:
+                quality = 100
+            else:
+                quality = min(100, (bias_count / self.min_frames_recommended) * 100) if bias_count > 0 else 0
 
             # Determine display text and status
             if master_count > 0:
@@ -260,7 +268,11 @@ class CalibrationMatcher:
                 master_count = cursor.fetchone()[0] or 0
 
             # Calculate quality score (0-100)
-            quality = min(100, (flat_count / self.min_frames_recommended) * 100) if flat_count > 0 else 0
+            # If master frame is present, quality is 100%
+            if master_count > 0:
+                quality = 100
+            else:
+                quality = min(100, (flat_count / self.min_frames_recommended) * 100) if flat_count > 0 else 0
 
             # Determine display text and status
             if master_count > 0:
