@@ -227,9 +227,11 @@ class SessionsTab(QWidget):
                 session_item.setText(4, bias_info['display'])
                 session_item.setText(5, flats_info['display'])
 
-                # Set status color
-                for col in range(6):
-                    session_item.setForeground(col, status_color)
+                # Set status color (only for non-complete sessions)
+                # Complete sessions use default colors
+                if status != 'Complete':
+                    for col in range(6):
+                        session_item.setForeground(col, status_color)
 
                 # Store session data for details view
                 session_item.setData(0, Qt.ItemDataRole.UserRole, {
