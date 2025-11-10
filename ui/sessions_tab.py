@@ -11,7 +11,7 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
     QLabel, QTextEdit, QGroupBox, QComboBox, QRadioButton,
-    QTreeWidget, QTreeWidgetItem, QFileDialog
+    QTreeWidget, QTreeWidgetItem, QFileDialog, QSplitter
 )
 from PyQt6.QtCore import Qt
 
@@ -115,23 +115,34 @@ class SessionsTab(QWidget):
         self.sessions_tree.itemClicked.connect(self.on_session_clicked)
         layout.addWidget(self.sessions_tree)
 
-        # Session details panel
+        # Session details and recommendations panel with resizable splitter
         details_group = QGroupBox("Session Details")
         details_layout = QVBoxLayout()
 
+        # Create a vertical splitter for resizable panels
+        splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Session details panel
         self.session_details_text = QTextEdit()
         self.session_details_text.setReadOnly(True)
-        self.session_details_text.setMaximumHeight(200)
-        details_layout.addWidget(self.session_details_text)
+        splitter.addWidget(self.session_details_text)
 
-        # Recommendations panel
+        # Recommendations panel with label
+        recommendations_widget = QWidget()
+        rec_layout = QVBoxLayout(recommendations_widget)
+        rec_layout.setContentsMargins(0, 0, 0, 0)
+        rec_layout.addWidget(QLabel('Recommendations:'))
         self.recommendations_text = QTextEdit()
         self.recommendations_text.setReadOnly(True)
-        self.recommendations_text.setMaximumHeight(150)
         self.recommendations_text.setPlaceholderText('Recommendations will appear here...')
-        details_layout.addWidget(QLabel('Recommendations:'))
-        details_layout.addWidget(self.recommendations_text)
+        rec_layout.addWidget(self.recommendations_text)
 
+        splitter.addWidget(recommendations_widget)
+
+        # Set initial proportions (200:150 ratio from original fixed heights)
+        splitter.setSizes([200, 150])
+
+        details_layout.addWidget(splitter)
         details_group.setLayout(details_layout)
         layout.addWidget(details_group)
 
