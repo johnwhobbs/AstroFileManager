@@ -42,6 +42,7 @@ from import_export.csv_exporter import CSVExporter
 from ui.import_tab import ImportTab
 from ui.settings_tab import SettingsTab
 from ui.maintenance_tab import MaintenanceTab
+from ui.sessions_tab import SessionsTab
 
 
 def generate_organized_path(repo_path, obj, filt, imgtyp, exp, temp, xbin, ybin, date, original_filename):
@@ -155,8 +156,8 @@ class XISFCatalogGUI(QMainWindow):
         self.import_tab = ImportTab(self.db_path, self.settings)
         self.settings_tab = SettingsTab(self.settings)
         self.maintenance_tab = MaintenanceTab(self.db_path, self.settings, self.import_tab.log_text)
+        self.sessions_tab = SessionsTab(self.db_path, self.db, self.calibration)
         self.view_tab = self.create_view_tab()
-        self.sessions_tab = self.create_sessions_tab()
         self.analytics_tab = self.create_analytics_tab()
 
         # Set cross-tab dependencies after all tabs are created
@@ -2117,7 +2118,7 @@ Imported: {result[11] or 'N/A'}
         if index == 0:  # View Catalog tab
             self.refresh_catalog_view()
         elif index == 1:  # Sessions tab
-            self.refresh_sessions()
+            self.sessions_tab.refresh_sessions()
         elif index == 2:  # Analytics tab
             self.refresh_analytics()
         elif index == 4:  # Maintenance tab
