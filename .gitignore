@@ -1,4 +1,5 @@
 xisf_catalog.db
+xisf_repository.db
 __pycache__/
 *.pyc
 *.pyo
