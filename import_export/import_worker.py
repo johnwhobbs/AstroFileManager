@@ -290,9 +290,6 @@ class ImportWorker(QThread):
         batch_size = IMPORT_BATCH_SIZE
         batch_data = []
 
-        # Track used organized paths to ensure uniqueness during import session
-        used_organized_paths = set()
-
         for i, filepath in enumerate(self.files):
             basename = os.path.basename(filepath)
             self.progress.emit(i + 1, len(self.files), f"Processing: {basename}")
@@ -341,21 +338,6 @@ class ImportWorker(QThread):
                                 date_loc,
                                 filename
                             )
-
-                            # Ensure unique filename by incrementing sequence number if needed
-                            if organized_path in used_organized_paths or os.path.exists(organized_path):
-                                # Extract base path and sequence number
-                                base_path = organized_path.rsplit('_', 1)[0]  # Everything before last underscore
-                                ext = '.xisf'
-                                seq_num = 1
-
-                                # Keep incrementing until we find a unique path
-                                while organized_path in used_organized_paths or os.path.exists(organized_path):
-                                    seq_num += 1
-                                    organized_path = f"{base_path}_{seq_num:03d}{ext}"
-
-                            # Track this path as used
-                            used_organized_paths.add(organized_path)
 
                             # Create directory if needed
                             os.makedirs(os.path.dirname(organized_path), exist_ok=True)
