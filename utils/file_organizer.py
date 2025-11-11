@@ -78,17 +78,23 @@ def generate_organized_path(repo_path: str, obj: Optional[str], filt: Optional[s
         except (ValueError, TypeError):
             exp_str = "0s"
         subdir = os.path.join("Calibration", "Darks", f"{exp_str}_{temp_str}_{binning}")
-        new_filename = f"{date}_Dark_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+        # Add "Master_" prefix for master frames
+        prefix = "Master_" if 'master' in imgtyp.lower() else ""
+        new_filename = f"{date}_{prefix}Dark_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
 
     elif 'flat' in imgtyp.lower():
         # Calibration/Flats/[date]/[filter]_[temp]_[binning]/[filename]
         subdir = os.path.join("Calibration", "Flats", date, f"{filt}_{temp_str}_{binning}")
-        new_filename = f"{date}_Flat_{filt}_{temp_str}_{binning}_{seq}.xisf"
+        # Add "Master_" prefix for master frames
+        prefix = "Master_" if 'master' in imgtyp.lower() else ""
+        new_filename = f"{date}_{prefix}Flat_{filt}_{temp_str}_{binning}_{seq}.xisf"
 
     elif 'bias' in imgtyp.lower():
         # Calibration/Bias/[temp]_[binning]/[filename]
         subdir = os.path.join("Calibration", "Bias", f"{temp_str}_{binning}")
-        new_filename = f"{date}_Bias_{temp_str}_{binning}_{seq}.xisf"
+        # Add "Master_" prefix for master frames
+        prefix = "Master_" if 'master' in imgtyp.lower() else ""
+        new_filename = f"{date}_{prefix}Bias_{temp_str}_{binning}_{seq}.xisf"
 
     else:
         # Unknown type - put in root with original structure
