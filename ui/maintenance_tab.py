@@ -11,9 +11,11 @@ import shutil
 from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
-    QLabel, QTextEdit, QGroupBox, QComboBox, QLineEdit
+    QLabel, QTextEdit, QGroupBox, QComboBox, QLineEdit, QListWidget,
+    QListWidgetItem, QDoubleSpinBox
 )
-from PyQt6.QtCore import QSettings
+from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtGui import QColor
 
 
 class MaintenanceTab(QWidget):
@@ -104,6 +106,57 @@ class MaintenanceTab(QWidget):
 
         replace_group.setLayout(replace_layout)
         layout.addWidget(replace_group)
+
+        # Master Frame Temperature Tagging section
+        master_temp_group = QGroupBox("Master Frame Temperature Tagging")
+        master_temp_layout = QVBoxLayout()
+
+        master_temp_info = QLabel("Assign CCD-TEMP values to master calibration frames:")
+        master_temp_layout.addWidget(master_temp_info)
+
+        master_temp_help = QLabel("Master frames from PixInsight often lack CCD-TEMP metadata. Tag them here to enable session matching.")
+        master_temp_help.setStyleSheet("color: #888888; font-size: 10px;")
+        master_temp_layout.addWidget(master_temp_help)
+
+        # Refresh button
+        refresh_masters_btn = QPushButton('Refresh Master Frames List')
+        refresh_masters_btn.clicked.connect(self.refresh_master_frames_list)
+        master_temp_layout.addWidget(refresh_masters_btn)
+
+        # List of master frames
+        list_label = QLabel("Select master frames to tag:")
+        master_temp_layout.addWidget(list_label)
+
+        self.master_frames_list = QListWidget()
+        self.master_frames_list.setMaximumHeight(150)
+        self.master_frames_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        master_temp_layout.addWidget(self.master_frames_list)
+
+        # Temperature input
+        temp_input_layout = QHBoxLayout()
+        temp_label = QLabel("CCD Temperature:")
+        temp_label.setMinimumWidth(120)
+        self.master_temp_spinbox = QDoubleSpinBox()
+        self.master_temp_spinbox.setRange(-50.0, 50.0)
+        self.master_temp_spinbox.setValue(-10.0)
+        self.master_temp_spinbox.setSuffix(" °C")
+        self.master_temp_spinbox.setDecimals(1)
+        temp_input_layout.addWidget(temp_label)
+        temp_input_layout.addWidget(self.master_temp_spinbox)
+        temp_input_layout.addStretch()
+        master_temp_layout.addLayout(temp_input_layout)
+
+        # Tag button
+        tag_button_layout = QHBoxLayout()
+        tag_button_layout.addStretch()
+        tag_masters_btn = QPushButton('Tag Selected Masters')
+        tag_masters_btn.clicked.connect(self.tag_master_frames)
+        tag_masters_btn.setStyleSheet("QPushButton { background-color: #2d7a2d; color: white; } QPushButton:hover { background-color: #3d8a3d; }")
+        tag_button_layout.addWidget(tag_masters_btn)
+        master_temp_layout.addLayout(tag_button_layout)
+
+        master_temp_group.setLayout(master_temp_layout)
+        layout.addWidget(master_temp_group)
 
         # File Organization section
         organize_group = QGroupBox("File Organization")
@@ -415,3 +468,100 @@ class MaintenanceTab(QWidget):
                 QMessageBox.information(self, 'Success', 'Database cleared successfully!')
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to clear database: {e}')
+
+    def refresh_master_frames_list(self) -> None:
+        """Refresh the list of master calibration frames."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Query for all master frames, showing current temp status
+            cursor.execute('''
+                SELECT id, filename, imagetyp, ccd_temp, exposure, xbinning, ybinning
+                FROM xisf_files
+                WHERE imagetyp LIKE '%Master%'
+                ORDER BY imagetyp, filename
+            ''')
+
+            master_frames = cursor.fetchall()
+            conn.close()
+
+            # Clear and populate the list
+            self.master_frames_list.clear()
+
+            if not master_frames:
+                item = QListWidgetItem("No master frames found in database")
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                self.master_frames_list.addItem(item)
+                return
+
+            for file_id, filename, imagetyp, ccd_temp, exposure, xbin, ybin in master_frames:
+                # Format display text
+                temp_str = f"{ccd_temp:.1f}°C" if ccd_temp is not None else "NO TEMP"
+                exp_str = f"{exposure:.1f}s" if exposure is not None else "N/A"
+                bin_str = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else "N/A"
+
+                # Create display text
+                display_text = f"{filename} [{imagetyp}] - {exp_str}, {temp_str}, Bin{bin_str}"
+
+                # Create list item
+                item = QListWidgetItem(display_text)
+                item.setData(Qt.ItemDataRole.UserRole, file_id)  # Store database ID
+
+                # Highlight items missing temperature
+                if ccd_temp is None:
+                    item.setForeground(QColor(255, 165, 0))  # Orange for missing temp
+
+                self.master_frames_list.addItem(item)
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to load master frames: {e}')
+
+    def tag_master_frames(self) -> None:
+        """Apply temperature tag to selected master frames."""
+        selected_items = self.master_frames_list.selectedItems()
+
+        if not selected_items:
+            QMessageBox.warning(self, 'No Selection', 'Please select one or more master frames to tag.')
+            return
+
+        temperature = self.master_temp_spinbox.value()
+
+        # Get file IDs from selected items
+        file_ids = [item.data(Qt.ItemDataRole.UserRole) for item in selected_items]
+
+        # Confirm the operation
+        reply = QMessageBox.question(
+            self, 'Confirm Temperature Tagging',
+            f'Set CCD-TEMP to {temperature}°C for {len(file_ids)} selected master frame(s)?\n\n'
+            f'This will enable these masters to match sessions.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Update temperature for all selected frames
+            for file_id in file_ids:
+                cursor.execute('UPDATE xisf_files SET ccd_temp = ? WHERE id = ?',
+                              (temperature, file_id))
+
+            conn.commit()
+            rows_affected = cursor.rowcount
+            conn.close()
+
+            QMessageBox.information(
+                self, 'Success',
+                f'Successfully tagged {rows_affected} master frame(s) with temperature {temperature}°C.'
+            )
+
+            # Refresh the list to show updated temperatures
+            self.refresh_master_frames_list()
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to tag master frames: {e}')
