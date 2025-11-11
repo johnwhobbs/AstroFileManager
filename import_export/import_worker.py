@@ -82,7 +82,11 @@ def generate_organized_path(
             exp_str = f"{int(float(exp))}s" if exp else "0s"
         except (ValueError, TypeError):
             exp_str = "0s"
-        new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+        # Add "Master_Light_" prefix for master frames, no prefix for regular lights
+        if 'master' in imgtyp.lower():
+            new_filename = f"{date}_Master_Light_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+        else:
+            new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
 
     elif 'dark' in imgtyp.lower():
         # Calibration/Darks/[exp]_[temp]_[binning]/[filename]

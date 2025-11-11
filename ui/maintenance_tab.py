@@ -17,6 +17,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QColor
 
+from utils.file_organizer import generate_organized_path
+
 
 class MaintenanceTab(QWidget):
     """Maintenance tab for database and file management operations."""
@@ -228,7 +230,7 @@ class MaintenanceTab(QWidget):
             QMessageBox.critical(self, 'Error', f'Failed to load values: {e}')
 
     def replace_values(self) -> None:
-        """Replace values in the database."""
+        """Replace values in the database and update filenames/folders for OBJECT and FILTER changes."""
         keyword = self.keyword_combo.currentText()
         current_value = self.current_value_combo.currentText()
         replacement_value = self.replacement_input.text()
@@ -242,13 +244,22 @@ class MaintenanceTab(QWidget):
             return
 
         # Confirm the replacement
-        reply = QMessageBox.question(
-            self, 'Confirm Replacement',
+        affects_organization = keyword in ['OBJECT', 'FILTER']
+        confirmation_msg = (
             f'Replace all occurrences of:\n\n'
             f'Keyword: {keyword}\n'
             f'Current Value: "{current_value}"\n'
             f'Replacement Value: "{replacement_value}"\n\n'
-            f'Are you sure?',
+        )
+
+        if affects_organization:
+            confirmation_msg += 'This will update the database, rename files, and move them to correct folders.\n\n'
+
+        confirmation_msg += 'Are you sure?'
+
+        reply = QMessageBox.question(
+            self, 'Confirm Replacement',
+            confirmation_msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
@@ -269,29 +280,126 @@ class MaintenanceTab(QWidget):
                 }
 
                 column = column_map.get(keyword)
-                if column:
+                if not column:
+                    QMessageBox.critical(self, 'Error', f'Unknown keyword: {keyword}')
+                    conn.close()
+                    return
+
+                # Get repository path if we need to reorganize files
+                repo_path = None
+                if affects_organization:
+                    repo_path = self.settings.value('repository_path', '')
+                    if not repo_path:
+                        QMessageBox.warning(
+                            self, 'No Repository Path',
+                            'Repository path not set. Files will not be moved, only database will be updated.'
+                        )
+
+                updated_count = 0
+                moved_count = 0
+                errors = []
+
+                # If this affects file organization, handle each file individually
+                if affects_organization and repo_path:
+                    # Get all affected files
+                    cursor.execute(f'''
+                        SELECT id, filepath, filename, object, filter, imagetyp,
+                               exposure, ccd_temp, xbinning, ybinning, date_loc
+                        FROM xisf_files
+                        WHERE {column} = ?
+                    ''', (current_value,))
+
+                    affected_files = cursor.fetchall()
+
+                    for row in affected_files:
+                        file_id, old_filepath, old_filename, obj, filt, imgtyp, exp, temp, xbin, ybin, date_loc = row
+
+                        # Update the appropriate field with new value
+                        if keyword == 'OBJECT':
+                            obj = replacement_value
+                        elif keyword == 'FILTER':
+                            filt = replacement_value
+
+                        # Update database
+                        cursor.execute(f'UPDATE xisf_files SET {column} = ? WHERE id = ?',
+                                      (replacement_value, file_id))
+                        updated_count += 1
+
+                        # Move file if it exists
+                        if old_filepath and os.path.exists(old_filepath):
+                            try:
+                                # Generate new organized path with updated value
+                                new_filepath = generate_organized_path(
+                                    repo_path, obj, filt, imgtyp, exp, temp,
+                                    xbin, ybin, date_loc, old_filename
+                                )
+
+                                # Only move if the path is different
+                                if old_filepath != new_filepath:
+                                    # Create new directory if needed
+                                    new_dir = os.path.dirname(new_filepath)
+                                    os.makedirs(new_dir, exist_ok=True)
+
+                                    # Move the file
+                                    shutil.move(old_filepath, new_filepath)
+
+                                    # Update database with new filepath and filename
+                                    new_filename = os.path.basename(new_filepath)
+                                    cursor.execute('''
+                                        UPDATE xisf_files
+                                        SET filepath = ?, filename = ?
+                                        WHERE id = ?
+                                    ''', (new_filepath, new_filename, file_id))
+
+                                    moved_count += 1
+
+                                    # Clean up old directory if empty
+                                    old_dir = os.path.dirname(old_filepath)
+                                    try:
+                                        if old_dir and os.path.isdir(old_dir) and not os.listdir(old_dir):
+                                            os.rmdir(old_dir)
+                                            # Try to remove parent directory if also empty (for nested structures)
+                                            parent_dir = os.path.dirname(old_dir)
+                                            if parent_dir and os.path.isdir(parent_dir) and not os.listdir(parent_dir):
+                                                os.rmdir(parent_dir)
+                                    except:
+                                        pass  # Ignore cleanup errors
+
+                            except Exception as e:
+                                errors.append(f"{old_filename}: {str(e)}")
+
+                else:
+                    # Simple update for non-organization-affecting fields
                     cursor.execute(f'UPDATE xisf_files SET {column} = ? WHERE {column} = ?',
                                    (replacement_value, current_value))
-                    rows_affected = cursor.rowcount
-                    conn.commit()
+                    updated_count = cursor.rowcount
 
-                    QMessageBox.information(
-                        self, 'Success',
-                        f'Successfully replaced {rows_affected} occurrence(s).'
-                    )
-
-                    # Refresh the current values dropdown
-                    self.populate_current_values(keyword)
-                    self.replacement_input.clear()
-
+                conn.commit()
                 conn.close()
+
+                # Show results
+                message = f'Successfully replaced {updated_count} occurrence(s).'
+                if moved_count > 0:
+                    message += f'\n{moved_count} file(s) moved to new locations.'
+                if errors:
+                    message += f'\n\nErrors encountered:\n' + '\n'.join(errors[:5])
+                    if len(errors) > 5:
+                        message += f'\n... and {len(errors) - 5} more'
+
+                if errors:
+                    QMessageBox.warning(self, 'Completed with Errors', message)
+                else:
+                    QMessageBox.information(self, 'Success', message)
+
+                # Refresh the current values dropdown
+                self.populate_current_values(keyword)
+                self.replacement_input.clear()
+
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to replace values: {e}')
 
     def preview_organization(self) -> None:
         """Preview the file organization plan."""
-        from utils.file_organizer import generate_organized_path
-
         repo_path = self.settings.value('repository_path', '')
 
         if not repo_path:
@@ -518,7 +626,7 @@ class MaintenanceTab(QWidget):
             QMessageBox.critical(self, 'Error', f'Failed to load master frames: {e}')
 
     def tag_master_frames(self) -> None:
-        """Apply temperature tag to selected master frames."""
+        """Apply temperature tag to selected master frames and update filenames/paths."""
         selected_items = self.master_frames_list.selectedItems()
 
         if not selected_items:
@@ -534,7 +642,7 @@ class MaintenanceTab(QWidget):
         reply = QMessageBox.question(
             self, 'Confirm Temperature Tagging',
             f'Set CCD-TEMP to {temperature}°C for {len(file_ids)} selected master frame(s)?\n\n'
-            f'This will enable these masters to match sessions.',
+            f'This will update the database, rename files, and move them to the correct folders.',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
@@ -546,19 +654,95 @@ class MaintenanceTab(QWidget):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            # Update temperature for all selected frames
+            # Get repository path from settings
+            repo_path = self.settings.value('repository_path', '')
+            if not repo_path:
+                QMessageBox.warning(
+                    self, 'No Repository Path',
+                    'Repository path not set. Files will not be moved, only database will be updated.'
+                )
+
+            updated_count = 0
+            moved_count = 0
+            errors = []
+
+            # Update temperature and move files for all selected frames
             for file_id in file_ids:
+                # Get full file information
+                cursor.execute('''
+                    SELECT filepath, filename, object, filter, imagetyp,
+                           exposure, xbinning, ybinning, date_loc
+                    FROM xisf_files
+                    WHERE id = ?
+                ''', (file_id,))
+
+                row = cursor.fetchone()
+                if not row:
+                    errors.append(f"File ID {file_id} not found")
+                    continue
+
+                old_filepath, old_filename, obj, filt, imgtyp, exp, xbin, ybin, date_loc = row
+
+                # Update temperature in database
                 cursor.execute('UPDATE xisf_files SET ccd_temp = ? WHERE id = ?',
                               (temperature, file_id))
+                updated_count += 1
+
+                # If repository path is set and file exists, move it
+                if repo_path and old_filepath and os.path.exists(old_filepath):
+                    try:
+                        # Generate new organized path with updated temperature
+                        new_filepath = generate_organized_path(
+                            repo_path, obj, filt, imgtyp, exp, temperature,
+                            xbin, ybin, date_loc, old_filename
+                        )
+
+                        # Only move if the path is different
+                        if old_filepath != new_filepath:
+                            # Create new directory if needed
+                            new_dir = os.path.dirname(new_filepath)
+                            os.makedirs(new_dir, exist_ok=True)
+
+                            # Move the file
+                            shutil.move(old_filepath, new_filepath)
+
+                            # Update database with new filepath and filename
+                            new_filename = os.path.basename(new_filepath)
+                            cursor.execute('''
+                                UPDATE xisf_files
+                                SET filepath = ?, filename = ?
+                                WHERE id = ?
+                            ''', (new_filepath, new_filename, file_id))
+
+                            moved_count += 1
+
+                            # Clean up old directory if empty
+                            old_dir = os.path.dirname(old_filepath)
+                            try:
+                                if old_dir and os.path.isdir(old_dir) and not os.listdir(old_dir):
+                                    os.rmdir(old_dir)
+                            except:
+                                pass  # Ignore cleanup errors
+
+                    except Exception as e:
+                        errors.append(f"{old_filename}: {str(e)}")
 
             conn.commit()
-            rows_affected = cursor.rowcount
             conn.close()
 
-            QMessageBox.information(
-                self, 'Success',
-                f'Successfully tagged {rows_affected} master frame(s) with temperature {temperature}°C.'
-            )
+            # Show results
+            message = f'Successfully updated {updated_count} master frame(s) with temperature {temperature}°C.'
+            if moved_count > 0:
+                message += f'\n{moved_count} file(s) moved to new locations.'
+            if errors:
+                message += f'\n\nErrors encountered:\n' + '\n'.join(errors[:5])
+                if len(errors) > 5:
+                    message += f'\n... and {len(errors) - 5} more'
+
+            if errors:
+                QMessageBox.warning(self, 'Completed with Errors', message)
+            else:
+                QMessageBox.information(self, 'Success', message)
 
             # Refresh the list to show updated temperatures
             self.refresh_master_frames_list()
