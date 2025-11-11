@@ -734,7 +734,7 @@ Imported: {result[11] or 'N/A'}
                                 WHERE imagetyp LIKE '%Dark%'
                                     AND object IS NULL
                                     AND (exposure = ? OR (exposure IS NULL AND ? IS NULL))
-                                    AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                                    AND (ROUND(ccd_temp / 2.0) * 2 = ? OR (ccd_temp IS NULL AND ? IS NULL))
                                     AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
                                     AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
                                 ORDER BY date_loc DESC
@@ -753,7 +753,7 @@ Imported: {result[11] or 'N/A'}
                                     WHERE imagetyp LIKE '%Dark%'
                                         AND object IS NULL
                                         AND (exposure = ? OR (exposure IS NULL AND ? IS NULL))
-                                        AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                                        AND (ROUND(ccd_temp / 2.0) * 2 = ? OR (ccd_temp IS NULL AND ? IS NULL))
                                         AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
                                         AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
                                         AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
@@ -845,7 +845,7 @@ Imported: {result[11] or 'N/A'}
                                     WHERE {flat_where}
                                         AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
                                         AND (filter = ? OR (filter IS NULL AND ? IS NULL))
-                                        AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                                        AND (ROUND(ccd_temp / 2.0) * 2 = ? OR (ccd_temp IS NULL AND ? IS NULL))
                                         AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
                                         AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
                                     ORDER BY filename
@@ -916,7 +916,7 @@ Imported: {result[11] or 'N/A'}
                                 SELECT DISTINCT date_loc
                                 FROM xisf_files
                                 WHERE {bias_where}
-                                    AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                                    AND (ROUND(ccd_temp / 2.0) * 2 = ? OR (ccd_temp IS NULL AND ? IS NULL))
                                     AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
                                     AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
                                 ORDER BY date_loc DESC
@@ -933,7 +933,7 @@ Imported: {result[11] or 'N/A'}
                                     SELECT filename, imagetyp, exposure, telescop, instrume, date_loc, filter, ccd_temp, xbinning, ybinning
                                     FROM xisf_files
                                     WHERE {bias_where}
-                                        AND (ROUND(ccd_temp) = ? OR (ccd_temp IS NULL AND ? IS NULL))
+                                        AND (ROUND(ccd_temp / 2.0) * 2 = ? OR (ccd_temp IS NULL AND ? IS NULL))
                                         AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
                                         AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
                                         AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
