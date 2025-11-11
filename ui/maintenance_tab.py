@@ -549,7 +549,7 @@ class MaintenanceTab(QWidget):
             cursor = conn.cursor()
 
             # Get repository path from settings
-            repo_path = self.settings.value('repo_path', '')
+            repo_path = self.settings.value('repository_path', '')
             if not repo_path:
                 QMessageBox.warning(
                     self, 'No Repository Path',
