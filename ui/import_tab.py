@@ -117,18 +117,30 @@ class ImportTab(QWidget):
 
     def import_files(self) -> None:
         """Import individual XISF files."""
+        # Get last used directory, default to home directory
+        last_dir = self.settings.value('last_import_directory', str(Path.home()))
+
         files, _ = QFileDialog.getOpenFileNames(
-            self, 'Select XISF Files', '', 'XISF Files (*.xisf)'
+            self, 'Select XISF Files', last_dir, 'XISF Files (*.xisf)'
         )
 
         if files:
+            # Save the directory of the first selected file for next time
+            selected_dir = str(Path(files[0]).parent)
+            self.settings.setValue('last_import_directory', selected_dir)
             self.start_import(files)
 
     def import_folder(self) -> None:
         """Import all XISF files from a folder and its subfolders."""
-        folder = QFileDialog.getExistingDirectory(self, 'Select Folder')
+        # Get last used directory, default to home directory
+        last_dir = self.settings.value('last_import_directory', str(Path.home()))
+
+        folder = QFileDialog.getExistingDirectory(self, 'Select Folder', last_dir)
 
         if folder:
+            # Save the selected folder for next time
+            self.settings.setValue('last_import_directory', folder)
+
             # Recursively find all .xisf files in folder and subfolders
             files = list(Path(folder).rglob('*.xisf'))
             if files:
