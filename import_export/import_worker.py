@@ -11,7 +11,7 @@ import hashlib
 import logging
 import shutil
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from dateutil import tz
 from typing import List, Optional, Any, Dict
 from PyQt6.QtCore import QThread, pyqtSignal
 import xisf
@@ -260,7 +260,7 @@ class ImportWorker(QThread):
                 logger.info(f"DateTime with UTC timezone: {dt_utc}")
 
                 # Convert to target timezone
-                target_tz = ZoneInfo(timezone_str)
+                target_tz = tz.gettz(timezone_str)
                 logger.info(f"Target timezone object: {target_tz}")
 
                 dt_local = dt_utc.astimezone(target_tz)
