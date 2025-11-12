@@ -10,7 +10,7 @@ import sqlite3
 import hashlib
 import logging
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import List, Optional, Any, Dict
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -256,7 +256,7 @@ class ImportWorker(QThread):
             try:
                 logger.info("Attempting timezone conversion...")
                 # Add UTC timezone info
-                dt_utc = dt.replace(tzinfo=ZoneInfo('UTC'))
+                dt_utc = dt.replace(tzinfo=timezone.utc)
                 logger.info(f"DateTime with UTC timezone: {dt_utc}")
 
                 # Convert to target timezone
