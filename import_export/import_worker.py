@@ -8,9 +8,10 @@ of XISF files into the database.
 import os
 import sqlite3
 import hashlib
+import logging
 import shutil
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
+import pytz
 from typing import List, Optional, Any, Dict
 from PyQt6.QtCore import QThread, pyqtSignal
 import xisf
@@ -143,6 +144,17 @@ class ImportWorker(QThread):
         self.processed = 0
         self.errors = 0
 
+        # Configure logging for date debugging
+        log_file = 'import_date_debug.log'
+        logging.basicConfig(
+            filename=log_file,
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            force=True  # Override any existing config
+        )
+        logger = logging.getLogger(__name__)
+        logger.info(f"ImportWorker initialized with timezone: {timezone}")
+
     def calculate_file_hash(self, filepath: str) -> str:
         """Calculate SHA256 hash of a file"""
         hash_obj = hashlib.sha256()
@@ -194,12 +206,19 @@ class ImportWorker(QThread):
 
     def process_date_obs(self, date_str: Optional[str], timezone_str: str) -> Optional[str]:
         """Process DATE-OBS: convert from UTC to local timezone, subtract DATE_OFFSET_HOURS, return date in YYYY-MM-DD format"""
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== process_date_obs called ===")
+        logger.info(f"Input date_str: {date_str}")
+        logger.info(f"Input timezone_str: {timezone_str}")
+
         if not date_str:
+            logger.warning("date_str is None or empty")
             return None
 
         try:
             # Convert to string if needed
             date_str = str(date_str).strip()
+            logger.info(f"After strip: {date_str}")
 
             # Handle fractional seconds that have too many digits (7+ digits instead of 6)
             # Python's %f expects exactly 6 digits for microseconds
@@ -209,6 +228,7 @@ class ImportWorker(QThread):
                     # Truncate fractional seconds to 6 digits
                     fractional = parts[1][:6]
                     date_str = f"{parts[0]}.{fractional}"
+                    logger.info(f"After truncating fractional seconds: {date_str}")
 
             # Try parsing common FITS date formats
             formats = [
@@ -222,31 +242,52 @@ class ImportWorker(QThread):
             for fmt in formats:
                 try:
                     dt = datetime.strptime(date_str, fmt)
+                    logger.info(f"Successfully parsed with format: {fmt}")
+                    logger.info(f"Parsed datetime (naive): {dt}")
                     break
                 except ValueError:
                     continue
 
             if dt is None:
+                logger.warning("Failed to parse date with any format")
                 return None
 
             # DATE-OBS is in UTC, convert to local timezone
             try:
+                logger.info("Attempting timezone conversion...")
                 # Add UTC timezone info
-                dt_utc = dt.replace(tzinfo=ZoneInfo('UTC'))
+                dt_utc = dt.replace(tzinfo=timezone.utc)
+                logger.info(f"DateTime with UTC timezone: {dt_utc}")
+
                 # Convert to target timezone
-                target_tz = ZoneInfo(timezone_str)
+                target_tz = pytz.timezone(timezone_str)
+                logger.info(f"Target timezone object: {target_tz}")
+
                 dt_local = dt_utc.astimezone(target_tz)
+                logger.info(f"Converted to local timezone: {dt_local}")
+
                 # Subtract DATE_OFFSET_HOURS for session grouping
                 dt_local = dt_local - timedelta(hours=DATE_OFFSET_HOURS)
+                logger.info(f"After subtracting {DATE_OFFSET_HOURS} hours: {dt_local}")
+
                 result = dt_local.strftime('%Y-%m-%d')
+                logger.info(f"Final result: {result}")
                 return result
-            except Exception:
+            except Exception as e:
                 # If timezone conversion fails, fall back to simple subtraction
+                logger.error(f"Timezone conversion FAILED: {e}")
+                logger.error(f"Exception type: {type(e).__name__}")
+                logger.info("Falling back to simple UTC subtraction")
+
                 dt = dt - timedelta(hours=DATE_OFFSET_HOURS)
+                logger.info(f"After fallback subtraction: {dt}")
+
                 result = dt.strftime('%Y-%m-%d')
+                logger.info(f"Fallback result: {result}")
                 return result
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"Outer exception in process_date_obs: {e}")
             return None
 
     def read_fits_keywords(self, filename: str) -> Optional[Dict[str, Any]]:

@@ -1,5 +1,6 @@
 xisf_catalog.db
 xisf_repository.db
+import_date_debug.log
 __pycache__/
 *.pyc
 *.pyo
