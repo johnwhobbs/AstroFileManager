@@ -81,7 +81,6 @@ def generate_organized_path(
     else:
         seq = "001"
         # Extract extension from original filename
-        import os
         _, ext = os.path.splitext(original_filename)
         file_ext = ext.lower() if ext else '.xisf'
 
