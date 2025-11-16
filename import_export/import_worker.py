@@ -2,7 +2,7 @@
 Import worker thread for AstroFileManager.
 
 This module contains the ImportWorker class which handles background import
-of XISF files into the database.
+of XISF and FITS files into the database.
 """
 
 import os
@@ -12,6 +12,7 @@ import logging
 import shutil
 from datetime import datetime, timedelta, timezone
 import pytz
+from pathlib import Path
 from typing import List, Optional, Any, Dict
 from PyQt6.QtCore import QThread, pyqtSignal
 import xisf
@@ -24,6 +25,7 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 from constants import IMPORT_BATCH_SIZE, DATE_OFFSET_HOURS
+from utils.fits_reader import read_fits_keywords as read_fits_file
 
 
 def generate_organized_path(
@@ -71,9 +73,17 @@ def generate_organized_path(
     else:
         temp_str = "0C"
 
-    # Extract sequence number from original filename if possible
+    # Extract sequence number and file extension from original filename
     seq_match = re.search(r'_(\d+)\.(xisf|fits?)$', original_filename, re.IGNORECASE)
-    seq = seq_match.group(1) if seq_match else "001"
+    if seq_match:
+        seq = seq_match.group(1)
+        file_ext = '.' + seq_match.group(2).lower()
+    else:
+        seq = "001"
+        # Extract extension from original filename
+        import os
+        _, ext = os.path.splitext(original_filename)
+        file_ext = ext.lower() if ext else '.xisf'
 
     # Determine file type and path structure
     if 'light' in imgtyp.lower():
@@ -85,9 +95,9 @@ def generate_organized_path(
             exp_str = "0s"
         # Add "Master_Light_" prefix for master frames, no prefix for regular lights
         if 'master' in imgtyp.lower():
-            new_filename = f"{date}_Master_Light_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+            new_filename = f"{date}_Master_Light_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}{file_ext}"
         else:
-            new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+            new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}{file_ext}"
 
     elif 'dark' in imgtyp.lower():
         # Calibration/Darks/[exp]_[temp]_[binning]/[filename]
@@ -98,21 +108,21 @@ def generate_organized_path(
         subdir = os.path.join("Calibration", "Darks", f"{exp_str}_{temp_str}_{binning}")
         # Add "Master_" prefix for master frames
         prefix = "Master_" if 'master' in imgtyp.lower() else ""
-        new_filename = f"{date}_{prefix}Dark_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+        new_filename = f"{date}_{prefix}Dark_{exp_str}_{temp_str}_{binning}_{seq}{file_ext}"
 
     elif 'flat' in imgtyp.lower():
         # Calibration/Flats/[date]/[filter]_[temp]_[binning]/[filename]
         subdir = os.path.join("Calibration", "Flats", date, f"{filt}_{temp_str}_{binning}")
         # Add "Master_" prefix for master frames
         prefix = "Master_" if 'master' in imgtyp.lower() else ""
-        new_filename = f"{date}_{prefix}Flat_{filt}_{temp_str}_{binning}_{seq}.xisf"
+        new_filename = f"{date}_{prefix}Flat_{filt}_{temp_str}_{binning}_{seq}{file_ext}"
 
     elif 'bias' in imgtyp.lower():
         # Calibration/Bias/[temp]_[binning]/[filename]
         subdir = os.path.join("Calibration", "Bias", f"{temp_str}_{binning}")
         # Add "Master_" prefix for master frames
         prefix = "Master_" if 'master' in imgtyp.lower() else ""
-        new_filename = f"{date}_{prefix}Bias_{temp_str}_{binning}_{seq}.xisf"
+        new_filename = f"{date}_{prefix}Bias_{temp_str}_{binning}_{seq}{file_ext}"
 
     else:
         # Unknown type - put in root with original structure
@@ -290,40 +300,80 @@ class ImportWorker(QThread):
             logger.error(f"Outer exception in process_date_obs: {e}")
             return None
 
+    def detect_file_type(self, filepath: str) -> Optional[str]:
+        """
+        Detect if file is XISF or FITS based on extension.
+
+        Args:
+            filepath: Path to the file
+
+        Returns:
+            'xisf' for XISF files, 'fits' for FITS files, None if unknown
+        """
+        ext = Path(filepath).suffix.lower()
+        if ext == '.xisf':
+            return 'xisf'
+        elif ext in ['.fits', '.fit']:
+            return 'fits'
+        return None
+
     def read_fits_keywords(self, filename: str) -> Optional[Dict[str, Any]]:
-        """Read FITS keywords from XISF file"""
+        """Read FITS keywords from XISF or FITS file"""
         keywords = ['TELESCOP', 'INSTRUME', 'OBJECT', 'FILTER', 'IMAGETYP',
                     'EXPOSURE', 'EXPTIME', 'CCD-TEMP', 'XBINNING', 'YBINNING', 'DATE-LOC', 'DATE-OBS']
-        try:
-            xisf_file = xisf.XISF(filename)
-            im_data = xisf_file.read_image(0)
 
-            if hasattr(xisf_file, 'fits_keywords'):
-                fits_keywords = xisf_file.fits_keywords
-            elif hasattr(im_data, 'fits_keywords'):
-                fits_keywords = im_data.fits_keywords
-            else:
-                metadata = xisf_file.get_images_metadata()[0]
-                fits_keywords = metadata.get('FITSKeywords', {})
+        file_type = self.detect_file_type(filename)
 
-            results = {}
-            for keyword in keywords:
-                if fits_keywords and keyword in fits_keywords:
-                    keyword_data = fits_keywords[keyword]
-                    if isinstance(keyword_data, list) and len(keyword_data) > 0:
-                        results[keyword] = keyword_data[0]['value']
-                    else:
-                        results[keyword] = keyword_data
+        if file_type == 'xisf':
+            # Read XISF file using xisf library
+            try:
+                xisf_file = xisf.XISF(filename)
+                im_data = xisf_file.read_image(0)
+
+                if hasattr(xisf_file, 'fits_keywords'):
+                    fits_keywords = xisf_file.fits_keywords
+                elif hasattr(im_data, 'fits_keywords'):
+                    fits_keywords = im_data.fits_keywords
                 else:
-                    results[keyword] = None
+                    metadata = xisf_file.get_images_metadata()[0]
+                    fits_keywords = metadata.get('FITSKeywords', {})
 
-            # Special handling: prefer EXPTIME over EXPOSURE (EXPTIME is FITS standard)
-            # This ensures compatibility with both standard and non-standard keywords
-            if results.get('EXPTIME') is not None:
-                results['EXPOSURE'] = results['EXPTIME']
+                results = {}
+                for keyword in keywords:
+                    if fits_keywords and keyword in fits_keywords:
+                        keyword_data = fits_keywords[keyword]
+                        if isinstance(keyword_data, list) and len(keyword_data) > 0:
+                            results[keyword] = keyword_data[0]['value']
+                        else:
+                            results[keyword] = keyword_data
+                    else:
+                        results[keyword] = None
 
-            return results
-        except Exception as e:
+                # Special handling: prefer EXPTIME over EXPOSURE (EXPTIME is FITS standard)
+                # This ensures compatibility with both standard and non-standard keywords
+                if results.get('EXPTIME') is not None:
+                    results['EXPOSURE'] = results['EXPTIME']
+
+                return results
+            except Exception as e:
+                return None
+
+        elif file_type == 'fits':
+            # Read FITS file using astropy
+            try:
+                results = read_fits_file(filename)
+
+                # Special handling: prefer EXPTIME over EXPOSURE (EXPTIME is FITS standard)
+                # This ensures compatibility with both standard and non-standard keywords
+                if results.get('EXPTIME') is not None:
+                    results['EXPOSURE'] = results['EXPTIME']
+
+                return results
+            except Exception as e:
+                return None
+
+        else:
+            # Unknown file type
             return None
 
     def run(self) -> None:

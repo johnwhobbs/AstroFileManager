@@ -49,7 +49,7 @@ class ImportTab(QWidget):
         # Buttons
         button_layout = QHBoxLayout()
 
-        self.import_files_btn = QPushButton('Import XISF Files')
+        self.import_files_btn = QPushButton('Import Astro Files')
         self.import_files_btn.clicked.connect(self.import_files)
         button_layout.addWidget(self.import_files_btn)
 
@@ -116,12 +116,13 @@ class ImportTab(QWidget):
         self.settings.setValue('import_mode', mode)
 
     def import_files(self) -> None:
-        """Import individual XISF files."""
+        """Import individual XISF and FITS files."""
         # Get last used directory, default to home directory
         last_dir = self.settings.value('last_import_directory', str(Path.home()))
 
         files, _ = QFileDialog.getOpenFileNames(
-            self, 'Select XISF Files', last_dir, 'XISF Files (*.xisf)'
+            self, 'Select Astro Image Files', last_dir,
+            'Astro Image Files (*.xisf *.fits *.fit);;XISF Files (*.xisf);;FITS Files (*.fits *.fit);;All Files (*.*)'
         )
 
         if files:
@@ -131,7 +132,7 @@ class ImportTab(QWidget):
             self.start_import(files)
 
     def import_folder(self) -> None:
-        """Import all XISF files from a folder and its subfolders."""
+        """Import all XISF and FITS files from a folder and its subfolders."""
         # Get last used directory, default to home directory
         last_dir = self.settings.value('last_import_directory', str(Path.home()))
 
@@ -141,12 +142,17 @@ class ImportTab(QWidget):
             # Save the selected folder for next time
             self.settings.setValue('last_import_directory', folder)
 
-            # Recursively find all .xisf files in folder and subfolders
-            files = list(Path(folder).rglob('*.xisf'))
+            # Recursively find all .xisf, .fits, and .fit files in folder and subfolders
+            folder_path = Path(folder)
+            xisf_files = list(folder_path.rglob('*.xisf'))
+            fits_files = list(folder_path.rglob('*.fits'))
+            fit_files = list(folder_path.rglob('*.fit'))
+            files = xisf_files + fits_files + fit_files
+
             if files:
                 self.start_import([str(f) for f in files])
             else:
-                QMessageBox.warning(self, 'No Files', 'No XISF files found in selected folder or its subfolders.')
+                QMessageBox.warning(self, 'No Files', 'No XISF or FITS files found in selected folder or its subfolders.')
 
     def start_import(self, files: List[str]) -> None:
         """Start the import worker thread."""
