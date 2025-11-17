@@ -1,7 +1,7 @@
 """
 File organization utilities for AstroFileManager.
 
-This module contains utility functions for organizing XISF files into
+This module contains utility functions for organizing XISF and FITS files into
 standardized folder structures with metadata-based naming conventions.
 """
 
@@ -57,9 +57,16 @@ def generate_organized_path(repo_path: str, obj: Optional[str], filt: Optional[s
     else:
         temp_str = "0C"
 
-    # Extract sequence number from original filename if possible
+    # Extract sequence number and file extension from original filename
     seq_match = re.search(r'_(\d+)\.(xisf|fits?)$', original_filename, re.IGNORECASE)
-    seq = seq_match.group(1) if seq_match else "001"
+    if seq_match:
+        seq = seq_match.group(1)
+        file_ext = '.' + seq_match.group(2).lower()
+    else:
+        seq = "001"
+        # Extract extension from original filename
+        _, ext = os.path.splitext(original_filename)
+        file_ext = ext.lower() if ext else '.xisf'
 
     # Determine file type and path structure
     if 'light' in imgtyp.lower():
@@ -71,9 +78,9 @@ def generate_organized_path(repo_path: str, obj: Optional[str], filt: Optional[s
             exp_str = "0s"
         # Add "Master_Light_" prefix for master frames, no prefix for regular lights
         if 'master' in imgtyp.lower():
-            new_filename = f"{date}_Master_Light_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+            new_filename = f"{date}_Master_Light_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}{file_ext}"
         else:
-            new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+            new_filename = f"{date}_{obj}_{filt}_{exp_str}_{temp_str}_{binning}_{seq}{file_ext}"
 
     elif 'dark' in imgtyp.lower():
         # Calibration/Darks/[exp]_[temp]_[binning]/[filename]
@@ -84,21 +91,21 @@ def generate_organized_path(repo_path: str, obj: Optional[str], filt: Optional[s
         subdir = os.path.join("Calibration", "Darks", f"{exp_str}_{temp_str}_{binning}")
         # Add "Master_" prefix for master frames
         prefix = "Master_" if 'master' in imgtyp.lower() else ""
-        new_filename = f"{date}_{prefix}Dark_{exp_str}_{temp_str}_{binning}_{seq}.xisf"
+        new_filename = f"{date}_{prefix}Dark_{exp_str}_{temp_str}_{binning}_{seq}{file_ext}"
 
     elif 'flat' in imgtyp.lower():
         # Calibration/Flats/[date]/[filter]_[temp]_[binning]/[filename]
         subdir = os.path.join("Calibration", "Flats", date, f"{filt}_{temp_str}_{binning}")
         # Add "Master_" prefix for master frames
         prefix = "Master_" if 'master' in imgtyp.lower() else ""
-        new_filename = f"{date}_{prefix}Flat_{filt}_{temp_str}_{binning}_{seq}.xisf"
+        new_filename = f"{date}_{prefix}Flat_{filt}_{temp_str}_{binning}_{seq}{file_ext}"
 
     elif 'bias' in imgtyp.lower():
         # Calibration/Bias/[temp]_[binning]/[filename]
         subdir = os.path.join("Calibration", "Bias", f"{temp_str}_{binning}")
         # Add "Master_" prefix for master frames
         prefix = "Master_" if 'master' in imgtyp.lower() else ""
-        new_filename = f"{date}_{prefix}Bias_{temp_str}_{binning}_{seq}.xisf"
+        new_filename = f"{date}_{prefix}Bias_{temp_str}_{binning}_{seq}{file_ext}"
 
     else:
         # Unknown type - put in root with original structure
