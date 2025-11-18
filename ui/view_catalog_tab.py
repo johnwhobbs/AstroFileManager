@@ -42,6 +42,7 @@ class ViewCatalogTab(QWidget):
         self.status_callback = status_callback
         self.reimport_callback = reimport_callback
         self.loader_worker = None  # Background thread for loading catalog
+        self.light_data_cache = []  # Cache for lazy loading light frames
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -152,6 +153,9 @@ class ViewCatalogTab(QWidget):
         # Enable context menu
         self.catalog_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.catalog_tree.customContextMenuRequested.connect(self.show_catalog_context_menu)
+
+        # Connect itemExpanded for lazy loading
+        self.catalog_tree.itemExpanded.connect(self._on_tree_item_expanded)
 
         layout.addWidget(self.catalog_tree)
 
@@ -587,9 +591,12 @@ Imported: {result[11] or 'N/A'}
             QMessageBox.critical(self, 'Error', f'Failed to build tree: {e}')
 
     def _build_light_frames_from_data(self, light_data: list) -> None:
-        """Build light frames tree from pre-loaded data."""
+        """Build light frames tree with lazy loading (only objects and filters initially)."""
         if not light_data:
             return
+
+        # Store data for lazy loading
+        self.light_data_cache = light_data
 
         # Calculate totals
         total_count = len(light_data)
@@ -602,22 +609,20 @@ Imported: {result[11] or 'N/A'}
         font.setBold(True)
         light_frames_root.setFont(0, font)
 
-        # Track current state for tree building
+        # LAZY LOADING: Only build objects → filters (2 levels)
+        # Dates and files will be loaded on-demand when filter nodes are expanded
+
+        # Track current state
         current_obj = None
-        current_filter = None
-        current_date = None
         obj_item = None
-        filter_item = None
-        date_item = None
 
         # Aggregation tracking
         obj_files = {}
         filter_files = {}
-        date_files = {}
 
-        # First pass: aggregate counts
+        # Aggregate counts
         for row in light_data:
-            obj, filt, date_loc = row[0], row[1], row[2]
+            obj, filt = row[0], row[1]
             exposure = row[5] or 0
 
             if obj not in obj_files:
@@ -631,15 +636,9 @@ Imported: {result[11] or 'N/A'}
             filter_files[key_filter]['count'] += 1
             filter_files[key_filter]['exposure'] += exposure
 
-            key_date = (obj, filt, date_loc)
-            if key_date not in date_files:
-                date_files[key_date] = {'count': 0, 'exposure': 0}
-            date_files[key_date]['count'] += 1
-            date_files[key_date]['exposure'] += exposure
-
-        # Second pass: build tree
+        # Build only objects and filters
         for row in light_data:
-            obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume = row
+            obj, filt = row[0], row[1]
 
             # Create object node if new
             if obj != current_obj:
@@ -649,48 +648,114 @@ Imported: {result[11] or 'N/A'}
                 obj_item.setText(0, f"{obj or 'Unknown'} ({obj_stats['count']} files, {obj_exp_hrs:.1f}h)")
                 obj_item.setFlags(obj_item.flags() | Qt.ItemFlag.ItemIsAutoTristate)
                 current_obj = obj
-                current_filter = None
-                current_date = None
 
-            # Create filter node if new
-            if filt != current_filter:
+            # Check if filter node already exists for this object
+            filter_exists = False
+            for i in range(obj_item.childCount()):
+                child = obj_item.child(i)
+                stored_filter = child.data(0, Qt.ItemDataRole.UserRole)
+                if stored_filter and stored_filter.get('filter') == filt:
+                    filter_exists = True
+                    break
+
+            if not filter_exists:
                 filter_stats = filter_files[(obj, filt)]
                 filter_exp_hrs = filter_stats['exposure'] / 3600.0
                 filter_item = QTreeWidgetItem(obj_item)
                 filter_item.setText(0, f"{filt or 'No Filter'} ({filter_stats['count']} files, {filter_exp_hrs:.1f}h)")
                 filter_item.setText(2, filt or 'No Filter')
-                current_filter = filt
-                current_date = None
 
-            # Create date node if new
-            if date_loc != current_date:
-                date_stats = date_files[(obj, filt, date_loc)]
-                date_exp_hrs = date_stats['exposure'] / 3600.0
-                date_item = QTreeWidgetItem(filter_item)
-                date_item.setText(0, f"{date_loc or 'No Date'} ({date_stats['count']} files, {date_exp_hrs:.1f}h)")
-                date_item.setText(6, date_loc or 'No Date')
-                current_date = date_loc
+                # Store metadata for lazy loading
+                filter_item.setData(0, Qt.ItemDataRole.UserRole, {
+                    'object': obj,
+                    'filter': filt,
+                    'lazy_load': True  # Mark for lazy loading
+                })
 
-            # Add file node
-            file_item = QTreeWidgetItem(date_item)
-            file_item.setText(0, filename)
-            file_item.setText(1, imagetyp or 'N/A')
-            file_item.setText(2, filt or 'N/A')
-            file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
-            file_item.setText(4, f"{temp:.1f}°C" if temp is not None else 'N/A')
-            binning = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
-            file_item.setText(5, binning)
-            file_item.setText(6, date_loc or 'N/A')
-            file_item.setText(7, telescop or 'N/A')
-            file_item.setText(8, instrume or 'N/A')
+                # Add a dummy child to make it expandable
+                dummy = QTreeWidgetItem(filter_item)
+                dummy.setText(0, "Loading...")
+                dummy.setData(0, Qt.ItemDataRole.UserRole, {'dummy': True})
 
-            # Apply color coding
-            color = self.get_item_color(imagetyp)
-            if color:
-                for col in range(9):
-                    file_item.setBackground(col, QBrush(color))
-    
-    
+    def _on_tree_item_expanded(self, item: QTreeWidgetItem) -> None:
+        """Handle tree item expansion for lazy loading."""
+        # Check if this item needs lazy loading
+        item_data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not item_data or not item_data.get('lazy_load'):
+            return
+
+        # Check if already loaded (no dummy children)
+        if item.childCount() > 0:
+            first_child = item.child(0)
+            first_child_data = first_child.data(0, Qt.ItemDataRole.UserRole)
+            if not first_child_data or not first_child_data.get('dummy'):
+                return  # Already loaded
+
+        # Get the object and filter for this node
+        obj = item_data.get('object')
+        filt = item_data.get('filter')
+
+        # Filter the cached data for this object/filter combination
+        filtered_data = [
+            row for row in self.light_data_cache
+            if row[0] == obj and row[1] == filt
+        ]
+
+        if not filtered_data:
+            # Remove dummy and mark as loaded
+            item.takeChildren()
+            return
+
+        # Aggregate by date
+        date_files = {}
+        for row in filtered_data:
+            date_loc = row[2]
+            exposure = row[5] or 0
+
+            if date_loc not in date_files:
+                date_files[date_loc] = {'count': 0, 'exposure': 0, 'rows': []}
+            date_files[date_loc]['count'] += 1
+            date_files[date_loc]['exposure'] += exposure
+            date_files[date_loc]['rows'].append(row)
+
+        # Remove dummy children
+        item.takeChildren()
+
+        # Build date nodes and file nodes
+        for date_loc in sorted(date_files.keys(), reverse=True):  # Most recent first
+            date_stats = date_files[date_loc]
+            date_exp_hrs = date_stats['exposure'] / 3600.0
+            date_item = QTreeWidgetItem(item)
+            date_item.setText(0, f"{date_loc or 'No Date'} ({date_stats['count']} files, {date_exp_hrs:.1f}h)")
+            date_item.setText(6, date_loc or 'No Date')
+
+            # Add file nodes for this date
+            for row in sorted(date_stats['rows'], key=lambda x: x[3]):  # Sort by filename
+                obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume = row
+
+                file_item = QTreeWidgetItem(date_item)
+                file_item.setText(0, filename)
+                file_item.setText(1, imagetyp or 'N/A')
+                file_item.setText(2, filt or 'N/A')
+                file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
+                file_item.setText(4, f"{temp:.1f}°C" if temp is not None else 'N/A')
+                binning = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
+                file_item.setText(5, binning)
+                file_item.setText(6, date_loc or 'N/A')
+                file_item.setText(7, telescop or 'N/A')
+                file_item.setText(8, instrume or 'N/A')
+
+                # Apply color coding
+                color = self.get_item_color(imagetyp)
+                if color:
+                    for col in range(9):
+                        file_item.setBackground(col, QBrush(color))
+
+        # Mark as loaded by removing lazy_load flag
+        item_data['lazy_load'] = False
+        item.setData(0, Qt.ItemDataRole.UserRole, item_data)
+
+
     def _build_calibration_frames_from_data(self, calib_data: dict) -> None:
         """Build calibration frames tree from pre-loaded data."""
         darks = calib_data.get('darks', [])
