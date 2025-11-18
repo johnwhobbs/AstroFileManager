@@ -152,8 +152,13 @@ class SessionsTab(QWidget):
         layout.addWidget(details_group)
 
     def refresh_sessions(self) -> None:
-        """Refresh the sessions view."""
+        """Refresh the sessions view with optimized calibration matching."""
         try:
+            # Show loading cursor
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtCore import Qt
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
@@ -189,13 +194,19 @@ class SessionsTab(QWidget):
             # Update calibration matcher settings
             self.calibration.include_masters = self.include_masters_checkbox.isChecked()
 
+            # PRE-LOAD all calibration data (OPTIMIZED - 3 queries instead of N*6)
+            calib_cache = self.calibration.preload_calibration_data()
+
             for session_data in sessions:
                 date, obj, filt, frame_count, avg_exp, avg_temp, xbin, ybin = session_data
 
-                # Find matching calibration frames
-                darks_info = self.calibration.find_matching_darks(avg_exp, avg_temp, xbin, ybin)
-                bias_info = self.calibration.find_matching_bias(avg_temp, xbin, ybin)
-                flats_info = self.calibration.find_matching_flats(filt, avg_temp, xbin, ybin, date)
+                # Find matching calibration frames from cache (no database queries)
+                darks_info = self.calibration.find_matching_darks_from_cache(
+                    avg_exp, avg_temp, xbin, ybin, calib_cache['darks'])
+                bias_info = self.calibration.find_matching_bias_from_cache(
+                    avg_temp, xbin, ybin, calib_cache['bias'])
+                flats_info = self.calibration.find_matching_flats_from_cache(
+                    filt, avg_temp, xbin, ybin, date, calib_cache['flats'])
 
                 # Calculate session status
                 status, status_color = self.calibration.calculate_session_status(darks_info, bias_info, flats_info)
@@ -254,7 +265,12 @@ class SessionsTab(QWidget):
             # Update statistics panel
             self.update_session_statistics(total_count, complete_count, partial_count, missing_count)
 
+            # Restore cursor
+            QApplication.restoreOverrideCursor()
+
         except Exception as e:
+            # Restore cursor on error
+            QApplication.restoreOverrideCursor()
             QMessageBox.critical(self, 'Error', f'Failed to refresh sessions: {e}')
 
     def on_session_clicked(self, item: QTreeWidgetItem, column: int) -> None:
