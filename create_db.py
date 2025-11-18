@@ -48,6 +48,32 @@ def create_database(db_path='xisf_catalog.db'):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_filter ON xisf_files(filter)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_imagetyp ON xisf_files(imagetyp)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_file_hash ON xisf_files(file_hash)')
+
+    # Create composite indexes for optimized View Catalog queries
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_catalog_hierarchy
+        ON xisf_files(object, filter, date_loc, filename)
+        WHERE object IS NOT NULL
+    ''')
+
+    # Create composite indexes for optimized calibration matching
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_calibration_darks
+        ON xisf_files(exposure, ccd_temp, xbinning, ybinning)
+        WHERE imagetyp LIKE '%Dark%'
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_calibration_flats
+        ON xisf_files(filter, date_loc, ccd_temp, xbinning, ybinning)
+        WHERE imagetyp LIKE '%Flat%'
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_calibration_bias
+        ON xisf_files(ccd_temp, xbinning, ybinning)
+        WHERE imagetyp LIKE '%Bias%'
+    ''')
     
     conn.commit()
     

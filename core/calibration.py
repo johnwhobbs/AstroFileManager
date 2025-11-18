@@ -368,3 +368,280 @@ class CalibrationMatcher:
                     recommendations.append(f"• Consider adding more flats (currently {flats['count']}, recommended {self.min_frames_recommended}+)")
 
         return '\n'.join(recommendations)
+
+    def preload_calibration_data(self):
+        """
+        Pre-load all calibration frame counts for optimized matching.
+
+        Returns:
+            Dictionary with 'darks', 'bias', 'flats' caches
+        """
+        with self.db.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Pre-load dark frames grouped by exposure/temp/binning
+            cursor.execute('''
+                SELECT
+                    ROUND(exposure, 1) as exp,
+                    ROUND(ccd_temp, 0) as temp,
+                    xbinning,
+                    ybinning,
+                    COUNT(*) as count,
+                    SUM(CASE WHEN imagetyp LIKE '%Master%' THEN 1 ELSE 0 END) as master_count,
+                    AVG(ccd_temp) as avg_temp
+                FROM xisf_files
+                WHERE imagetyp LIKE '%Dark%'
+                GROUP BY ROUND(exposure, 1), ROUND(ccd_temp, 0), xbinning, ybinning
+            ''')
+
+            darks_cache = {}
+            for exp, temp, xbin, ybin, count, master_count, avg_temp in cursor.fetchall():
+                key = (exp, temp, xbin, ybin)
+                darks_cache[key] = {
+                    'count': count - master_count,  # Regular darks
+                    'master_count': master_count,
+                    'avg_temp': avg_temp
+                }
+
+            # Pre-load bias frames grouped by temp/binning
+            cursor.execute('''
+                SELECT
+                    ROUND(ccd_temp, 0) as temp,
+                    xbinning,
+                    ybinning,
+                    COUNT(*) as count,
+                    SUM(CASE WHEN imagetyp LIKE '%Master%' THEN 1 ELSE 0 END) as master_count,
+                    AVG(ccd_temp) as avg_temp
+                FROM xisf_files
+                WHERE imagetyp LIKE '%Bias%'
+                GROUP BY ROUND(ccd_temp, 0), xbinning, ybinning
+            ''')
+
+            bias_cache = {}
+            for temp, xbin, ybin, count, master_count, avg_temp in cursor.fetchall():
+                key = (temp, xbin, ybin)
+                bias_cache[key] = {
+                    'count': count - master_count,  # Regular bias
+                    'master_count': master_count,
+                    'avg_temp': avg_temp
+                }
+
+            # Pre-load flat frames grouped by filter/temp/binning/date
+            cursor.execute('''
+                SELECT
+                    filter,
+                    date_loc,
+                    ROUND(ccd_temp, 0) as temp,
+                    xbinning,
+                    ybinning,
+                    COUNT(*) as count,
+                    SUM(CASE WHEN imagetyp LIKE '%Master%' THEN 1 ELSE 0 END) as master_count,
+                    AVG(ccd_temp) as avg_temp
+                FROM xisf_files
+                WHERE imagetyp LIKE '%Flat%'
+                GROUP BY filter, date_loc, ROUND(ccd_temp, 0), xbinning, ybinning
+            ''')
+
+            flats_cache = {}
+            for filt, date, temp, xbin, ybin, count, master_count, avg_temp in cursor.fetchall():
+                key = (filt, date, temp, xbin, ybin)
+                flats_cache[key] = {
+                    'count': count - master_count,  # Regular flats
+                    'master_count': master_count,
+                    'avg_temp': avg_temp
+                }
+
+            return {
+                'darks': darks_cache,
+                'bias': bias_cache,
+                'flats': flats_cache
+            }
+
+    def find_matching_darks_from_cache(self, exposure: float, temp: Optional[float],
+                                       xbin: int, ybin: int, cache: dict) -> Dict[str, Any]:
+        """
+        Find matching dark frames from pre-loaded cache (OPTIMIZED).
+
+        Args:
+            exposure: Exposure time in seconds
+            temp: CCD temperature in °C
+            xbin: X binning
+            ybin: Y binning
+            cache: Pre-loaded darks cache from preload_calibration_data()
+
+        Returns:
+            Dictionary with count, master_count, avg_temp, quality, display, has_frames, exposure
+        """
+        exp_rounded = round(exposure, 1)
+        temp_rounded = round(temp, 0) if temp is not None else 0
+
+        dark_count = 0
+        master_count = 0
+        dark_temp = None
+
+        # Search cache with tolerance
+        for (cached_exp, cached_temp, cached_xbin, cached_ybin), data in cache.items():
+            if (abs(cached_exp - exp_rounded) < self.exposure_tolerance and
+                abs(cached_temp - temp_rounded) <= self.temp_tolerance_darks and
+                cached_xbin == xbin and cached_ybin == ybin):
+
+                dark_count += data['count']
+                if self.include_masters:
+                    master_count += data['master_count']
+                dark_temp = data['avg_temp']
+
+        # Calculate quality score
+        if master_count > 0:
+            quality = 100
+        else:
+            quality = min(100, (dark_count / self.min_frames_recommended) * 100) if dark_count > 0 else 0
+
+        # Determine display text
+        if master_count > 0:
+            display = f"✓ {dark_count} + {master_count} Master"
+            has_frames = True
+        elif dark_count >= self.min_frames_acceptable:
+            display = f"✓ {dark_count} frames"
+            has_frames = True
+        elif dark_count > 0:
+            display = f"⚠ {dark_count} frames (need {self.min_frames_acceptable}+)"
+            has_frames = True
+        else:
+            display = "✗ Missing"
+            has_frames = False
+
+        return {
+            'count': dark_count,
+            'master_count': master_count,
+            'avg_temp': dark_temp,
+            'quality': quality,
+            'display': display,
+            'has_frames': has_frames,
+            'exposure': exposure
+        }
+
+    def find_matching_bias_from_cache(self, temp: Optional[float], xbin: int, ybin: int,
+                                      cache: dict) -> Dict[str, Any]:
+        """
+        Find matching bias frames from pre-loaded cache (OPTIMIZED).
+
+        Args:
+            temp: CCD temperature in °C
+            xbin: X binning
+            ybin: Y binning
+            cache: Pre-loaded bias cache from preload_calibration_data()
+
+        Returns:
+            Dictionary with count, master_count, avg_temp, quality, display, has_frames
+        """
+        temp_rounded = round(temp, 0) if temp is not None else 0
+
+        bias_count = 0
+        master_count = 0
+        bias_temp = None
+
+        # Search cache with tolerance
+        for (cached_temp, cached_xbin, cached_ybin), data in cache.items():
+            if (abs(cached_temp - temp_rounded) <= self.temp_tolerance_bias and
+                cached_xbin == xbin and cached_ybin == ybin):
+
+                bias_count += data['count']
+                if self.include_masters:
+                    master_count += data['master_count']
+                bias_temp = data['avg_temp']
+
+        # Calculate quality score
+        if master_count > 0:
+            quality = 100
+        else:
+            quality = min(100, (bias_count / self.min_frames_recommended) * 100) if bias_count > 0 else 0
+
+        # Determine display text
+        if master_count > 0:
+            display = f"✓ {bias_count} + {master_count} Master"
+            has_frames = True
+        elif bias_count >= self.min_frames_acceptable:
+            display = f"✓ {bias_count} frames"
+            has_frames = True
+        elif bias_count > 0:
+            display = f"⚠ {bias_count} frames (need {self.min_frames_acceptable}+)"
+            has_frames = True
+        else:
+            display = "✗ Missing"
+            has_frames = False
+
+        return {
+            'count': bias_count,
+            'master_count': master_count,
+            'avg_temp': bias_temp,
+            'quality': quality,
+            'display': display,
+            'has_frames': has_frames
+        }
+
+    def find_matching_flats_from_cache(self, filt: Optional[str], temp: Optional[float],
+                                       xbin: int, ybin: int, date: str, cache: dict) -> Dict[str, Any]:
+        """
+        Find matching flat frames from pre-loaded cache (OPTIMIZED).
+
+        Args:
+            filt: Filter name
+            temp: CCD temperature in °C
+            xbin: X binning
+            ybin: Y binning
+            date: Observation date (must match exactly)
+            cache: Pre-loaded flats cache from preload_calibration_data()
+
+        Returns:
+            Dictionary with count, master_count, avg_temp, quality, display, has_frames, filter
+        """
+        temp_rounded = round(temp, 0) if temp is not None else 0
+
+        flat_count = 0
+        master_count = 0
+        flat_temp = None
+
+        # Search cache with tolerance (filter and date must match exactly)
+        for (cached_filt, cached_date, cached_temp, cached_xbin, cached_ybin), data in cache.items():
+            # Handle NULL filter matching
+            filters_match = (cached_filt == filt) or (cached_filt is None and filt is None)
+
+            if (filters_match and
+                cached_date == date and
+                abs(cached_temp - temp_rounded) <= self.temp_tolerance_flats and
+                cached_xbin == xbin and cached_ybin == ybin):
+
+                flat_count += data['count']
+                if self.include_masters:
+                    master_count += data['master_count']
+                flat_temp = data['avg_temp']
+
+        # Calculate quality score
+        if master_count > 0:
+            quality = 100
+        else:
+            quality = min(100, (flat_count / self.min_frames_recommended) * 100) if flat_count > 0 else 0
+
+        # Determine display text
+        if master_count > 0:
+            display = f"✓ {flat_count} + {master_count} Master"
+            has_frames = True
+        elif flat_count >= self.min_frames_acceptable:
+            display = f"✓ {flat_count} frames"
+            has_frames = True
+        elif flat_count > 0:
+            display = f"⚠ {flat_count} frames (need {self.min_frames_acceptable}+)"
+            has_frames = True
+        else:
+            display = "✗ Missing"
+            has_frames = False
+
+        return {
+            'count': flat_count,
+            'master_count': master_count,
+            'avg_temp': flat_temp,
+            'quality': quality,
+            'display': display,
+            'has_frames': has_frames,
+            'filter': filt
+        }
