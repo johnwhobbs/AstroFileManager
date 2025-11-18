@@ -11,12 +11,13 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
     QLabel, QTextEdit, QGroupBox, QComboBox, QRadioButton,
-    QTreeWidget, QTreeWidgetItem, QFileDialog, QSplitter
+    QTreeWidget, QTreeWidgetItem, QFileDialog, QSplitter, QProgressBar
 )
 from PyQt6.QtCore import Qt, QSettings
 
 from core.database import DatabaseManager
 from core.calibration import CalibrationMatcher
+from ui.background_workers import SessionsLoaderWorker
 
 
 class SessionsTab(QWidget):
@@ -38,6 +39,7 @@ class SessionsTab(QWidget):
         self.db = db_manager
         self.calibration = calibration_matcher
         self.settings = settings
+        self.loader_worker = None  # Background thread for loading sessions
 
         self.init_ui()
 
@@ -78,6 +80,26 @@ class SessionsTab(QWidget):
 
         controls_layout.addStretch()
         layout.addLayout(controls_layout)
+
+        # Progress indicator for background loading
+        progress_widget = QWidget()
+        progress_layout = QVBoxLayout(progress_widget)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        progress_layout.setSpacing(2)
+
+        self.sessions_status_label = QLabel("")
+        self.sessions_status_label.setStyleSheet("color: #666; font-style: italic; font-size: 11px;")
+        progress_layout.addWidget(self.sessions_status_label)
+
+        self.sessions_progress = QProgressBar()
+        self.sessions_progress.setRange(0, 0)  # Indeterminate progress
+        self.sessions_progress.setTextVisible(False)
+        self.sessions_progress.setMaximumHeight(3)  # Very slim progress bar
+        progress_layout.addWidget(self.sessions_progress)
+
+        progress_widget.hide()  # Hidden by default
+        self.sessions_progress_widget = progress_widget
+        layout.addWidget(progress_widget)
 
         # Statistics panel
         stats_group = QGroupBox("Session Statistics")
@@ -152,50 +174,65 @@ class SessionsTab(QWidget):
         layout.addWidget(details_group)
 
     def refresh_sessions(self) -> None:
-        """Refresh the sessions view with optimized calibration matching."""
+        """Refresh the sessions view using background thread (non-blocking)."""
         try:
-            # Show loading cursor
-            from PyQt6.QtWidgets import QApplication
-            from PyQt6.QtCore import Qt
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            # Cancel any existing worker
+            if self.loader_worker and self.loader_worker.isRunning():
+                self.loader_worker.terminate()
+                self.loader_worker.wait()
 
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            # Show progress
+            self.sessions_progress_widget.show()
+            self.sessions_status_label.setText("Loading sessions...")
+            self.sessions_tree.setEnabled(False)
 
+            # Update calibration matcher settings before loading
+            self.calibration.include_masters = self.include_masters_checkbox.isChecked()
+
+            # Create and start worker
+            self.loader_worker = SessionsLoaderWorker(self.db_path, self.calibration)
+            self.loader_worker.progress_updated.connect(self._on_sessions_progress)
+            self.loader_worker.data_ready.connect(self._on_sessions_data_ready)
+            self.loader_worker.error_occurred.connect(self._on_sessions_error)
+            self.loader_worker.finished.connect(self._on_sessions_finished)
+            self.loader_worker.start()
+
+        except Exception as e:
+            self.sessions_progress_widget.hide()
+            self.sessions_tree.setEnabled(True)
+            QMessageBox.critical(self, 'Error', f'Failed to start sessions load: {e}')
+
+    def _on_sessions_progress(self, message: str) -> None:
+        """Update progress message."""
+        self.sessions_status_label.setText(message)
+
+    def _on_sessions_error(self, error_msg: str) -> None:
+        """Handle worker error."""
+        self.sessions_progress_widget.hide()
+        self.sessions_tree.setEnabled(True)
+        QMessageBox.critical(self, 'Error', error_msg)
+
+    def _on_sessions_finished(self) -> None:
+        """Hide progress when worker finishes."""
+        self.sessions_progress_widget.hide()
+        self.sessions_tree.setEnabled(True)
+
+    def _on_sessions_data_ready(self, sessions: list, calib_cache: dict) -> None:
+        """
+        Build sessions tree from loaded data (runs on UI thread).
+
+        Args:
+            sessions: List of session data tuples
+            calib_cache: Pre-loaded calibration data cache
+        """
+        try:
             self.sessions_tree.clear()
-
-            # Find all unique sessions (date + object + filter combination for light frames)
-            cursor.execute('''
-                SELECT
-                    date_loc,
-                    object,
-                    filter,
-                    COUNT(*) as frame_count,
-                    AVG(exposure) as avg_exposure,
-                    AVG(ccd_temp) as avg_temp,
-                    xbinning,
-                    ybinning
-                FROM xisf_files
-                WHERE imagetyp LIKE '%Light%'
-                    AND date_loc IS NOT NULL
-                    AND object IS NOT NULL
-                GROUP BY date_loc, object, filter
-                ORDER BY date_loc DESC, object, filter
-            ''')
-
-            sessions = cursor.fetchall()
 
             # Statistics counters
             total_count = 0
             complete_count = 0
             partial_count = 0
             missing_count = 0
-
-            # Update calibration matcher settings
-            self.calibration.include_masters = self.include_masters_checkbox.isChecked()
-
-            # PRE-LOAD all calibration data (OPTIMIZED - 3 queries instead of N*6)
-            calib_cache = self.calibration.preload_calibration_data()
 
             for session_data in sessions:
                 date, obj, filt, frame_count, avg_exp, avg_temp, xbin, ybin = session_data
@@ -239,7 +276,6 @@ class SessionsTab(QWidget):
                 session_item.setText(5, flats_info['display'])
 
                 # Set status color (only for non-complete sessions)
-                # Complete sessions use default colors
                 if status != 'Complete':
                     for col in range(6):
                         session_item.setForeground(col, status_color)
@@ -260,18 +296,11 @@ class SessionsTab(QWidget):
                     'status': status
                 })
 
-            conn.close()
-
             # Update statistics panel
             self.update_session_statistics(total_count, complete_count, partial_count, missing_count)
 
-            # Restore cursor
-            QApplication.restoreOverrideCursor()
-
         except Exception as e:
-            # Restore cursor on error
-            QApplication.restoreOverrideCursor()
-            QMessageBox.critical(self, 'Error', f'Failed to refresh sessions: {e}')
+            QMessageBox.critical(self, 'Error', f'Failed to build sessions tree: {e}')
 
     def on_session_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         """Handle session tree item click."""
