@@ -13,11 +13,12 @@ from PyQt6.QtGui import QColor, QBrush
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
     QGroupBox, QLineEdit, QComboBox, QPushButton, QMenu, QMessageBox,
-    QFileDialog, QApplication
+    QFileDialog, QApplication, QProgressBar
 )
 
-# Import CSV exporter from import_export module
+# Import CSV exporter and catalog worker
 from import_export.csv_exporter import CSVExporter
+from ui.catalog_worker import CatalogLoaderWorker
 
 
 class ViewCatalogTab(QWidget):
@@ -40,6 +41,7 @@ class ViewCatalogTab(QWidget):
         self.settings = settings
         self.status_callback = status_callback
         self.reimport_callback = reimport_callback
+        self.loader_worker = None  # Background thread for loading catalog data
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -109,6 +111,25 @@ class ViewCatalogTab(QWidget):
         filter_layout.addWidget(refresh_btn)
 
         layout.addLayout(filter_layout)
+
+        # Progress bar and status label for background loading
+        progress_widget = QWidget()
+        progress_layout = QVBoxLayout(progress_widget)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.catalog_status_label = QLabel("")
+        self.catalog_status_label.setStyleSheet("color: #666; font-style: italic;")
+        progress_layout.addWidget(self.catalog_status_label)
+
+        self.catalog_progress = QProgressBar()
+        self.catalog_progress.setRange(0, 0)  # Indeterminate progress
+        self.catalog_progress.setTextVisible(False)
+        self.catalog_progress.setMaximumHeight(4)  # Slim progress bar
+        progress_layout.addWidget(self.catalog_progress)
+
+        progress_widget.hide()  # Hidden by default
+        self.catalog_progress_widget = progress_widget
+        layout.addWidget(progress_widget)
 
         # Tree widget with expanded columns
         self.catalog_tree = QTreeWidget()
