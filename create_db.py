@@ -48,7 +48,42 @@ def create_database(db_path='xisf_catalog.db'):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_filter ON xisf_files(filter)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_imagetyp ON xisf_files(imagetyp)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_file_hash ON xisf_files(file_hash)')
-    
+
+    # Create composite indexes for optimized queries
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_catalog_hierarchy
+        ON xisf_files(object, filter, date_loc, filename)
+        WHERE object IS NOT NULL
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_calibration_darks
+        ON xisf_files(exposure, ccd_temp, xbinning, ybinning)
+        WHERE imagetyp LIKE '%Dark%'
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_calibration_flats
+        ON xisf_files(filter, date_loc, ccd_temp, xbinning, ybinning)
+        WHERE imagetyp LIKE '%Flat%'
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_calibration_bias
+        ON xisf_files(ccd_temp, xbinning, ybinning)
+        WHERE imagetyp LIKE '%Bias%'
+    ''')
+
+    # Performance optimizations
+    # Enable WAL mode for better concurrency (allows reads during writes)
+    cursor.execute('PRAGMA journal_mode=WAL')
+
+    # Increase cache size to 64MB for better performance
+    cursor.execute('PRAGMA cache_size=-64000')
+
+    # Enable memory-mapped I/O for faster reads (256MB)
+    cursor.execute('PRAGMA mmap_size=268435456')
+
     conn.commit()
     
     print(f"Database created successfully: {db_path}")
