@@ -154,11 +154,13 @@ class XISFCatalogGUI(QMainWindow):
         """Handle tab change"""
         if index == 0:  # View Catalog tab
             self.view_tab.refresh_catalog_view()
-        elif index == 1:  # Sessions tab
+        elif index == 1:  # Projects tab
+            self.projects_tab.refresh_projects()
+        elif index == 2:  # Sessions tab
             self.sessions_tab.refresh_sessions()
-        elif index == 2:  # Analytics tab
+        elif index == 3:  # Analytics tab
             self.analytics_tab.refresh_analytics()
-        elif index == 4:  # Maintenance tab
+        elif index == 5:  # Maintenance tab
             # Populate current values when maintenance tab is opened
             keyword = self.maintenance_tab.keyword_combo.currentText()
             self.maintenance_tab.populate_current_values(keyword)
