@@ -337,6 +337,137 @@ Light Frames: 25 | Exposure: 300.0s | Temp: -10.2°C | Binning: 1x1
 - Aim for 20+ frames per calibration type for optimal results
 - Master frames reduce the need for large frame counts
 
+### Projects Tab
+
+The Projects tab provides project-based workflow management for tracking imaging campaigns across multiple sessions and nights. It helps you manage target frame counts per filter, track progress toward goals, and organize your workflow from initial capture through final integration.
+
+**Creating a Project:**
+
+1. Click "New Project" to open the project creation dialog
+2. Select a template:
+   - **Narrowband (SHO)**: 90 frames each of Ha, OIII, SII (270 total)
+   - **Broadband (LRGB)**: 270 frames of L, 270 each of R, G, B (1,080 total)
+   - **Custom**: Define your own filter goals
+3. Enter project details:
+   - **Project Name**: Unique identifier (e.g., "M31 Narrowband 2024")
+   - **Object Name**: Target object (e.g., "M31")
+   - **Year**: Optional year for reference
+   - **Description**: Optional notes about equipment, goals, etc.
+4. Review/adjust filter goals and target frame counts
+5. Click "Create Project"
+
+**Project Progress Tracking:**
+
+Each project displays:
+- **Total Frames**: Count of all frames assigned to the project
+- **Approved Frames**: Count of frames that passed quality grading
+- Progress bars for each filter showing both total and approved counts
+- Color-coded progress indicators:
+  - Green: Goal met (approved frames ≥ target)
+  - Blue: Frames captured, awaiting grading or approval
+  - Gray: No frames captured yet
+
+**Assigning Sessions to Projects:**
+
+Sessions must be assigned to projects BEFORE importing quality data:
+
+1. Switch to the View Catalog tab
+2. Navigate to a session (date grouping under object/filter)
+3. Right-click on the session and select "Assign to Project"
+4. Choose the target project from the dropdown
+5. Optionally add notes about the session
+6. Click "Assign to Project"
+
+All light frames from that session are immediately linked to the project, and total frame counts are updated.
+
+**Importing Quality Data:**
+
+After grading frames in PixInsight SubFrame Selector:
+
+1. In PixInsight, grade your frames using SubFrame Selector
+2. Export the CSV file with quality metrics
+3. In AstroFileManager Projects tab, click "Import Quality Data"
+4. Select the CSV file exported from PixInsight
+5. Review the import results:
+   - Matched frames: Successfully updated with quality data
+   - Not found: Frames in CSV not in database
+   - Approved/Rejected counts
+   - Updated projects count
+
+The import automatically:
+- Matches frames by filename
+- Updates quality metrics (FWHM, eccentricity, SNR, stars, background)
+- Sets approval status (approved/rejected) based on Weight column
+- Recalculates project progress with approved counts
+- Updates session grading status
+
+**Next Steps Recommendations:**
+
+For each project, the system provides specific guidance:
+
+**During capture phase:**
+```
+• Capture more frames:
+  - Ha: 35 more frames
+  - OIII: 45 more frames
+  - SII: 40 more frames
+```
+
+**After partial grading:**
+```
+• Grade frames in PixInsight SubFrame Selector
+• Import quality data CSV
+```
+
+**When goals are met:**
+```
+✓ All goals met! Ready to generate WBPP file lists
+```
+
+**Project Status Management:**
+
+- **Mark Complete**: Changes project status to "completed" when all goals are met
+- **Archive**: Moves project to archived status (hidden from active list)
+- **Delete Project**: Permanently removes project and unlinks all frames
+  - Frames remain in database but are unassigned
+  - Project data, sessions, and filter goals are deleted
+
+**Unassigned Sessions Warning:**
+
+The Projects tab displays a warning (⚠️) showing count of unassigned sessions that contain light frames. This helps ensure all your imaging sessions are properly tracked within projects.
+
+**Workflow Integration:**
+
+The typical workflow is:
+
+1. **Create Project**: Define your imaging campaign with filter goals
+2. **Capture Frames**: Use NINA or other capture software
+3. **Import Frames**: Import XISF files into AstroFileManager
+4. **Assign Sessions**: Assign newly imported sessions to your project
+5. **Continue Capturing**: Repeat over multiple nights until target counts reached
+6. **Grade in PixInsight**: Use SubFrame Selector to grade all frames
+7. **Import Quality Data**: Import CSV to update approval status
+8. **Check Progress**: Review approved counts vs targets
+9. **Capture More if Needed**: If insufficient approved frames, capture more
+10. **Mark Complete**: When goals met, mark project complete
+11. **Generate WBPP Lists**: Export file lists for integration (future feature)
+
+**Use Cases:**
+
+- **Multi-Night Projects**: Track progress across weeks or months of imaging
+- **Multiple Targets**: Manage several concurrent imaging projects
+- **Historical Tracking**: Separate projects by year or campaign
+- **Goal-Oriented Workflow**: Work toward specific frame count targets
+- **Quality-Based Planning**: Know exactly how many more frames to capture after grading
+
+**Tips:**
+
+- Assign sessions immediately after import, even before grading
+- Quality data can be imported weeks or months later
+- Partial CSV imports work - only frames in the CSV are updated
+- Projects can span calendar years (don't worry about Dec 31/Jan 1 boundaries)
+- Use descriptive project names to distinguish campaigns (e.g., "M31 Narrowband 2024" vs "M31 Narrowband 2025")
+
 ### Analytics Tab
 
 Visualize your imaging activity with a GitHub-style activity heatmap:
@@ -485,8 +616,9 @@ All settings are automatically saved and persisted between sessions.
 
 ## Database Schema
 
-The SQLite database contains a single table `xisf_files` with the following fields:
+The SQLite database contains the following tables:
 
+**xisf_files table** - Core image metadata:
 - `id`: Unique identifier (auto-increment)
 - `file_hash`: SHA256 hash of the file (prevents duplicates)
 - `filepath`: Full path to the file
@@ -501,8 +633,53 @@ The SQLite database contains a single table `xisf_files` with the following fiel
 - `xbinning`: X-axis binning
 - `ybinning`: Y-axis binning
 - `date_loc`: Observation date (YYYY-MM-DD format, adjusted by -12 hours)
+- `project_id`: Links frame to imaging project
+- `session_assignment_id`: Links frame to project session
+- `fwhm`: Full Width Half Maximum (arcseconds)
+- `eccentricity`: Star eccentricity metric
+- `snr`: Signal-to-noise ratio weight
+- `star_count`: Number of detected stars
+- `background_level`: Median background level
+- `approval_status`: Frame grading status (not_graded/approved/rejected)
+- `grading_date`: Date frame was graded
+- `grading_notes`: Optional notes from grading
 - `created_at`: Record creation timestamp
 - `updated_at`: Record update timestamp
+
+**projects table** - Imaging campaigns:
+- `id`: Unique identifier
+- `name`: Project name (unique)
+- `object_name`: Target object
+- `description`: Optional project description
+- `year`: Optional year for reference
+- `start_date`: Project start date
+- `status`: Project status (active/completed/archived)
+- `created_at`: Project creation timestamp
+- `updated_at`: Project update timestamp
+
+**project_filter_goals table** - Target frame counts:
+- `id`: Unique identifier
+- `project_id`: Links to project
+- `filter`: Filter name
+- `target_count`: Target number of frames
+- `total_count`: Current total frames captured
+- `approved_count`: Current approved frames
+- `last_updated`: Last update timestamp
+
+**project_sessions table** - Session assignments:
+- `id`: Unique identifier
+- `project_id`: Links to project
+- `session_id`: Session identifier
+- `date_loc`: Session date
+- `object_name`: Object name
+- `filter`: Filter name
+- `frame_count`: Number of frames in session
+- `approved_count`: Number of approved frames
+- `rejected_count`: Number of rejected frames
+- `graded`: Whether session has been graded (0/1)
+- `avg_fwhm`: Average FWHM for session
+- `notes`: Optional session notes
+- `assigned_date`: Date session was assigned
 
 ## Date Processing
 
@@ -609,6 +786,45 @@ This project is provided as-is for personal use in managing astrophotography fil
 Feel free to submit issues or pull requests for improvements.
 
 ## Version History
+
+**v2.3.0** - Projects Tab: Project-Based Workflow Management
+- **Projects Tab**: New comprehensive project-based workflow system
+  - Create imaging projects with predefined templates (Narrowband, Broadband, Custom)
+  - Track progress toward target frame counts per filter
+  - Assign sessions to projects before quality grading
+  - Import PixInsight SubFrame Selector CSV quality data
+  - Dual progress tracking: total frames vs approved frames
+  - Color-coded progress bars with visual indicators
+  - Smart "Next Steps" recommendations based on project status
+  - Project status management (active/completed/archived)
+  - Unassigned sessions warning for better workflow tracking
+- **Quality Tracking**: Frame quality metrics from PixInsight SubFrame Selector
+  - Import FWHM, eccentricity, SNR, star count, background level
+  - Approval status tracking (approved/rejected/not_graded)
+  - Automatic project progress recalculation after quality import
+  - Partial CSV import support (only updates frames in CSV)
+- **Session Assignment**: Manual session-to-project linking
+  - Context menu in View Catalog: "Assign to Project"
+  - Assign sessions immediately after capture, before grading
+  - Session notes and metadata tracking
+  - Grading status indicators per session
+- **Database Migration**: Automatic schema upgrade for existing databases
+  - Migration script adds projects, filter goals, and session tables
+  - Adds quality metric columns to xisf_files table
+  - Safe idempotent migration (can run multiple times)
+  - Verification step ensures migration success
+- **Project Templates**: Pre-configured filter goals
+  - Narrowband (SHO): 90 frames each of Ha, OIII, SII
+  - Broadband (LRGB): 270 frames each of L, R, G, B
+  - Custom: User-defined filter goals
+- **Workflow Integration**: Complete multi-session imaging workflow
+  - Create project → Capture → Import → Assign → Continue capturing → Grade → Import quality → Complete
+  - Projects span multiple nights and sessions
+  - Projects can span calendar years
+  - Separate projects for same target in different years
+- **Tab Navigation Fix**: Fixed tab change handler for correct refresh behavior
+  - Projects tab now refreshes when selected
+  - All tab indices corrected after Projects tab insertion
 
 **v2.1.0** - Sessions Tab: Comprehensive Calibration Tracking
 - **Sessions Tab**: New comprehensive calibration tracking system
