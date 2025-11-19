@@ -274,23 +274,45 @@ class ProjectManager:
             project_id: Project ID
         """
         # Update total_count and approved_count for each filter
+        # Use COALESCE for NULL-safe filter comparison
         cursor.execute('''
             UPDATE project_filter_goals
             SET
                 total_count = (
                     SELECT COUNT(*)
                     FROM xisf_files
-                    WHERE project_id = ? AND filter = project_filter_goals.filter
+                    WHERE project_id = ?
+                    AND COALESCE(filter, '') = COALESCE(project_filter_goals.filter, '')
                 ),
                 approved_count = (
                     SELECT COUNT(*)
                     FROM xisf_files
-                    WHERE project_id = ? AND filter = project_filter_goals.filter
+                    WHERE project_id = ?
+                    AND COALESCE(filter, '') = COALESCE(project_filter_goals.filter, '')
                     AND approval_status = 'approved'
                 ),
                 last_updated = CURRENT_TIMESTAMP
             WHERE project_id = ?
         ''', (project_id, project_id, project_id))
+
+    def recalculate_project_counts(self, project_id: int):
+        """
+        Manually recalculate filter goal counts for a project.
+
+        Useful for fixing counts after a bug fix or manual database changes.
+
+        Args:
+            project_id: Project ID
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            self._update_filter_goal_counts(cursor, project_id)
+            conn.commit()
+
+        finally:
+            conn.close()
 
     def update_project_status(self, project_id: int, status: str):
         """
