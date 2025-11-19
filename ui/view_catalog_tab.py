@@ -13,11 +13,13 @@ from PyQt6.QtGui import QColor, QBrush
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
     QGroupBox, QLineEdit, QComboBox, QPushButton, QMenu, QMessageBox,
-    QFileDialog, QApplication
+    QFileDialog, QApplication, QProgressBar
 )
 
-# Import CSV exporter from import_export module
+# Import CSV exporter and background workers
 from import_export.csv_exporter import CSVExporter
+from ui.background_workers import CatalogLoaderWorker
+from ui.assign_session_dialog import AssignSessionDialog
 
 
 class ViewCatalogTab(QWidget):
@@ -40,6 +42,8 @@ class ViewCatalogTab(QWidget):
         self.settings = settings
         self.status_callback = status_callback
         self.reimport_callback = reimport_callback
+        self.loader_worker = None  # Background thread for loading catalog
+        self.light_data_cache = []  # Cache for lazy loading light frames
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -110,6 +114,26 @@ class ViewCatalogTab(QWidget):
 
         layout.addLayout(filter_layout)
 
+        # Progress indicator for background loading
+        progress_widget = QWidget()
+        progress_layout = QVBoxLayout(progress_widget)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        progress_layout.setSpacing(2)
+
+        self.catalog_status_label = QLabel("")
+        self.catalog_status_label.setStyleSheet("color: #666; font-style: italic; font-size: 11px;")
+        progress_layout.addWidget(self.catalog_status_label)
+
+        self.catalog_progress = QProgressBar()
+        self.catalog_progress.setRange(0, 0)  # Indeterminate progress
+        self.catalog_progress.setTextVisible(False)
+        self.catalog_progress.setMaximumHeight(3)  # Very slim progress bar
+        progress_layout.addWidget(self.catalog_progress)
+
+        progress_widget.hide()  # Hidden by default
+        self.catalog_progress_widget = progress_widget
+        layout.addWidget(progress_widget)
+
         # Tree widget with expanded columns
         self.catalog_tree = QTreeWidget()
         self.catalog_tree.setColumnCount(9)
@@ -130,6 +154,9 @@ class ViewCatalogTab(QWidget):
         # Enable context menu
         self.catalog_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.catalog_tree.customContextMenuRequested.connect(self.show_catalog_context_menu)
+
+        # Connect itemExpanded for lazy loading
+        self.catalog_tree.itemExpanded.connect(self._on_tree_item_expanded)
 
         layout.addWidget(self.catalog_tree)
 
@@ -193,6 +220,9 @@ class ViewCatalogTab(QWidget):
         # Only show file operations if this is a file item (has no children and is not a group node)
         is_file = item.childCount() == 0 and '(' not in item.text(0)
 
+        # Check if this is a date node (session) - has children and date_loc in column 6
+        is_session = item.childCount() > 0 and item.text(6) and '(' in item.text(0)
+
         if is_file:
             show_path_action = menu.addAction("Show Full Path")
             copy_path_action = menu.addAction("Copy Path to Clipboard")
@@ -217,8 +247,20 @@ class ViewCatalogTab(QWidget):
                 self.delete_file_from_database(item)
             elif action == reimport_action:
                 self.reimport_file(item)
+        elif is_session:
+            # Session node - offer to assign to project
+            assign_action = menu.addAction("Assign to Project")
+            menu.addSeparator()
+            export_action = menu.addAction("Export This Group to CSV")
+
+            action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
+
+            if action == assign_action:
+                self.assign_session_to_project(item)
+            elif action == export_action:
+                self.export_tree_group_to_csv(item)
         else:
-            # For group nodes, offer export
+            # For other group nodes, offer export
             export_action = menu.addAction("Export This Group to CSV")
             action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
 
@@ -370,6 +412,60 @@ Imported: {result[11] or 'N/A'}
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to re-import file: {e}')
 
+    def assign_session_to_project(self, item: QTreeWidgetItem) -> None:
+        """
+        Assign a session (date node) to a project.
+
+        Args:
+            item: Date node tree item
+        """
+        try:
+            # Get date_loc from column 6
+            date_loc = item.text(6)
+            if not date_loc:
+                QMessageBox.warning(self, 'Error', 'Could not determine session date')
+                return
+
+            # Get parent filter node to extract object and filter
+            parent = item.parent()
+            if not parent:
+                QMessageBox.warning(self, 'Error', 'Could not determine session details')
+                return
+
+            # Get object and filter from parent node's data
+            parent_data = parent.data(0, Qt.ItemDataRole.UserRole)
+            if not parent_data:
+                QMessageBox.warning(self, 'Error', 'Could not determine session details')
+                return
+
+            object_name = parent_data.get('object')
+            filter_name = parent_data.get('filter')
+
+            if not object_name:
+                QMessageBox.warning(self, 'Error', 'Could not determine object name')
+                return
+
+            # Count frames in this session
+            frame_count = item.childCount()
+
+            # Open assign session dialog
+            dialog = AssignSessionDialog(
+                db_path=self.db_path,
+                date_loc=date_loc,
+                object_name=object_name,
+                filter_name=filter_name,
+                frame_count=frame_count,
+                parent=self
+            )
+
+            if dialog.exec() == dialog.DialogCode.Accepted:
+                self.status_callback(f'Session assigned to project')
+                # Optionally refresh the view to show assignment status
+                # self.refresh_catalog_view()
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to assign session: {e}')
+
     def export_tree_group_to_csv(self, item: QTreeWidgetItem) -> None:
         """Export a tree group (and its children) to CSV."""
         filename, _ = QFileDialog.getSaveFileName(
@@ -473,497 +569,450 @@ Imported: {result[11] or 'N/A'}
         return None
 
     def refresh_catalog_view(self) -> None:
-        """Refresh the catalog view tree."""
+        """Refresh the catalog view using background thread (non-blocking)."""
         try:
+            # Cancel any existing worker
+            if self.loader_worker and self.loader_worker.isRunning():
+                self.loader_worker.terminate()
+                self.loader_worker.wait()
+
+            # Update statistics synchronously (fast operation)
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-
-            # Update summary statistics
             self.update_catalog_statistics(cursor)
+            conn.close()
 
-            # Populate object filter dropdown
-            cursor.execute('''
-                SELECT DISTINCT object
-                FROM xisf_files
-                WHERE object IS NOT NULL
-                ORDER BY object
-            ''')
-            objects = [row[0] for row in cursor.fetchall()]
-
-            # Save current selection
-            current_object = self.catalog_object_filter.currentText()
-
-            # Update dropdown
-            self.catalog_object_filter.blockSignals(True)
-            self.catalog_object_filter.clear()
-            self.catalog_object_filter.addItem('All')
-            self.catalog_object_filter.addItems(objects)
-
-            # Restore selection if still available
-            if current_object in ['All'] + objects:
-                self.catalog_object_filter.setCurrentText(current_object)
-
-            self.catalog_object_filter.blockSignals(False)
+            # Show progress
+            self.catalog_progress_widget.show()
+            self.catalog_status_label.setText("Loading catalog...")
+            self.catalog_tree.setEnabled(False)
 
             # Get filter values
             imagetype_filter = self.catalog_imagetype_filter.currentText()
             object_filter = self.catalog_object_filter.currentText()
 
-            self.catalog_tree.clear()
-
-            # ===== LIGHT FRAMES SECTION =====
-            # Skip light frames section if filtering to calibration only
-            if imagetype_filter not in ['Dark', 'Flat', 'Bias', 'Master']:
-                # Build filter conditions
-                where_conditions = ['object IS NOT NULL']
-                params = []
-
-                if object_filter != 'All':
-                    where_conditions.append('object = ?')
-                    params.append(object_filter)
-
-                if imagetype_filter == 'Light':
-                    where_conditions.append('imagetyp LIKE ?')
-                    params.append('%Light%')
-                elif imagetype_filter == 'Master':
-                    where_conditions.append('imagetyp LIKE ?')
-                    params.append('%Master%')
-
-                where_clause = ' AND '.join(where_conditions)
-
-                # Get total light frame counts
-                cursor.execute(f'''
-                    SELECT COUNT(*), SUM(exposure) / 3600.0
-                    FROM xisf_files
-                    WHERE {where_clause}
-                ''', params)
-                light_total_count, light_total_exp = cursor.fetchone()
-                light_total_exp = light_total_exp or 0
-
-                light_frames_root = QTreeWidgetItem(self.catalog_tree)
-                light_frames_root.setText(0, f"Light Frames ({light_total_count} files, {light_total_exp:.1f}h)")
-                light_frames_root.setFlags(light_frames_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
-                # Make parent nodes bold
-                font = light_frames_root.font(0)
-                font.setBold(True)
-                light_frames_root.setFont(0, font)
-
-                # Get all objects (light frames only)
-                cursor.execute(f'''
-                    SELECT
-                        object,
-                        COUNT(*) as file_count,
-                        SUM(exposure) as total_exposure
-                    FROM xisf_files
-                    WHERE {where_clause}
-                    GROUP BY object
-                    ORDER BY object
-                ''', params)
-
-                objects = cursor.fetchall()
-
-                for obj_name, obj_file_count, obj_total_exp in objects:
-                    # Create object node with aggregate info
-                    obj_exp_hrs = (obj_total_exp or 0) / 3600.0
-                    obj_item = QTreeWidgetItem(light_frames_root)
-                    obj_item.setText(0, f"{obj_name or 'Unknown'} ({obj_file_count} files, {obj_exp_hrs:.1f}h)")
-                    obj_item.setFlags(obj_item.flags() | Qt.ItemFlag.ItemIsAutoTristate)
-
-                    # Get all filters for this object
-                    cursor.execute('''
-                        SELECT
-                            filter,
-                            COUNT(*) as file_count,
-                            SUM(exposure) as total_exposure
-                        FROM xisf_files
-                        WHERE object = ?
-                        GROUP BY filter
-                        ORDER BY filter
-                    ''', (obj_name,))
-
-                    filters = cursor.fetchall()
-
-                    for filter_name, filter_file_count, filter_total_exp in filters:
-                        # Create filter node with aggregate info
-                        filter_exp_hrs = (filter_total_exp or 0) / 3600.0
-                        filter_item = QTreeWidgetItem(obj_item)
-                        filter_item.setText(0, f"{filter_name or 'No Filter'} ({filter_file_count} files, {filter_exp_hrs:.1f}h)")
-                        filter_item.setText(2, filter_name or 'No Filter')  # Show filter in Filter column too
-
-                        # Get all dates for this object and filter
-                        cursor.execute('''
-                            SELECT
-                                date_loc,
-                                COUNT(*) as file_count,
-                                SUM(exposure) as total_exposure
-                            FROM xisf_files
-                            WHERE object = ? AND (filter = ? OR (filter IS NULL AND ? IS NULL))
-                            GROUP BY date_loc
-                            ORDER BY date_loc DESC
-                        ''', (obj_name, filter_name, filter_name))
-
-                        dates = cursor.fetchall()
-
-                        for date_val, date_file_count, date_total_exp in dates:
-                            # Create date node with aggregate info
-                            date_exp_hrs = (date_total_exp or 0) / 3600.0
-                            date_item = QTreeWidgetItem(filter_item)
-                            date_item.setText(0, f"{date_val or 'No Date'} ({date_file_count} files, {date_exp_hrs:.1f}h)")
-                            date_item.setText(6, date_val or 'No Date')  # Show date in Date column too
-
-                            # Get all files for this object, filter, and date
-                            cursor.execute('''
-                                SELECT
-                                    filename,
-                                    imagetyp,
-                                    exposure,
-                                    telescop,
-                                    instrume,
-                                    date_loc,
-                                    filter,
-                                    ccd_temp,
-                                    xbinning,
-                                    ybinning
-                                FROM xisf_files
-                                WHERE object = ?
-                                    AND (filter = ? OR (filter IS NULL AND ? IS NULL))
-                                    AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
-                                ORDER BY filename
-                            ''', (obj_name, filter_name, filter_name, date_val, date_val))
-
-                            files = cursor.fetchall()
-
-                            for filename, imagetyp, exposure, telescop, instrume, date_loc, filt, temp, xbin, ybin in files:
-                                # Create file node with all columns
-                                file_item = QTreeWidgetItem(date_item)
-                                file_item.setText(0, filename)
-                                file_item.setText(1, imagetyp or 'N/A')
-                                file_item.setText(2, filt or 'N/A')
-                                file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
-                                file_item.setText(4, f"{temp:.1f}°C" if temp is not None else 'N/A')
-                                binning = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
-                                file_item.setText(5, binning)
-                                file_item.setText(6, date_loc or 'N/A')
-                                file_item.setText(7, telescop or 'N/A')
-                                file_item.setText(8, instrume or 'N/A')
-
-                                # Apply color coding based on image type
-                                color = self.get_item_color(imagetyp)
-                                if color:
-                                    for col in range(9):
-                                        file_item.setBackground(col, QBrush(color))
-
-            # ===== CALIBRATION FRAMES SECTION =====
-            # Skip calibration frames if filtering to Light only
-            if imagetype_filter not in ['Light']:
-                # Get total calibration counts
-                calib_where = []
-                calib_params = []
-                if imagetype_filter in ['Dark', 'Flat', 'Bias', 'Master']:
-                    if imagetype_filter == 'Master':
-                        calib_where.append('imagetyp LIKE ?')
-                        calib_params.append('%Master%')
-                    else:
-                        calib_where.append(f'imagetyp LIKE ?')
-                        calib_params.append(f'%{imagetype_filter}%')
-
-                calib_where_clause = 'object IS NULL'
-                if calib_where:
-                    calib_where_clause += ' AND ' + ' AND '.join(calib_where)
-
-                cursor.execute(f'''
-                    SELECT COUNT(*)
-                    FROM xisf_files
-                    WHERE {calib_where_clause}
-                ''', calib_params)
-                calib_total_count = cursor.fetchone()[0]
-
-                calib_root = QTreeWidgetItem(self.catalog_tree)
-                calib_root.setText(0, f"Calibration Frames ({calib_total_count} files)")
-                calib_root.setFlags(calib_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
-                font = calib_root.font(0)
-                font.setBold(True)
-                calib_root.setFont(0, font)
-
-                # ----- DARK FRAMES: exposure_temp_binning → date → files -----
-                if imagetype_filter in ['All', 'Dark', 'Master']:
-                    dark_where = 'imagetyp LIKE "%Dark%" AND object IS NULL'
-                    if imagetype_filter == 'Master':
-                        dark_where = 'imagetyp LIKE "%Master%" AND imagetyp LIKE "%Dark%" AND object IS NULL'
-
-                    cursor.execute(f'SELECT COUNT(*) FROM xisf_files WHERE {dark_where}')
-                    dark_count = cursor.fetchone()[0]
-
-                    if dark_count > 0:
-                        dark_root = QTreeWidgetItem(calib_root)
-                        dark_root.setText(0, f"Dark Frames ({dark_count} files)")
-                        dark_root.setFlags(dark_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
-
-                        cursor.execute('''
-                            SELECT
-                                exposure,
-                                ROUND(ccd_temp / 2.0) * 2 as ccd_temp,
-                                xbinning,
-                                ybinning,
-                                COUNT(*) as file_count
-                            FROM xisf_files
-                            WHERE imagetyp LIKE '%Dark%' AND object IS NULL
-                            GROUP BY exposure, ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning
-                            ORDER BY exposure, ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning
-                        ''')
-
-                        dark_groups = cursor.fetchall()
-
-                        for exp, temp, xbin, ybin, count in dark_groups:
-                            # Create dark group node (e.g., "300s_-10C_Bin1x1 (25 files)")
-                            exp_str = f"{int(exp)}s" if exp else "0s"
-                            temp_str = f"{int(temp)}C" if temp is not None else "0C"
-                            binning = f"Bin{int(xbin)}x{int(ybin)}" if xbin and ybin else "Bin1x1"
-                            group_name = f"{exp_str}_{temp_str}_{binning} ({count} files)"
-
-                            dark_group_item = QTreeWidgetItem(dark_root)
-                            dark_group_item.setText(0, group_name)
-                            dark_group_item.setText(3, exp_str)  # Exposure column
-                            dark_group_item.setText(4, temp_str)  # Temp column
-                            dark_group_item.setText(5, binning)  # Binning column
-
-                            # Get dates for this dark group
-                            cursor.execute('''
-                                SELECT DISTINCT date_loc
-                                FROM xisf_files
-                                WHERE imagetyp LIKE '%Dark%'
-                                    AND object IS NULL
-                                    AND (exposure = ? OR (exposure IS NULL AND ? IS NULL))
-                                    AND (ROUND(ccd_temp / 2.0) * 2 = ? OR (ccd_temp IS NULL AND ? IS NULL))
-                                    AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
-                                    AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
-                                ORDER BY date_loc DESC
-                            ''', (exp, exp, temp, temp, xbin, xbin, ybin, ybin))
-
-                            dark_dates = cursor.fetchall()
-
-                            for (date_val,) in dark_dates:
-                                date_item = QTreeWidgetItem(dark_group_item)
-                                date_item.setText(0, date_val or 'No Date')
-
-                                # Get files for this dark group and date
-                                cursor.execute('''
-                                    SELECT filename, imagetyp, exposure, telescop, instrume, date_loc, filter, ccd_temp, xbinning, ybinning
-                                    FROM xisf_files
-                                    WHERE imagetyp LIKE '%Dark%'
-                                        AND object IS NULL
-                                        AND (exposure = ? OR (exposure IS NULL AND ? IS NULL))
-                                        AND (ROUND(ccd_temp / 2.0) * 2 = ? OR (ccd_temp IS NULL AND ? IS NULL))
-                                        AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
-                                        AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
-                                        AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
-                                    ORDER BY filename
-                                ''', (exp, exp, temp, temp, xbin, xbin, ybin, ybin, date_val, date_val))
-
-                                dark_files = cursor.fetchall()
-
-                                for filename, imagetyp, exposure, telescop, instrume, date_loc, filt, temp_val, xb, yb in dark_files:
-                                    file_item = QTreeWidgetItem(date_item)
-                                    file_item.setText(0, filename)
-                                    file_item.setText(1, imagetyp or 'N/A')
-                                    file_item.setText(2, filt or 'N/A')
-                                    file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
-                                    file_item.setText(4, f"{temp_val:.1f}°C" if temp_val is not None else 'N/A')
-                                    binning_str = f"{int(xb)}x{int(yb)}" if xb and yb else 'N/A'
-                                    file_item.setText(5, binning_str)
-                                    file_item.setText(6, date_loc or 'N/A')
-                                    file_item.setText(7, telescop or 'N/A')
-                                    file_item.setText(8, instrume or 'N/A')
-
-                                    # Apply color coding based on image type
-                                    color = self.get_item_color(imagetyp)
-                                    if color:
-                                        for col in range(9):
-                                            file_item.setBackground(col, QBrush(color))
-
-                # ----- FLAT FRAMES: date → filter_temp_binning → files -----
-                if imagetype_filter in ['All', 'Flat', 'Master']:
-                    flat_where = 'imagetyp LIKE "%Flat%" AND object IS NULL'
-                    if imagetype_filter == 'Master':
-                        flat_where = 'imagetyp LIKE "%Master%" AND imagetyp LIKE "%Flat%" AND object IS NULL'
-
-                    cursor.execute(f'SELECT COUNT(*) FROM xisf_files WHERE {flat_where}')
-                    flat_count = cursor.fetchone()[0]
-
-                    if flat_count > 0:
-                        flat_root = QTreeWidgetItem(calib_root)
-                        flat_root.setText(0, f"Flat Frames ({flat_count} files)")
-                        flat_root.setFlags(flat_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
-
-                        cursor.execute(f'''
-                            SELECT DISTINCT date_loc
-                            FROM xisf_files
-                            WHERE {flat_where}
-                            ORDER BY date_loc DESC
-                        ''')
-
-                        flat_dates = cursor.fetchall()
-
-                        for (date_val,) in flat_dates:
-                            date_item = QTreeWidgetItem(flat_root)
-                            date_item.setText(0, date_val or 'No Date')
-
-                            # Get filter/temp/binning groups for this date
-                            cursor.execute(f'''
-                                SELECT
-                                    filter,
-                                    ROUND(ccd_temp / 2.0) * 2 as ccd_temp,
-                                    xbinning,
-                                    ybinning,
-                                    COUNT(*) as file_count
-                                FROM xisf_files
-                                WHERE {flat_where}
-                                    AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
-                                GROUP BY filter, ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning
-                                ORDER BY filter, ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning
-                            ''', (date_val, date_val))
-
-                            flat_groups = cursor.fetchall()
-
-                            for filt, temp, xbin, ybin, count in flat_groups:
-                                # Create flat group node (e.g., "Ha_-10C_Bin1x1 (30 files)")
-                                filt_str = filt or "NoFilter"
-                                temp_str = f"{int(temp)}C" if temp is not None else "0C"
-                                binning = f"Bin{int(xbin)}x{int(ybin)}" if xbin and ybin else "Bin1x1"
-                                group_name = f"{filt_str}_{temp_str}_{binning} ({count} files)"
-
-                                flat_group_item = QTreeWidgetItem(date_item)
-                                flat_group_item.setText(0, group_name)
-                                flat_group_item.setText(2, filt_str)  # Filter column
-                                flat_group_item.setText(4, temp_str)  # Temp column
-                                flat_group_item.setText(5, binning)  # Binning column
-
-                                # Get files for this flat group
-                                cursor.execute(f'''
-                                    SELECT filename, imagetyp, exposure, telescop, instrume, date_loc, filter, ccd_temp, xbinning, ybinning
-                                    FROM xisf_files
-                                    WHERE {flat_where}
-                                        AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
-                                        AND (filter = ? OR (filter IS NULL AND ? IS NULL))
-                                        AND (ROUND(ccd_temp / 2.0) * 2 = ? OR (ccd_temp IS NULL AND ? IS NULL))
-                                        AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
-                                        AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
-                                    ORDER BY filename
-                                ''', (date_val, date_val, filt, filt, temp, temp, xbin, xbin, ybin, ybin))
-
-                                flat_files = cursor.fetchall()
-
-                                for filename, imagetyp, exposure, telescop, instrume, date_loc, filt_val, temp_val, xb, yb in flat_files:
-                                    file_item = QTreeWidgetItem(flat_group_item)
-                                    file_item.setText(0, filename)
-                                    file_item.setText(1, imagetyp or 'N/A')
-                                    file_item.setText(2, filt_val or 'N/A')
-                                    file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
-                                    file_item.setText(4, f"{temp_val:.1f}°C" if temp_val is not None else 'N/A')
-                                    binning_str = f"{int(xb)}x{int(yb)}" if xb and yb else 'N/A'
-                                    file_item.setText(5, binning_str)
-                                    file_item.setText(6, date_loc or 'N/A')
-                                    file_item.setText(7, telescop or 'N/A')
-                                    file_item.setText(8, instrume or 'N/A')
-
-                                    # Apply color coding based on image type
-                                    color = self.get_item_color(imagetyp)
-                                    if color:
-                                        for col in range(9):
-                                            file_item.setBackground(col, QBrush(color))
-
-                # ----- BIAS FRAMES: temp_binning → date → files -----
-                if imagetype_filter in ['All', 'Bias', 'Master']:
-                    bias_where = 'imagetyp LIKE "%Bias%" AND object IS NULL'
-                    if imagetype_filter == 'Master':
-                        bias_where = 'imagetyp LIKE "%Master%" AND imagetyp LIKE "%Bias%" AND object IS NULL'
-
-                    cursor.execute(f'SELECT COUNT(*) FROM xisf_files WHERE {bias_where}')
-                    bias_count = cursor.fetchone()[0]
-
-                    if bias_count > 0:
-                        bias_root = QTreeWidgetItem(calib_root)
-                        bias_root.setText(0, f"Bias Frames ({bias_count} files)")
-                        bias_root.setFlags(bias_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
-
-                        cursor.execute(f'''
-                            SELECT
-                                ROUND(ccd_temp / 2.0) * 2 as ccd_temp,
-                                xbinning,
-                                ybinning,
-                                COUNT(*) as file_count
-                            FROM xisf_files
-                            WHERE {bias_where}
-                            GROUP BY ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning
-                            ORDER BY ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning
-                        ''')
-
-                        bias_groups = cursor.fetchall()
-
-                        for temp, xbin, ybin, count in bias_groups:
-                            # Create bias group node (e.g., "-10C_Bin1x1 (50 files)")
-                            temp_str = f"{int(temp)}C" if temp is not None else "0C"
-                            binning = f"Bin{int(xbin)}x{int(ybin)}" if xbin and ybin else "Bin1x1"
-                            group_name = f"{temp_str}_{binning} ({count} files)"
-
-                            bias_group_item = QTreeWidgetItem(bias_root)
-                            bias_group_item.setText(0, group_name)
-                            bias_group_item.setText(4, temp_str)  # Temp column
-                            bias_group_item.setText(5, binning)  # Binning column
-
-                            # Get dates for this bias group
-                            cursor.execute(f'''
-                                SELECT DISTINCT date_loc
-                                FROM xisf_files
-                                WHERE {bias_where}
-                                    AND (ROUND(ccd_temp / 2.0) * 2 = ? OR (ccd_temp IS NULL AND ? IS NULL))
-                                    AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
-                                    AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
-                                ORDER BY date_loc DESC
-                            ''', (temp, temp, xbin, xbin, ybin, ybin))
-
-                            bias_dates = cursor.fetchall()
-
-                            for (date_val,) in bias_dates:
-                                date_item = QTreeWidgetItem(bias_group_item)
-                                date_item.setText(0, date_val or 'No Date')
-
-                                # Get files for this bias group and date
-                                cursor.execute(f'''
-                                    SELECT filename, imagetyp, exposure, telescop, instrume, date_loc, filter, ccd_temp, xbinning, ybinning
-                                    FROM xisf_files
-                                    WHERE {bias_where}
-                                        AND (ROUND(ccd_temp / 2.0) * 2 = ? OR (ccd_temp IS NULL AND ? IS NULL))
-                                        AND (xbinning = ? OR (xbinning IS NULL AND ? IS NULL))
-                                        AND (ybinning = ? OR (ybinning IS NULL AND ? IS NULL))
-                                        AND (date_loc = ? OR (date_loc IS NULL AND ? IS NULL))
-                                    ORDER BY filename
-                                ''', (temp, temp, xbin, xbin, ybin, ybin, date_val, date_val))
-
-                                bias_files = cursor.fetchall()
-
-                                for filename, imagetyp, exposure, telescop, instrume, date_loc, filt, temp_val, xb, yb in bias_files:
-                                    file_item = QTreeWidgetItem(date_item)
-                                    file_item.setText(0, filename)
-                                    file_item.setText(1, imagetyp or 'N/A')
-                                    file_item.setText(2, filt or 'N/A')
-                                    file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
-                                    file_item.setText(4, f"{temp_val:.1f}°C" if temp_val is not None else 'N/A')
-                                    binning_str = f"{int(xb)}x{int(yb)}" if xb and yb else 'N/A'
-                                    file_item.setText(5, binning_str)
-                                    file_item.setText(6, date_loc or 'N/A')
-                                    file_item.setText(7, telescop or 'N/A')
-                                    file_item.setText(8, instrume or 'N/A')
-
-                                    # Apply color coding based on image type
-                                    color = self.get_item_color(imagetyp)
-                                    if color:
-                                        for col in range(9):
-                                            file_item.setBackground(col, QBrush(color))
-
-            conn.close()
-
-            # Don't expand any items by default - keep everything collapsed
+            # Create and start worker
+            self.loader_worker = CatalogLoaderWorker(self.db_path, imagetype_filter, object_filter)
+            self.loader_worker.progress_updated.connect(self._on_catalog_progress)
+            self.loader_worker.data_ready.connect(self._on_catalog_data_ready)
+            self.loader_worker.error_occurred.connect(self._on_catalog_error)
+            self.loader_worker.finished.connect(self._on_catalog_finished)
+            self.loader_worker.start()
 
         except Exception as e:
-            QMessageBox.critical(self, 'Error', f'Failed to refresh view: {e}')
+            self.catalog_progress_widget.hide()
+            self.catalog_tree.setEnabled(True)
+            QMessageBox.critical(self, 'Error', f'Failed to start catalog load: {e}')
+
+    def _on_catalog_progress(self, message: str) -> None:
+        """Update progress message."""
+        self.catalog_status_label.setText(message)
+
+    def _on_catalog_error(self, error_msg: str) -> None:
+        """Handle worker error."""
+        self.catalog_progress_widget.hide()
+        self.catalog_tree.setEnabled(True)
+        QMessageBox.critical(self, 'Error', error_msg)
+
+    def _on_catalog_finished(self) -> None:
+        """Hide progress when worker finishes."""
+        self.catalog_progress_widget.hide()
+        self.catalog_tree.setEnabled(True)
+
+    def _on_catalog_data_ready(self, result: dict) -> None:
+        """
+        Build catalog tree from loaded data (runs on UI thread).
+
+        Args:
+            result: Dictionary with 'objects', 'light_data', 'calib_data' keys
+        """
+        try:
+            # Update object filter dropdown
+            objects = result.get('objects', [])
+            current_object = self.catalog_object_filter.currentText()
+
+            self.catalog_object_filter.blockSignals(True)
+            self.catalog_object_filter.clear()
+            self.catalog_object_filter.addItem('All')
+            self.catalog_object_filter.addItems(objects)
+
+            if current_object in ['All'] + objects:
+                self.catalog_object_filter.setCurrentText(current_object)
+
+            self.catalog_object_filter.blockSignals(False)
+
+            # Clear and build tree
+            self.catalog_tree.setUpdatesEnabled(False)
+            self.catalog_tree.clear()
+
+            # Build light frames tree from data
+            light_data = result.get('light_data', [])
+            if light_data:
+                self._build_light_frames_from_data(light_data)
+
+            # Build calibration frames tree from data
+            calib_data = result.get('calib_data', {})
+            if any(calib_data.values()):  # If any calibration data exists
+                self._build_calibration_frames_from_data(calib_data)
+
+            self.catalog_tree.setUpdatesEnabled(True)
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to build tree: {e}')
+
+    def _build_light_frames_from_data(self, light_data: list) -> None:
+        """Build light frames tree with lazy loading (only objects and filters initially)."""
+        if not light_data:
+            return
+
+        # Store data for lazy loading
+        self.light_data_cache = light_data
+
+        # Calculate totals
+        total_count = len(light_data)
+        total_exp = sum(row[5] or 0 for row in light_data) / 3600.0  # exposure is column 5
+
+        light_frames_root = QTreeWidgetItem(self.catalog_tree)
+        light_frames_root.setText(0, f"Light Frames ({total_count} files, {total_exp:.1f}h)")
+        light_frames_root.setFlags(light_frames_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+        font = light_frames_root.font(0)
+        font.setBold(True)
+        light_frames_root.setFont(0, font)
+
+        # LAZY LOADING: Only build objects → filters (2 levels)
+        # Dates and files will be loaded on-demand when filter nodes are expanded
+
+        # Track current state
+        current_obj = None
+        obj_item = None
+
+        # Aggregation tracking
+        obj_files = {}
+        filter_files = {}
+
+        # Aggregate counts
+        for row in light_data:
+            obj, filt = row[0], row[1]
+            exposure = row[5] or 0
+
+            if obj not in obj_files:
+                obj_files[obj] = {'count': 0, 'exposure': 0}
+            obj_files[obj]['count'] += 1
+            obj_files[obj]['exposure'] += exposure
+
+            key_filter = (obj, filt)
+            if key_filter not in filter_files:
+                filter_files[key_filter] = {'count': 0, 'exposure': 0}
+            filter_files[key_filter]['count'] += 1
+            filter_files[key_filter]['exposure'] += exposure
+
+        # Build only objects and filters
+        for row in light_data:
+            obj, filt = row[0], row[1]
+
+            # Create object node if new
+            if obj != current_obj:
+                obj_stats = obj_files[obj]
+                obj_exp_hrs = obj_stats['exposure'] / 3600.0
+                obj_item = QTreeWidgetItem(light_frames_root)
+                obj_item.setText(0, f"{obj or 'Unknown'} ({obj_stats['count']} files, {obj_exp_hrs:.1f}h)")
+                obj_item.setFlags(obj_item.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+                current_obj = obj
+
+            # Check if filter node already exists for this object
+            filter_exists = False
+            for i in range(obj_item.childCount()):
+                child = obj_item.child(i)
+                stored_filter = child.data(0, Qt.ItemDataRole.UserRole)
+                if stored_filter and stored_filter.get('filter') == filt:
+                    filter_exists = True
+                    break
+
+            if not filter_exists:
+                filter_stats = filter_files[(obj, filt)]
+                filter_exp_hrs = filter_stats['exposure'] / 3600.0
+                filter_item = QTreeWidgetItem(obj_item)
+                filter_item.setText(0, f"{filt or 'No Filter'} ({filter_stats['count']} files, {filter_exp_hrs:.1f}h)")
+                filter_item.setText(2, filt or 'No Filter')
+
+                # Store metadata for lazy loading
+                filter_item.setData(0, Qt.ItemDataRole.UserRole, {
+                    'object': obj,
+                    'filter': filt,
+                    'lazy_load': True  # Mark for lazy loading
+                })
+
+                # Add a dummy child to make it expandable
+                dummy = QTreeWidgetItem(filter_item)
+                dummy.setText(0, "Loading...")
+                dummy.setData(0, Qt.ItemDataRole.UserRole, {'dummy': True})
+
+    def _on_tree_item_expanded(self, item: QTreeWidgetItem) -> None:
+        """Handle tree item expansion for lazy loading."""
+        # Check if this item needs lazy loading
+        item_data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not item_data or not item_data.get('lazy_load'):
+            return
+
+        # Check if already loaded (no dummy children)
+        if item.childCount() > 0:
+            first_child = item.child(0)
+            first_child_data = first_child.data(0, Qt.ItemDataRole.UserRole)
+            if not first_child_data or not first_child_data.get('dummy'):
+                return  # Already loaded
+
+        # Get the object and filter for this node
+        obj = item_data.get('object')
+        filt = item_data.get('filter')
+
+        # Filter the cached data for this object/filter combination
+        filtered_data = [
+            row for row in self.light_data_cache
+            if row[0] == obj and row[1] == filt
+        ]
+
+        if not filtered_data:
+            # Remove dummy and mark as loaded
+            item.takeChildren()
+            return
+
+        # Aggregate by date
+        date_files = {}
+        for row in filtered_data:
+            date_loc = row[2]
+            exposure = row[5] or 0
+
+            if date_loc not in date_files:
+                date_files[date_loc] = {'count': 0, 'exposure': 0, 'rows': []}
+            date_files[date_loc]['count'] += 1
+            date_files[date_loc]['exposure'] += exposure
+            date_files[date_loc]['rows'].append(row)
+
+        # Remove dummy children
+        item.takeChildren()
+
+        # Build date nodes and file nodes
+        for date_loc in sorted(date_files.keys(), reverse=True):  # Most recent first
+            date_stats = date_files[date_loc]
+            date_exp_hrs = date_stats['exposure'] / 3600.0
+            date_item = QTreeWidgetItem(item)
+            date_item.setText(0, f"{date_loc or 'No Date'} ({date_stats['count']} files, {date_exp_hrs:.1f}h)")
+            date_item.setText(6, date_loc or 'No Date')
+
+            # Add file nodes for this date
+            for row in sorted(date_stats['rows'], key=lambda x: x[3]):  # Sort by filename
+                obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume = row
+
+                file_item = QTreeWidgetItem(date_item)
+                file_item.setText(0, filename)
+                file_item.setText(1, imagetyp or 'N/A')
+                file_item.setText(2, filt or 'N/A')
+                file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
+                file_item.setText(4, f"{temp:.1f}°C" if temp is not None else 'N/A')
+                binning = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
+                file_item.setText(5, binning)
+                file_item.setText(6, date_loc or 'N/A')
+                file_item.setText(7, telescop or 'N/A')
+                file_item.setText(8, instrume or 'N/A')
+
+                # Apply color coding
+                color = self.get_item_color(imagetyp)
+                if color:
+                    for col in range(9):
+                        file_item.setBackground(col, QBrush(color))
+
+        # Mark as loaded by removing lazy_load flag
+        item_data['lazy_load'] = False
+        item.setData(0, Qt.ItemDataRole.UserRole, item_data)
+
+
+    def _build_calibration_frames_from_data(self, calib_data: dict) -> None:
+        """Build calibration frames tree from pre-loaded data."""
+        darks = calib_data.get('darks', [])
+        flats = calib_data.get('flats', [])
+        bias = calib_data.get('bias', [])
+
+        total_count = len(darks) + len(flats) + len(bias)
+        if total_count == 0:
+            return
+
+        calib_root = QTreeWidgetItem(self.catalog_tree)
+        calib_root.setText(0, f"Calibration Frames ({total_count} files)")
+        calib_root.setFlags(calib_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+        font = calib_root.font(0)
+        font.setBold(True)
+        calib_root.setFont(0, font)
+
+        # Build darks
+        if darks:
+            self._build_darks_from_data(calib_root, darks)
+
+        # Build flats
+        if flats:
+            self._build_flats_from_data(calib_root, flats)
+
+        # Build bias
+        if bias:
+            self._build_bias_from_data(calib_root, bias)
+    
+    
+    def _build_darks_from_data(self, calib_root, darks_data: list) -> None:
+        """Build darks tree from pre-loaded data."""
+        dark_root = QTreeWidgetItem(calib_root)
+        dark_root.setText(0, f"Dark Frames ({len(darks_data)} files)")
+        dark_root.setFlags(dark_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+
+        current_group = None
+        current_date = None
+        group_item = None
+        date_item = None
+
+        for row in darks_data:
+            exp, temp, xbin, ybin, date_loc, filename, imagetyp, telescop, instrume, actual_temp = row
+
+            # Create group node if new
+            group_key = (exp, temp, xbin, ybin)
+            if group_key != current_group:
+                exp_str = f"{int(exp)}s" if exp else "0s"
+                temp_str = f"{int(temp)}C" if temp is not None else "0C"
+                binning = f"Bin{int(xbin)}x{int(ybin)}" if xbin and ybin else "Bin1x1"
+
+                group_item = QTreeWidgetItem(dark_root)
+                group_item.setText(0, f"{exp_str}_{temp_str}_{binning}")
+                group_item.setText(3, exp_str)
+                group_item.setText(4, temp_str)
+                group_item.setText(5, binning)
+
+                current_group = group_key
+                current_date = None
+
+            # Create date node if new
+            if date_loc != current_date:
+                date_item = QTreeWidgetItem(group_item)
+                date_item.setText(0, date_loc or 'No Date')
+                current_date = date_loc
+
+            # Add file node
+            file_item = QTreeWidgetItem(date_item)
+            file_item.setText(0, filename)
+            file_item.setText(1, imagetyp or 'N/A')
+            file_item.setText(3, f"{exp:.1f}s" if exp else 'N/A')
+            file_item.setText(4, f"{actual_temp:.1f}°C" if actual_temp is not None else 'N/A')
+            binning_str = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
+            file_item.setText(5, binning_str)
+            file_item.setText(6, date_loc or 'N/A')
+            file_item.setText(7, telescop or 'N/A')
+            file_item.setText(8, instrume or 'N/A')
+
+            color = self.get_item_color(imagetyp)
+            if color:
+                for col in range(9):
+                    file_item.setBackground(col, QBrush(color))
+    
+    
+    def _build_flats_from_data(self, calib_root, flats_data: list) -> None:
+        """Build flats tree from pre-loaded data."""
+        flat_root = QTreeWidgetItem(calib_root)
+        flat_root.setText(0, f"Flat Frames ({len(flats_data)} files)")
+        flat_root.setFlags(flat_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+
+        current_date = None
+        current_group = None
+        date_item = None
+        group_item = None
+
+        for row in flats_data:
+            date_loc, filt, temp, xbin, ybin, filename, imagetyp, exposure, telescop, instrume, actual_temp = row
+
+            # Create date node if new
+            if date_loc != current_date:
+                date_item = QTreeWidgetItem(flat_root)
+                date_item.setText(0, date_loc or 'No Date')
+                current_date = date_loc
+                current_group = None
+
+            # Create group node if new
+            group_key = (filt, temp, xbin, ybin)
+            if group_key != current_group:
+                filt_str = filt or "NoFilter"
+                temp_str = f"{int(temp)}C" if temp is not None else "0C"
+                binning = f"Bin{int(xbin)}x{int(ybin)}" if xbin and ybin else "Bin1x1"
+
+                group_item = QTreeWidgetItem(date_item)
+                group_item.setText(0, f"{filt_str}_{temp_str}_{binning}")
+                group_item.setText(2, filt_str)
+                group_item.setText(4, temp_str)
+                group_item.setText(5, binning)
+
+                current_group = group_key
+
+            # Add file node
+            file_item = QTreeWidgetItem(group_item)
+            file_item.setText(0, filename)
+            file_item.setText(1, imagetyp or 'N/A')
+            file_item.setText(2, filt or 'N/A')
+            file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
+            file_item.setText(4, f"{actual_temp:.1f}°C" if actual_temp is not None else 'N/A')
+            binning_str = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
+            file_item.setText(5, binning_str)
+            file_item.setText(6, date_loc or 'N/A')
+            file_item.setText(7, telescop or 'N/A')
+            file_item.setText(8, instrume or 'N/A')
+
+            color = self.get_item_color(imagetyp)
+            if color:
+                for col in range(9):
+                    file_item.setBackground(col, QBrush(color))
+    
+    
+    def _build_bias_from_data(self, calib_root, bias_data: list) -> None:
+        """Build bias tree from pre-loaded data."""
+        bias_root = QTreeWidgetItem(calib_root)
+        bias_root.setText(0, f"Bias Frames ({len(bias_data)} files)")
+        bias_root.setFlags(bias_root.flags() | Qt.ItemFlag.ItemIsAutoTristate)
+
+        current_group = None
+        current_date = None
+        group_item = None
+        date_item = None
+
+        for row in bias_data:
+            temp, xbin, ybin, date_loc, filename, imagetyp, exposure, telescop, instrume, actual_temp, filt = row
+
+            # Create group node if new
+            group_key = (temp, xbin, ybin)
+            if group_key != current_group:
+                temp_str = f"{int(temp)}C" if temp is not None else "0C"
+                binning = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else "Bin1x1"
+
+                group_item = QTreeWidgetItem(bias_root)
+                group_item.setText(0, f"{temp_str}_{binning}")
+                group_item.setText(4, temp_str)
+                group_item.setText(5, binning)
+
+                current_group = group_key
+                current_date = None
+
+            # Create date node if new
+            if date_loc != current_date:
+                date_item = QTreeWidgetItem(group_item)
+                date_item.setText(0, date_loc or 'No Date')
+                current_date = date_loc
+
+            # Add file node
+            file_item = QTreeWidgetItem(date_item)
+            file_item.setText(0, filename)
+            file_item.setText(1, imagetyp or 'N/A')
+            file_item.setText(2, filt or 'N/A')
+            file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
+            file_item.setText(4, f"{actual_temp:.1f}°C" if actual_temp is not None else 'N/A')
+            binning_str = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
+            file_item.setText(5, binning_str)
+            file_item.setText(6, date_loc or 'N/A')
+            file_item.setText(7, telescop or 'N/A')
+            file_item.setText(8, instrume or 'N/A')
+
+            color = self.get_item_color(imagetyp)
+            if color:
+                for col in range(9):
+                    file_item.setBackground(col, QBrush(color))
