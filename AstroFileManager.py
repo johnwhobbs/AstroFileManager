@@ -27,6 +27,7 @@ from ui.maintenance_tab import MaintenanceTab
 from ui.sessions_tab import SessionsTab
 from ui.analytics_tab import AnalyticsTab
 from ui.view_catalog_tab import ViewCatalogTab
+from ui.projects_tab import ProjectsTab
 
 
 class XISFCatalogGUI(QMainWindow):
@@ -80,12 +81,14 @@ class XISFCatalogGUI(QMainWindow):
             reimport_callback=self.import_tab.start_import
         )
         self.analytics_tab = AnalyticsTab(self.db_path, self.settings)
+        self.projects_tab = ProjectsTab(self.db_path, self.settings)
 
         # Set cross-tab dependencies after all tabs are created
         self.import_tab.clear_db_btn = self.maintenance_tab.clear_db_btn
         self.clear_db_btn = self.maintenance_tab.clear_db_btn  # For backward compatibility
 
         tabs.addTab(self.view_tab, "View Catalog")
+        tabs.addTab(self.projects_tab, "Projects")
         tabs.addTab(self.sessions_tab, "Sessions")
         tabs.addTab(self.analytics_tab, "Analytics")
         tabs.addTab(self.import_tab, "Import Files")
