@@ -38,10 +38,10 @@ BROADBAND_TEMPLATE = ProjectTemplate(
     name="Broadband (LRGB)",
     description="Broadband LRGB imaging: 270 Luminance, 270 each RGB",
     filter_goals=[
-        FilterGoal("L", 270),
-        FilterGoal("R", 270),
-        FilterGoal("G", 270),
-        FilterGoal("B", 270),
+        FilterGoal("Luminance", 270),
+        FilterGoal("Red", 270),
+        FilterGoal("Green", 270),
+        FilterGoal("Blue", 270),
     ]
 )
 
