@@ -25,7 +25,7 @@ class DatabaseManager:
     @contextmanager
     def get_connection(self):
         """
-        Context manager for database connections.
+        Context manager for database connections with performance optimizations.
 
         Yields:
             sqlite3.Connection: Database connection
@@ -36,6 +36,14 @@ class DatabaseManager:
                 cursor.execute(...)
         """
         conn = sqlite3.connect(self.db_path)
+
+        # Apply performance optimizations
+        cursor = conn.cursor()
+        cursor.execute('PRAGMA journal_mode=WAL')  # Write-Ahead Logging
+        cursor.execute('PRAGMA cache_size=-64000')  # 64MB cache
+        cursor.execute('PRAGMA mmap_size=268435456')  # 256MB memory-mapped I/O
+        cursor.execute('PRAGMA synchronous=NORMAL')  # Faster writes, still safe with WAL
+
         try:
             yield conn
             conn.commit()
