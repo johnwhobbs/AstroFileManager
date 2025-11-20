@@ -73,7 +73,7 @@ class ProjectsTab(QWidget):
         layout.addLayout(toolbar)
 
         # Splitter for projects list and details
-        splitter = QSplitter(Qt.Orientation.Vertical)
+        self.projects_splitter = QSplitter(Qt.Orientation.Vertical)
 
         # Projects table
         self.projects_table = QTableWidget()
@@ -91,7 +91,7 @@ class ProjectsTab(QWidget):
             QTableWidget.SelectionMode.SingleSelection
         )
         self.projects_table.itemSelectionChanged.connect(self.on_project_selected)
-        splitter.addWidget(self.projects_table)
+        self.projects_splitter.addWidget(self.projects_table)
 
         # Project details panel
         details_panel = QWidget()
@@ -142,9 +142,16 @@ class ProjectsTab(QWidget):
         details_layout.addLayout(action_buttons)
 
         details_layout.addStretch()
-        splitter.addWidget(details_panel)
+        self.projects_splitter.addWidget(details_panel)
 
-        layout.addWidget(splitter)
+        # Set initial proportions: 70% for projects table, 30% for details
+        # Use 400:200 ratio to give more space to the projects list
+        self.projects_splitter.setSizes([400, 200])
+
+        # Connect splitter movement to save settings
+        self.projects_splitter.splitterMoved.connect(self.save_splitter_state)
+
+        layout.addWidget(self.projects_splitter)
 
     def refresh_projects(self):
         """Refresh the projects list."""
@@ -536,3 +543,16 @@ class ProjectsTab(QWidget):
             QMessageBox.critical(
                 self, "Import Failed", f"Failed to import quality data:\n{str(e)}"
             )
+
+    def save_splitter_state(self) -> None:
+        """Save the splitter sizes to settings."""
+        sizes = self.projects_splitter.sizes()
+        self.settings.setValue('projects_splitter_sizes', sizes)
+
+    def restore_splitter_state(self) -> None:
+        """Restore the splitter sizes from settings."""
+        saved_sizes = self.settings.value('projects_splitter_sizes')
+        if saved_sizes:
+            # Convert to integers (QSettings may return strings)
+            sizes = [int(s) for s in saved_sizes]
+            self.projects_splitter.setSizes(sizes)
