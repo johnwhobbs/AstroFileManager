@@ -285,11 +285,14 @@ class ProjectsTab(QWidget):
 
             # Total progress bar
             total_progress = QProgressBar()
-            total_progress.setMaximum(goal.target_count)
-            total_progress.setValue(goal.total_count)
+            # Use max of 100 to avoid issues when value exceeds target
+            total_progress.setMinimum(0)
+            total_progress.setMaximum(100)
+            # Calculate percentage, capped at 100%
+            total_percentage = min(100, (goal.total_count * 100 // goal.target_count) if goal.target_count > 0 else 0)
+            total_progress.setValue(total_percentage)
             total_progress.setFormat(
-                f"Total: {goal.total_count}/{goal.target_count} frames "
-                f"({goal.total_count * 100 // goal.target_count if goal.target_count > 0 else 0}%)"
+                f"Total: {goal.total_count}/{goal.target_count} frames ({total_percentage}%)"
             )
             total_progress.setTextVisible(True)
             # Style total progress bar with gray/blue color
@@ -305,11 +308,14 @@ class ProjectsTab(QWidget):
 
             # Approved progress bar
             approved_progress = QProgressBar()
-            approved_progress.setMaximum(goal.target_count)
-            approved_progress.setValue(goal.approved_count)
+            # Use max of 100 to avoid issues when value exceeds target
+            approved_progress.setMinimum(0)
+            approved_progress.setMaximum(100)
+            # Calculate percentage, capped at 100%
+            approved_percentage = min(100, (goal.approved_count * 100 // goal.target_count) if goal.target_count > 0 else 0)
+            approved_progress.setValue(approved_percentage)
             approved_progress.setFormat(
-                f"Approved: {goal.approved_count}/{goal.target_count} frames "
-                f"({goal.approved_count * 100 // goal.target_count if goal.target_count > 0 else 0}%)"
+                f"Approved: {goal.approved_count}/{goal.target_count} frames ({approved_percentage}%)"
             )
             approved_progress.setTextVisible(True)
 
