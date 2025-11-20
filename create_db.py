@@ -37,6 +37,16 @@ def create_database(db_path='xisf_catalog.db'):
             xbinning INTEGER,
             ybinning INTEGER,
             date_loc TEXT,
+            project_id INTEGER,
+            session_assignment_id INTEGER,
+            fwhm REAL,
+            eccentricity REAL,
+            snr REAL,
+            star_count INTEGER,
+            background_level REAL,
+            approval_status TEXT DEFAULT 'not_graded',
+            grading_date TEXT,
+            grading_notes TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -48,6 +58,10 @@ def create_database(db_path='xisf_catalog.db'):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_filter ON xisf_files(filter)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_imagetyp ON xisf_files(imagetyp)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_file_hash ON xisf_files(file_hash)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_project_id ON xisf_files(project_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_session_assignment_id ON xisf_files(session_assignment_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_approval_status ON xisf_files(approval_status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_fwhm ON xisf_files(fwhm)')
 
     # Create composite indexes for optimized queries
     cursor.execute('''
@@ -74,6 +88,57 @@ def create_database(db_path='xisf_catalog.db'):
         WHERE imagetyp LIKE '%Bias%'
     ''')
 
+    # Create projects table for imaging campaigns
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            object_name TEXT NOT NULL,
+            description TEXT,
+            year INTEGER,
+            start_date TEXT,
+            status TEXT DEFAULT 'active',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # Create project_filter_goals table for target frame counts per filter
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS project_filter_goals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            filter TEXT NOT NULL,
+            target_count INTEGER NOT NULL,
+            total_count INTEGER DEFAULT 0,
+            approved_count INTEGER DEFAULT 0,
+            last_updated TEXT,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            UNIQUE(project_id, filter)
+        )
+    ''')
+
+    # Create project_sessions table to link sessions to projects
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS project_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            session_id TEXT NOT NULL,
+            date_loc TEXT NOT NULL,
+            object_name TEXT,
+            filter TEXT,
+            frame_count INTEGER DEFAULT 0,
+            approved_count INTEGER DEFAULT 0,
+            rejected_count INTEGER DEFAULT 0,
+            graded INTEGER DEFAULT 0,
+            avg_fwhm REAL,
+            notes TEXT,
+            assigned_date TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            UNIQUE(project_id, session_id)
+        )
+    ''')
+
     # Performance optimizations
     # Enable WAL mode for better concurrency (allows reads during writes)
     cursor.execute('PRAGMA journal_mode=WAL')
@@ -89,22 +154,39 @@ def create_database(db_path='xisf_catalog.db'):
     print(f"Database created successfully: {db_path}")
     print("\nTable schema:")
     print("-" * 60)
-    print("id (INTEGER PRIMARY KEY) - Unique identifier")
-    print("file_hash (TEXT UNIQUE) - SHA256 hash of the file")
-    print("filepath (TEXT) - Full path to the file")
-    print("filename (TEXT) - Filename only")
-    print("telescop (TEXT) - Telescope name")
-    print("instrume (TEXT) - Instrument name")
-    print("object (TEXT) - Object name")
-    print("filter (TEXT) - Filter name")
-    print("imagetyp (TEXT) - Image type")
-    print("exposure (REAL) - Exposure time in seconds")
-    print("ccd_temp (REAL) - CCD temperature")
-    print("xbinning (INTEGER) - X binning")
-    print("ybinning (INTEGER) - Y binning")
-    print("date_loc (TEXT) - Local date/time")
-    print("created_at (TIMESTAMP) - Record creation timestamp")
-    print("updated_at (TIMESTAMP) - Record update timestamp")
+    print("xisf_files table:")
+    print("  id (INTEGER PRIMARY KEY) - Unique identifier")
+    print("  file_hash (TEXT UNIQUE) - SHA256 hash of the file")
+    print("  filepath (TEXT) - Full path to the file")
+    print("  filename (TEXT) - Filename only")
+    print("  telescop (TEXT) - Telescope name")
+    print("  instrume (TEXT) - Instrument name")
+    print("  object (TEXT) - Object name")
+    print("  filter (TEXT) - Filter name")
+    print("  imagetyp (TEXT) - Image type")
+    print("  exposure (REAL) - Exposure time in seconds")
+    print("  ccd_temp (REAL) - CCD temperature")
+    print("  xbinning (INTEGER) - X binning")
+    print("  ybinning (INTEGER) - Y binning")
+    print("  date_loc (TEXT) - Local date/time")
+    print("  project_id (INTEGER) - Project assignment")
+    print("  session_assignment_id (INTEGER) - Session assignment")
+    print("  fwhm (REAL) - Full Width Half Maximum")
+    print("  eccentricity (REAL) - Star eccentricity")
+    print("  snr (REAL) - Signal-to-noise ratio")
+    print("  star_count (INTEGER) - Number of stars")
+    print("  background_level (REAL) - Background level")
+    print("  approval_status (TEXT) - Grading status (not_graded/approved/rejected)")
+    print("  grading_date (TEXT) - Date graded")
+    print("  grading_notes (TEXT) - Grading notes")
+    print("  created_at (TIMESTAMP) - Record creation timestamp")
+    print("  updated_at (TIMESTAMP) - Record update timestamp")
+    print("\nprojects table:")
+    print("  Tracks imaging campaigns (e.g., 'M31 Narrowband 2024')")
+    print("\nproject_filter_goals table:")
+    print("  Tracks target frame counts per filter for each project")
+    print("\nproject_sessions table:")
+    print("  Links imaging sessions to projects")
     
     return conn
 

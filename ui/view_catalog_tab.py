@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 # Import CSV exporter and background workers
 from import_export.csv_exporter import CSVExporter
 from ui.background_workers import CatalogLoaderWorker
+from ui.assign_session_dialog import AssignSessionDialog
 
 
 class ViewCatalogTab(QWidget):
@@ -219,6 +220,9 @@ class ViewCatalogTab(QWidget):
         # Only show file operations if this is a file item (has no children and is not a group node)
         is_file = item.childCount() == 0 and '(' not in item.text(0)
 
+        # Check if this is a date node (session) - has children and date_loc in column 6
+        is_session = item.childCount() > 0 and item.text(6) and '(' in item.text(0)
+
         if is_file:
             show_path_action = menu.addAction("Show Full Path")
             copy_path_action = menu.addAction("Copy Path to Clipboard")
@@ -243,8 +247,20 @@ class ViewCatalogTab(QWidget):
                 self.delete_file_from_database(item)
             elif action == reimport_action:
                 self.reimport_file(item)
+        elif is_session:
+            # Session node - offer to assign to project
+            assign_action = menu.addAction("Assign to Project")
+            menu.addSeparator()
+            export_action = menu.addAction("Export This Group to CSV")
+
+            action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
+
+            if action == assign_action:
+                self.assign_session_to_project(item)
+            elif action == export_action:
+                self.export_tree_group_to_csv(item)
         else:
-            # For group nodes, offer export
+            # For other group nodes, offer export
             export_action = menu.addAction("Export This Group to CSV")
             action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
 
@@ -395,6 +411,60 @@ Imported: {result[11] or 'N/A'}
                 QMessageBox.warning(self, 'Not Found', f'File not found in database: {filename}')
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to re-import file: {e}')
+
+    def assign_session_to_project(self, item: QTreeWidgetItem) -> None:
+        """
+        Assign a session (date node) to a project.
+
+        Args:
+            item: Date node tree item
+        """
+        try:
+            # Get date_loc from column 6
+            date_loc = item.text(6)
+            if not date_loc:
+                QMessageBox.warning(self, 'Error', 'Could not determine session date')
+                return
+
+            # Get parent filter node to extract object and filter
+            parent = item.parent()
+            if not parent:
+                QMessageBox.warning(self, 'Error', 'Could not determine session details')
+                return
+
+            # Get object and filter from parent node's data
+            parent_data = parent.data(0, Qt.ItemDataRole.UserRole)
+            if not parent_data:
+                QMessageBox.warning(self, 'Error', 'Could not determine session details')
+                return
+
+            object_name = parent_data.get('object')
+            filter_name = parent_data.get('filter')
+
+            if not object_name:
+                QMessageBox.warning(self, 'Error', 'Could not determine object name')
+                return
+
+            # Count frames in this session
+            frame_count = item.childCount()
+
+            # Open assign session dialog
+            dialog = AssignSessionDialog(
+                db_path=self.db_path,
+                date_loc=date_loc,
+                object_name=object_name,
+                filter_name=filter_name,
+                frame_count=frame_count,
+                parent=self
+            )
+
+            if dialog.exec() == dialog.DialogCode.Accepted:
+                self.status_callback(f'Session assigned to project')
+                # Optionally refresh the view to show assignment status
+                # self.refresh_catalog_view()
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to assign session: {e}')
 
     def export_tree_group_to_csv(self, item: QTreeWidgetItem) -> None:
         """Export a tree group (and its children) to CSV."""
