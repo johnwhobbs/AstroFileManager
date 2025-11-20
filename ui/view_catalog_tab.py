@@ -572,9 +572,24 @@ Imported: {result[11] or 'N/A'}
         """Refresh the catalog view using background thread (non-blocking)."""
         try:
             # Cancel any existing worker
-            if self.loader_worker and self.loader_worker.isRunning():
-                self.loader_worker.terminate()
-                self.loader_worker.wait()
+            if self.loader_worker:
+                if self.loader_worker.isRunning():
+                    self.loader_worker.terminate()
+                    self.loader_worker.wait()
+
+                # Disconnect all signals from old worker to prevent stale data
+                try:
+                    self.loader_worker.progress_updated.disconnect()
+                    self.loader_worker.data_ready.disconnect()
+                    self.loader_worker.error_occurred.disconnect()
+                    self.loader_worker.finished.disconnect()
+                except TypeError:
+                    # Signals were not connected or already disconnected
+                    pass
+
+                # Clean up old worker
+                self.loader_worker.deleteLater()
+                self.loader_worker = None
 
             # Update statistics synchronously (fast operation)
             conn = sqlite3.connect(self.db_path)
