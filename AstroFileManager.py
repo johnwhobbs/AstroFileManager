@@ -119,6 +119,9 @@ class XISFCatalogGUI(QMainWindow):
 
         # Save sessions tab splitter state
         self.sessions_tab.save_splitter_state()
+
+        # Save projects tab splitter state
+        self.projects_tab.save_splitter_state()
     
     def restore_settings(self) -> None:
         """Restore window size and column widths"""
@@ -141,6 +144,9 @@ class XISFCatalogGUI(QMainWindow):
 
         # Restore sessions tab splitter state
         self.sessions_tab.restore_splitter_state()
+
+        # Restore projects tab splitter state
+        self.projects_tab.restore_splitter_state()
 
         # Connect signals after restoring settings to avoid triggering saves during restore
         self.connect_signals()
