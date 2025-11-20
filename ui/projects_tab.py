@@ -292,6 +292,15 @@ class ProjectsTab(QWidget):
                 f"({goal.total_count * 100 // goal.target_count if goal.target_count > 0 else 0}%)"
             )
             total_progress.setTextVisible(True)
+            # Style total progress bar with gray/blue color
+            total_progress.setStyleSheet("""
+                QProgressBar {
+                    text-align: center;
+                }
+                QProgressBar::chunk {
+                    background-color: #5bc0de;
+                }
+            """)
             self.goals_layout.addWidget(total_progress)
 
             # Approved progress bar
@@ -307,11 +316,21 @@ class ProjectsTab(QWidget):
             # Color code: green if complete, blue if in progress
             if goal.approved_count >= goal.target_count:
                 approved_progress.setStyleSheet("""
-                    QProgressBar::chunk { background-color: #5cb85c; }
+                    QProgressBar {
+                        text-align: center;
+                    }
+                    QProgressBar::chunk {
+                        background-color: #5cb85c;
+                    }
                 """)
             else:
                 approved_progress.setStyleSheet("""
-                    QProgressBar::chunk { background-color: #5bc0de; }
+                    QProgressBar {
+                        text-align: center;
+                    }
+                    QProgressBar::chunk {
+                        background-color: #5bc0de;
+                    }
                 """)
 
             self.goals_layout.addWidget(approved_progress)
