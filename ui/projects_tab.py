@@ -103,22 +103,32 @@ class ProjectsTab(QWidget):
         self.info_label.setWordWrap(True)
         details_layout.addWidget(self.info_label)
 
+        # Create a splitter for goals and next steps sections
+        self.details_content_splitter = QSplitter(Qt.Orientation.Vertical)
+
         # Filter goals progress
         self.goals_group = QGroupBox("Filter Goals Progress")
         self.goals_layout = QVBoxLayout()
         self.goals_group.setLayout(self.goals_layout)
         self.goals_group.setVisible(False)
-        details_layout.addWidget(self.goals_group)
+        self.details_content_splitter.addWidget(self.goals_group)
 
         # Next steps / recommendations
         self.next_steps_group = QGroupBox("Next Steps")
         next_steps_layout = QVBoxLayout()
         self.next_steps_text = QTextBrowser()
-        self.next_steps_text.setMaximumHeight(100)
         next_steps_layout.addWidget(self.next_steps_text)
         self.next_steps_group.setLayout(next_steps_layout)
         self.next_steps_group.setVisible(False)
-        details_layout.addWidget(self.next_steps_group)
+        self.details_content_splitter.addWidget(self.next_steps_group)
+
+        # Set initial proportions for goals and next steps (200:150 ratio)
+        self.details_content_splitter.setSizes([200, 150])
+
+        # Connect splitter movement to save settings
+        self.details_content_splitter.splitterMoved.connect(self.save_details_content_splitter_state)
+
+        details_layout.addWidget(self.details_content_splitter)
 
         # Action buttons
         action_buttons = QHBoxLayout()
@@ -294,11 +304,16 @@ class ProjectsTab(QWidget):
         goals_table.setColumnCount(4)
         goals_table.setHorizontalHeaderLabels(["Filter", "Total", "Approved", "Progress"])
 
-        # Configure table appearance
-        goals_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        goals_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        goals_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        goals_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        # Configure table appearance - make columns resizable
+        goals_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        goals_table.horizontalHeader().setStretchLastSection(False)
+
+        # Set initial column widths
+        goals_table.setColumnWidth(0, 80)   # Filter
+        goals_table.setColumnWidth(1, 120)  # Total
+        goals_table.setColumnWidth(2, 120)  # Approved
+        goals_table.setColumnWidth(3, 80)   # Progress
+
         goals_table.verticalHeader().setVisible(False)
         goals_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         goals_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -557,6 +572,9 @@ class ProjectsTab(QWidget):
         sizes = self.projects_splitter.sizes()
         self.settings.setValue('projects_splitter_sizes', sizes)
 
+        # Also save the details content splitter state
+        self.save_details_content_splitter_state()
+
     def restore_splitter_state(self) -> None:
         """Restore the splitter sizes from settings."""
         saved_sizes = self.settings.value('projects_splitter_sizes')
@@ -564,3 +582,19 @@ class ProjectsTab(QWidget):
             # Convert to integers (QSettings may return strings)
             sizes = [int(s) for s in saved_sizes]
             self.projects_splitter.setSizes(sizes)
+
+        # Also restore the details content splitter state
+        self.restore_details_content_splitter_state()
+
+    def save_details_content_splitter_state(self) -> None:
+        """Save the details content splitter sizes to settings."""
+        sizes = self.details_content_splitter.sizes()
+        self.settings.setValue('projects_details_content_splitter_sizes', sizes)
+
+    def restore_details_content_splitter_state(self) -> None:
+        """Restore the details content splitter sizes from settings."""
+        saved_sizes = self.settings.value('projects_details_content_splitter_sizes')
+        if saved_sizes:
+            # Convert to integers (QSettings may return strings)
+            sizes = [int(s) for s in saved_sizes]
+            self.details_content_splitter.setSizes(sizes)
