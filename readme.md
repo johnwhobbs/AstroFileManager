@@ -377,14 +377,24 @@ The Projects tab provides project-based workflow management for tracking imaging
 
 **Project Progress Tracking:**
 
-Each project displays:
-- **Total Frames**: Count of all frames assigned to the project
-- **Approved Frames**: Count of frames that passed quality grading
-- Progress bars for each filter showing both total and approved counts
-- Color-coded progress indicators:
-  - Green: Goal met (approved frames ≥ target)
-  - Blue: Frames captured, awaiting grading or approval
-  - Gray: No frames captured yet
+Each project displays progress in a compact, space-efficient table format:
+
+**Filter Goals Table:**
+- **Filter**: Filter name (Ha, OIII, SII, L, R, G, B, etc.)
+- **Total**: Total frames captured vs target (e.g., "100/100 (100%)")
+- **Approved**: Approved frames vs target (e.g., "95/100 (95%)")
+- **Progress**: Color-coded indicator showing approval progress
+  - **● Green (100%)**: Goal met (approved frames ≥ target)
+  - **● Light Green (75-99%)**: Excellent progress
+  - **● Orange (50-74%)**: Moderate progress
+  - **● Dark Orange (25-49%)**: Low progress
+  - **● Red (0-24%)**: Very low progress
+
+**Customization Features:**
+- Resizable table columns to fit your data
+- Adjustable splitter between Filter Goals and Next Steps sections
+- All resize preferences saved and restored across sessions
+- Compact format saves ~70% vertical space compared to progress bars
 
 **Assigning Sessions to Projects:**
 
@@ -416,9 +426,19 @@ After grading frames in PixInsight SubFrame Selector:
 The import automatically:
 - Matches frames by filename
 - Updates quality metrics (FWHM, eccentricity, SNR, stars, background)
-- Sets approval status (approved/rejected) based on Weight column
+- Sets approval status (approved/rejected) from "Approved" column
+- Handles multiple approval formats:
+  - Boolean text: True/False, Yes/No, 1/0
+  - Numeric weight: Values > 0 = approved, 0 = rejected
+  - Works with any column name (Approved, Weight, etc.)
 - Recalculates project progress with approved counts
 - Updates session grading status
+
+**Supported CSV Formats:**
+- Standard PixInsight SubFrame Selector CSV with "Approved" column
+- Custom exports with True/False approval values
+- Weight-based columns with numeric values
+- Mixed format CSVs with various column names
 
 **Next Steps Recommendations:**
 
@@ -866,6 +886,35 @@ This project is provided as-is for personal use in managing astrophotography fil
 Feel free to submit issues or pull requests for improvements.
 
 ## Version History
+
+**v2.3.1** - Projects Tab: UI Improvements & CSV Import Enhancements
+- **Projects Tab UI Overhaul**: Space-efficient design improvements
+  - Replaced bulky progress bars with compact table format
+  - Filter Goals displayed in tabular layout (Filter | Total | Approved | Progress)
+  - Color-coded progress indicators with percentage bullets (● 100%)
+  - ~70% vertical space savings while showing same data
+  - Better space allocation: projects list gets 67% of screen, details get 33%
+- **Resizable Components**: Full layout customization
+  - Resizable table columns for Filter Goals table
+  - Adjustable splitter between Filter Goals and Next Steps sections
+  - Adjustable splitter between projects list and details panel
+  - All resize preferences saved and restored across sessions
+- **CSV Import Improvements**: Robust approval value handling
+  - Fixed issue where True/False approval values were incorrectly processed
+  - Unified approval logic works regardless of column name
+  - Handles boolean text (True/False, Yes/No, 1/0) and numeric weights
+  - Changed default column from "Weight" to "Approved" for standard format
+  - Supports mixed CSV formats with flexible column detection
+- **Tab Switching Fix**: Preserved project selection across tab switches
+  - Selected project and details now persist when switching tabs
+  - Fixed data clearing issue on tab navigation
+- **Background Worker Cleanup**: Enhanced signal management
+  - Properly disconnect worker signals to prevent stale data issues
+  - Fixed race conditions in Sessions and Catalog tabs
+  - Improved memory management for background threads
+- **Code Cleanup**: Removed development artifacts
+  - Deleted migration scripts, debug tools, and test data
+  - Cleaner repository with only production code
 
 **v2.3.0** - Projects Tab: Project-Based Workflow Management
 - **Projects Tab**: New comprehensive project-based workflow system
