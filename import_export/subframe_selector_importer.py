@@ -161,20 +161,21 @@ class SubFrameSelectorImporter:
         if approval_column in col_map:
             approval_value = get_value(approval_column)
             if approval_value:
-                # Handle different formats
-                if approval_column == 'Approved':
-                    # Boolean column
-                    approval_status = 'approved' if approval_value.lower() in ['true', '1', 'yes'] else 'rejected'
-                elif approval_column == 'Weight':
-                    # Weight column (0 = rejected, >0 = approved)
+                approval_lower = approval_value.lower()
+
+                # First check if it's a boolean text value (True/False, Yes/No)
+                if approval_lower in ['true', '1', 'yes', 'approved']:
+                    approval_status = 'approved'
+                elif approval_lower in ['false', '0', 'no', 'rejected']:
+                    approval_status = 'rejected'
+                # Then try numeric weight (for Weight column)
+                else:
                     try:
                         weight = float(approval_value)
                         approval_status = 'approved' if weight > 0 else 'rejected'
                     except ValueError:
+                        # Not a boolean text and not a number, mark as not graded
                         approval_status = 'not_graded'
-                else:
-                    # Generic approval column
-                    approval_status = 'approved' if approval_value.lower() in ['true', '1', 'yes', 'approved'] else 'rejected'
 
         # Extract quality metrics
         frame_data = {
