@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QFileDialog, QDialog
 )
 from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtGui import QColor, QBrush
 from typing import Optional
 
 from core.project_manager import ProjectManager, Project, FilterGoalProgress
@@ -34,6 +35,7 @@ class ProjectsTab(QWidget):
         self.settings = settings
         self.project_manager = ProjectManager(db_path)
         self.selected_project_id: Optional[int] = None
+        self.current_goals_table: Optional[QTableWidget] = None  # Keep reference for signal connection
 
         self.init_ui()
         self.refresh_projects()
@@ -73,7 +75,7 @@ class ProjectsTab(QWidget):
         layout.addLayout(toolbar)
 
         # Splitter for projects list and details
-        splitter = QSplitter(Qt.Orientation.Vertical)
+        self.projects_splitter = QSplitter(Qt.Orientation.Vertical)
 
         # Projects table
         self.projects_table = QTableWidget()
@@ -91,7 +93,7 @@ class ProjectsTab(QWidget):
             QTableWidget.SelectionMode.SingleSelection
         )
         self.projects_table.itemSelectionChanged.connect(self.on_project_selected)
-        splitter.addWidget(self.projects_table)
+        self.projects_splitter.addWidget(self.projects_table)
 
         # Project details panel
         details_panel = QWidget()
@@ -102,22 +104,32 @@ class ProjectsTab(QWidget):
         self.info_label.setWordWrap(True)
         details_layout.addWidget(self.info_label)
 
+        # Create a splitter for goals and next steps sections
+        self.details_content_splitter = QSplitter(Qt.Orientation.Vertical)
+
         # Filter goals progress
         self.goals_group = QGroupBox("Filter Goals Progress")
         self.goals_layout = QVBoxLayout()
         self.goals_group.setLayout(self.goals_layout)
         self.goals_group.setVisible(False)
-        details_layout.addWidget(self.goals_group)
+        self.details_content_splitter.addWidget(self.goals_group)
 
         # Next steps / recommendations
         self.next_steps_group = QGroupBox("Next Steps")
         next_steps_layout = QVBoxLayout()
         self.next_steps_text = QTextBrowser()
-        self.next_steps_text.setMaximumHeight(100)
         next_steps_layout.addWidget(self.next_steps_text)
         self.next_steps_group.setLayout(next_steps_layout)
         self.next_steps_group.setVisible(False)
-        details_layout.addWidget(self.next_steps_group)
+        self.details_content_splitter.addWidget(self.next_steps_group)
+
+        # Set initial proportions for goals and next steps (200:150 ratio)
+        self.details_content_splitter.setSizes([200, 150])
+
+        # Connect splitter movement to save settings
+        self.details_content_splitter.splitterMoved.connect(self.save_details_content_splitter_state)
+
+        details_layout.addWidget(self.details_content_splitter)
 
         # Action buttons
         action_buttons = QHBoxLayout()
@@ -142,12 +154,22 @@ class ProjectsTab(QWidget):
         details_layout.addLayout(action_buttons)
 
         details_layout.addStretch()
-        splitter.addWidget(details_panel)
+        self.projects_splitter.addWidget(details_panel)
 
-        layout.addWidget(splitter)
+        # Set initial proportions: 70% for projects table, 30% for details
+        # Use 400:200 ratio to give more space to the projects list
+        self.projects_splitter.setSizes([400, 200])
+
+        # Connect splitter movement to save settings
+        self.projects_splitter.splitterMoved.connect(self.save_splitter_state)
+
+        layout.addWidget(self.projects_splitter)
 
     def refresh_projects(self):
         """Refresh the projects list."""
+        # Save the currently selected project ID to restore after refresh
+        previously_selected_id = self.selected_project_id
+
         # Get status filter
         status_text = self.status_filter.currentText()
         status = None if status_text == "All" else status_text.lower()
@@ -155,9 +177,13 @@ class ProjectsTab(QWidget):
         # Load projects
         projects = self.project_manager.list_projects(status=status)
 
+        # Block signals to prevent on_project_selected from firing during update
+        self.projects_table.blockSignals(True)
+
         # Update table
         self.projects_table.setRowCount(len(projects))
 
+        row_to_select = None
         for row, project in enumerate(projects):
             # Project name
             name_item = QTableWidgetItem(project.name)
@@ -179,6 +205,13 @@ class ProjectsTab(QWidget):
             created = project.created_at[:10] if project.created_at else ""
             self.projects_table.setItem(row, 4, QTableWidgetItem(created))
 
+            # Check if this is the previously selected project
+            if previously_selected_id is not None and project.id == previously_selected_id:
+                row_to_select = row
+
+        # Re-enable signals
+        self.projects_table.blockSignals(False)
+
         # Update unassigned sessions warning
         unassigned = self.project_manager.get_unassigned_sessions()
         if unassigned:
@@ -188,8 +221,13 @@ class ProjectsTab(QWidget):
         else:
             self.unassigned_label.setText("")
 
-        # Clear selection
-        self.clear_project_details()
+        # Restore selection if the previously selected project is still in the list
+        if row_to_select is not None:
+            self.projects_table.selectRow(row_to_select)
+            self.show_project_details(previously_selected_id)
+        else:
+            # Clear selection if previously selected project is no longer visible
+            self.clear_project_details()
 
     def on_project_selected(self):
         """Handle project selection."""
@@ -244,14 +282,16 @@ class ProjectsTab(QWidget):
 
     def display_filter_goals(self, goals: list[FilterGoalProgress]):
         """
-        Display filter goals with progress bars.
+        Display filter goals in a compact table format.
 
         Args:
             goals: List of FilterGoalProgress objects
         """
         # Clear existing widgets
         for i in reversed(range(self.goals_layout.count())):
-            self.goals_layout.itemAt(i).widget().setParent(None)
+            widget = self.goals_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
 
         if not goals:
             self.goals_group.setVisible(False)
@@ -259,46 +299,89 @@ class ProjectsTab(QWidget):
 
         self.goals_group.setVisible(True)
 
-        for goal in goals:
-            # Filter label
-            filter_label = QLabel(f"<b>{goal.filter}</b>")
-            self.goals_layout.addWidget(filter_label)
+        # Create table
+        goals_table = QTableWidget()
+        goals_table.setRowCount(len(goals))
+        goals_table.setColumnCount(4)
+        goals_table.setHorizontalHeaderLabels(["Filter", "Total", "Approved", "Progress"])
 
-            # Total progress bar
-            total_progress = QProgressBar()
-            total_progress.setMaximum(goal.target_count)
-            total_progress.setValue(goal.total_count)
-            total_progress.setFormat(
-                f"Total: {goal.total_count}/{goal.target_count} frames "
-                f"({goal.total_count * 100 // goal.target_count if goal.target_count > 0 else 0}%)"
-            )
-            total_progress.setTextVisible(True)
-            self.goals_layout.addWidget(total_progress)
+        # Configure table appearance - make columns resizable
+        goals_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        goals_table.horizontalHeader().setStretchLastSection(False)
 
-            # Approved progress bar
-            approved_progress = QProgressBar()
-            approved_progress.setMaximum(goal.target_count)
-            approved_progress.setValue(goal.approved_count)
-            approved_progress.setFormat(
-                f"Approved: {goal.approved_count}/{goal.target_count} frames "
-                f"({goal.approved_count * 100 // goal.target_count if goal.target_count > 0 else 0}%)"
-            )
-            approved_progress.setTextVisible(True)
-
-            # Color code: green if complete, blue if in progress
-            if goal.approved_count >= goal.target_count:
-                approved_progress.setStyleSheet("""
-                    QProgressBar::chunk { background-color: #5cb85c; }
-                """)
+        # Restore saved column widths or use defaults
+        default_widths = [80, 120, 120, 80]  # Filter, Total, Approved, Progress
+        for col in range(4):
+            saved_width = self.settings.value(f'projects_goals_table_col_{col}')
+            if saved_width:
+                goals_table.setColumnWidth(col, int(saved_width))
             else:
-                approved_progress.setStyleSheet("""
-                    QProgressBar::chunk { background-color: #5bc0de; }
-                """)
+                goals_table.setColumnWidth(col, default_widths[col])
 
-            self.goals_layout.addWidget(approved_progress)
+        # Connect column resize to save settings
+        goals_table.horizontalHeader().sectionResized.connect(self.save_goals_table_column_widths)
 
-            # Spacing
-            self.goals_layout.addWidget(QLabel(""))
+        goals_table.verticalHeader().setVisible(False)
+        goals_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        goals_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        goals_table.setShowGrid(True)
+
+        # Set compact row height
+        goals_table.verticalHeader().setDefaultSectionSize(30)
+
+        # Populate table
+        for row, goal in enumerate(goals):
+            # Filter name
+            filter_item = QTableWidgetItem(goal.filter)
+            goals_table.setItem(row, 0, filter_item)
+
+            # Total frames with percentage
+            total_percentage = min(100, (goal.total_count * 100 // goal.target_count) if goal.target_count > 0 else 0)
+            total_item = QTableWidgetItem(f"{goal.total_count}/{goal.target_count} ({total_percentage}%)")
+            goals_table.setItem(row, 1, total_item)
+
+            # Approved frames with percentage
+            approved_percentage = min(100, (goal.approved_count * 100 // goal.target_count) if goal.target_count > 0 else 0)
+            approved_item = QTableWidgetItem(f"{goal.approved_count}/{goal.target_count} ({approved_percentage}%)")
+            goals_table.setItem(row, 2, approved_item)
+
+            # Progress indicator with colored circle
+            if approved_percentage >= 100:
+                # Complete - green circle
+                progress_text = "● 100%"
+                color = "#5cb85c"  # Green
+            elif approved_percentage >= 75:
+                # Good progress - light green
+                progress_text = f"● {approved_percentage}%"
+                color = "#92d050"  # Light green
+            elif approved_percentage >= 50:
+                # Moderate progress - yellow/orange
+                progress_text = f"● {approved_percentage}%"
+                color = "#f0ad4e"  # Orange
+            elif approved_percentage >= 25:
+                # Low progress - orange/red
+                progress_text = f"● {approved_percentage}%"
+                color = "#e67e22"  # Dark orange
+            else:
+                # Very low progress - red
+                progress_text = f"● {approved_percentage}%"
+                color = "#d9534f"  # Red
+
+            progress_item = QTableWidgetItem(progress_text)
+            progress_item.setForeground(QBrush(QColor(color)))
+            font = progress_item.font()
+            font.setBold(True)
+            progress_item.setFont(font)
+            goals_table.setItem(row, 3, progress_item)
+
+        # Set reasonable height based on content
+        table_height = goals_table.horizontalHeader().height() + (len(goals) * 30) + 10
+        goals_table.setMaximumHeight(table_height)
+        goals_table.setMinimumHeight(table_height)
+
+        # Store reference to keep signal connection alive
+        self.current_goals_table = goals_table
+        self.goals_layout.addWidget(goals_table)
 
     def display_next_steps(self, project: Project, goals: list[FilterGoalProgress]):
         """
@@ -462,7 +545,7 @@ class ProjectsTab(QWidget):
         try:
             # Import CSV
             importer = SubFrameSelectorImporter(self.db_path)
-            stats = importer.import_csv(csv_path, approval_column="Weight")
+            stats = importer.import_csv(csv_path, approval_column="Approved")
 
             # Show results
             result_msg = (
@@ -492,3 +575,42 @@ class ProjectsTab(QWidget):
             QMessageBox.critical(
                 self, "Import Failed", f"Failed to import quality data:\n{str(e)}"
             )
+
+    def save_splitter_state(self) -> None:
+        """Save the splitter sizes to settings."""
+        sizes = self.projects_splitter.sizes()
+        self.settings.setValue('projects_splitter_sizes', sizes)
+
+        # Also save the details content splitter state
+        self.save_details_content_splitter_state()
+
+    def restore_splitter_state(self) -> None:
+        """Restore the splitter sizes from settings."""
+        saved_sizes = self.settings.value('projects_splitter_sizes')
+        if saved_sizes:
+            # Convert to integers (QSettings may return strings)
+            sizes = [int(s) for s in saved_sizes]
+            self.projects_splitter.setSizes(sizes)
+
+        # Also restore the details content splitter state
+        self.restore_details_content_splitter_state()
+
+    def save_details_content_splitter_state(self) -> None:
+        """Save the details content splitter sizes to settings."""
+        sizes = self.details_content_splitter.sizes()
+        self.settings.setValue('projects_details_content_splitter_sizes', sizes)
+
+    def restore_details_content_splitter_state(self) -> None:
+        """Restore the details content splitter sizes from settings."""
+        saved_sizes = self.settings.value('projects_details_content_splitter_sizes')
+        if saved_sizes:
+            # Convert to integers (QSettings may return strings)
+            sizes = [int(s) for s in saved_sizes]
+            self.details_content_splitter.setSizes(sizes)
+
+    def save_goals_table_column_widths(self) -> None:
+        """Save the goals table column widths to settings."""
+        if self.current_goals_table:
+            for col in range(self.current_goals_table.columnCount()):
+                width = self.current_goals_table.columnWidth(col)
+                self.settings.setValue(f'projects_goals_table_col_{col}', width)
