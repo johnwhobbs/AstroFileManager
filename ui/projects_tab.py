@@ -545,7 +545,7 @@ class ProjectsTab(QWidget):
         try:
             # Import CSV
             importer = SubFrameSelectorImporter(self.db_path)
-            stats = importer.import_csv(csv_path, approval_column="Weight")
+            stats = importer.import_csv(csv_path, approval_column="Approved")
 
             # Show results
             result_msg = (
