@@ -51,6 +51,11 @@ class ProjectsTab(QWidget):
         self.new_project_btn.clicked.connect(self.create_new_project)
         toolbar.addWidget(self.new_project_btn)
 
+        self.edit_project_btn = QPushButton("Edit Project")
+        self.edit_project_btn.clicked.connect(self.edit_project)
+        self.edit_project_btn.setEnabled(False)  # Disabled until project is selected
+        toolbar.addWidget(self.edit_project_btn)
+
         self.import_quality_btn = QPushButton("Import Quality Data")
         self.import_quality_btn.clicked.connect(self.import_quality_data)
         toolbar.addWidget(self.import_quality_btn)
@@ -83,9 +88,23 @@ class ProjectsTab(QWidget):
         self.projects_table.setHorizontalHeaderLabels([
             "Project Name", "Object", "Year", "Status", "Created"
         ])
-        self.projects_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
-        )
+
+        # Make columns resizable
+        self.projects_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.projects_table.horizontalHeader().setStretchLastSection(True)
+
+        # Set initial column widths or restore from settings
+        default_widths = [200, 150, 80, 100, 100]  # Project Name, Object, Year, Status, Created
+        for col in range(5):
+            saved_width = self.settings.value(f'projects_table_col_{col}')
+            if saved_width:
+                self.projects_table.setColumnWidth(col, int(saved_width))
+            else:
+                self.projects_table.setColumnWidth(col, default_widths[col])
+
+        # Connect column resize to save settings
+        self.projects_table.horizontalHeader().sectionResized.connect(self.save_projects_table_column_widths)
+
         self.projects_table.setSelectionBehavior(
             QTableWidget.SelectionBehavior.SelectRows
         )
@@ -234,6 +253,7 @@ class ProjectsTab(QWidget):
         selected_rows = self.projects_table.selectedItems()
         if not selected_rows:
             self.clear_project_details()
+            self.edit_project_btn.setEnabled(False)
             return
 
         # Get project ID from first column
@@ -241,6 +261,7 @@ class ProjectsTab(QWidget):
             selected_rows[0].row(), 0
         ).data(Qt.ItemDataRole.UserRole)
 
+        self.edit_project_btn.setEnabled(True)
         self.show_project_details(project_id)
 
     def show_project_details(self, project_id: int):
@@ -460,6 +481,26 @@ class ProjectsTab(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.refresh_projects()
 
+    def edit_project(self):
+        """Open dialog to edit the selected project."""
+        if not self.selected_project_id:
+            return
+
+        # Get project details
+        project = self.project_manager.get_project(self.selected_project_id)
+        if not project:
+            QMessageBox.warning(self, "Error", "Project not found.")
+            return
+
+        # Create edit dialog
+        from ui.edit_project_dialog import EditProjectDialog
+        dialog = EditProjectDialog(self.db_path, project, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.refresh_projects()
+            # Restore selection to the edited project
+            if self.selected_project_id:
+                self.show_project_details(self.selected_project_id)
+
     def mark_project_complete(self):
         """Mark selected project as complete."""
         if not self.selected_project_id:
@@ -614,3 +655,9 @@ class ProjectsTab(QWidget):
             for col in range(self.current_goals_table.columnCount()):
                 width = self.current_goals_table.columnWidth(col)
                 self.settings.setValue(f'projects_goals_table_col_{col}', width)
+
+    def save_projects_table_column_widths(self) -> None:
+        """Save the projects table column widths to settings."""
+        for col in range(self.projects_table.columnCount()):
+            width = self.projects_table.columnWidth(col)
+            self.settings.setValue(f'projects_table_col_{col}', width)

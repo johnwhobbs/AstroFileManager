@@ -337,6 +337,105 @@ class ProjectManager:
         finally:
             conn.close()
 
+    def update_project(self, project_id: int, name: str, object_name: str,
+                      year: Optional[int] = None, description: Optional[str] = None):
+        """
+        Update project details.
+
+        Args:
+            project_id: Project ID
+            name: Project name
+            object_name: Object name
+            year: Optional year
+            description: Optional description
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                UPDATE projects
+                SET name = ?, object_name = ?, year = ?, description = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (name, object_name, year, description, project_id))
+
+            conn.commit()
+
+        finally:
+            conn.close()
+
+    def update_filter_goals(self, project_id: int, filter_goals: Dict[str, int]):
+        """
+        Update filter goals for a project. Removes old goals and adds new ones.
+
+        Args:
+            project_id: Project ID
+            filter_goals: Dictionary of {filter_name: target_count}
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            # Delete existing filter goals
+            cursor.execute('DELETE FROM project_filter_goals WHERE project_id = ?',
+                         (project_id,))
+
+            # Insert new filter goals
+            for filter_name, target_count in filter_goals.items():
+                cursor.execute('''
+                    INSERT INTO project_filter_goals
+                    (project_id, filter, target_count, total_count, approved_count)
+                    VALUES (?, ?, ?, 0, 0)
+                ''', (project_id, filter_name, target_count))
+
+            # Recalculate counts based on existing frames
+            self._update_filter_goal_counts(cursor, project_id)
+
+            conn.commit()
+
+        finally:
+            conn.close()
+
+    def get_project_by_name(self, name: str) -> Optional[Project]:
+        """
+        Get a project by name.
+
+        Args:
+            name: Project name
+
+        Returns:
+            Project object or None if not found
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT id, name, object_name, description, year, start_date,
+                       status, created_at, updated_at
+                FROM projects
+                WHERE name = ?
+            ''', (name,))
+
+            row = cursor.fetchone()
+            if row:
+                return Project(
+                    id=row[0],
+                    name=row[1],
+                    object_name=row[2],
+                    description=row[3],
+                    year=row[4],
+                    start_date=row[5],
+                    status=row[6],
+                    created_at=row[7],
+                    updated_at=row[8]
+                )
+            return None
+
+        finally:
+            conn.close()
+
     def get_unassigned_sessions(self) -> List[Tuple]:
         """
         Get sessions that are not assigned to any project.
