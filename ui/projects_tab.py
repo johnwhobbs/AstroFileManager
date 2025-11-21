@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QFileDialog, QDialog
 )
 from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtGui import QColor, QBrush
 from typing import Optional
 
 from core.project_manager import ProjectManager, Project, FilterGoalProgress
@@ -270,14 +271,16 @@ class ProjectsTab(QWidget):
 
     def display_filter_goals(self, goals: list[FilterGoalProgress]):
         """
-        Display filter goals with progress bars.
+        Display filter goals in a compact table format.
 
         Args:
             goals: List of FilterGoalProgress objects
         """
         # Clear existing widgets
         for i in reversed(range(self.goals_layout.count())):
-            self.goals_layout.itemAt(i).widget().setParent(None)
+            widget = self.goals_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
 
         if not goals:
             self.goals_group.setVisible(False)
@@ -285,71 +288,76 @@ class ProjectsTab(QWidget):
 
         self.goals_group.setVisible(True)
 
-        for goal in goals:
-            # Filter label
-            filter_label = QLabel(f"<b>{goal.filter}</b>")
-            self.goals_layout.addWidget(filter_label)
+        # Create table
+        goals_table = QTableWidget()
+        goals_table.setRowCount(len(goals))
+        goals_table.setColumnCount(4)
+        goals_table.setHorizontalHeaderLabels(["Filter", "Total", "Approved", "Progress"])
 
-            # Total progress bar
-            total_progress = QProgressBar()
-            # Use max of 100 to avoid issues when value exceeds target
-            total_progress.setMinimum(0)
-            total_progress.setMaximum(100)
-            # Calculate percentage, capped at 100%
+        # Configure table appearance
+        goals_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        goals_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        goals_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        goals_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        goals_table.verticalHeader().setVisible(False)
+        goals_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        goals_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        goals_table.setShowGrid(True)
+
+        # Set compact row height
+        goals_table.verticalHeader().setDefaultSectionSize(30)
+
+        # Populate table
+        for row, goal in enumerate(goals):
+            # Filter name
+            filter_item = QTableWidgetItem(goal.filter)
+            goals_table.setItem(row, 0, filter_item)
+
+            # Total frames with percentage
             total_percentage = min(100, (goal.total_count * 100 // goal.target_count) if goal.target_count > 0 else 0)
-            total_progress.setValue(total_percentage)
-            total_progress.setFormat(
-                f"Total: {goal.total_count}/{goal.target_count} frames ({total_percentage}%)"
-            )
-            total_progress.setTextVisible(True)
-            # Style total progress bar with gray/blue color
-            total_progress.setStyleSheet("""
-                QProgressBar {
-                    text-align: center;
-                }
-                QProgressBar::chunk {
-                    background-color: #5bc0de;
-                }
-            """)
-            self.goals_layout.addWidget(total_progress)
+            total_item = QTableWidgetItem(f"{goal.total_count}/{goal.target_count} ({total_percentage}%)")
+            goals_table.setItem(row, 1, total_item)
 
-            # Approved progress bar
-            approved_progress = QProgressBar()
-            # Use max of 100 to avoid issues when value exceeds target
-            approved_progress.setMinimum(0)
-            approved_progress.setMaximum(100)
-            # Calculate percentage, capped at 100%
+            # Approved frames with percentage
             approved_percentage = min(100, (goal.approved_count * 100 // goal.target_count) if goal.target_count > 0 else 0)
-            approved_progress.setValue(approved_percentage)
-            approved_progress.setFormat(
-                f"Approved: {goal.approved_count}/{goal.target_count} frames ({approved_percentage}%)"
-            )
-            approved_progress.setTextVisible(True)
+            approved_item = QTableWidgetItem(f"{goal.approved_count}/{goal.target_count} ({approved_percentage}%)")
+            goals_table.setItem(row, 2, approved_item)
 
-            # Color code: green if complete, blue if in progress
-            if goal.approved_count >= goal.target_count:
-                approved_progress.setStyleSheet("""
-                    QProgressBar {
-                        text-align: center;
-                    }
-                    QProgressBar::chunk {
-                        background-color: #5cb85c;
-                    }
-                """)
+            # Progress indicator with colored circle
+            if approved_percentage >= 100:
+                # Complete - green circle
+                progress_text = "● 100%"
+                color = "#5cb85c"  # Green
+            elif approved_percentage >= 75:
+                # Good progress - light green
+                progress_text = f"● {approved_percentage}%"
+                color = "#92d050"  # Light green
+            elif approved_percentage >= 50:
+                # Moderate progress - yellow/orange
+                progress_text = f"● {approved_percentage}%"
+                color = "#f0ad4e"  # Orange
+            elif approved_percentage >= 25:
+                # Low progress - orange/red
+                progress_text = f"● {approved_percentage}%"
+                color = "#e67e22"  # Dark orange
             else:
-                approved_progress.setStyleSheet("""
-                    QProgressBar {
-                        text-align: center;
-                    }
-                    QProgressBar::chunk {
-                        background-color: #5bc0de;
-                    }
-                """)
+                # Very low progress - red
+                progress_text = f"● {approved_percentage}%"
+                color = "#d9534f"  # Red
 
-            self.goals_layout.addWidget(approved_progress)
+            progress_item = QTableWidgetItem(progress_text)
+            progress_item.setForeground(QBrush(QColor(color)))
+            font = progress_item.font()
+            font.setBold(True)
+            progress_item.setFont(font)
+            goals_table.setItem(row, 3, progress_item)
 
-            # Spacing
-            self.goals_layout.addWidget(QLabel(""))
+        # Set reasonable height based on content
+        table_height = goals_table.horizontalHeader().height() + (len(goals) * 30) + 10
+        goals_table.setMaximumHeight(table_height)
+        goals_table.setMinimumHeight(table_height)
+
+        self.goals_layout.addWidget(goals_table)
 
     def display_next_steps(self, project: Project, goals: list[FilterGoalProgress]):
         """
