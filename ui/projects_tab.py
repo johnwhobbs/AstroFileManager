@@ -35,6 +35,7 @@ class ProjectsTab(QWidget):
         self.settings = settings
         self.project_manager = ProjectManager(db_path)
         self.selected_project_id: Optional[int] = None
+        self.current_goals_table: Optional[QTableWidget] = None  # Keep reference for signal connection
 
         self.init_ui()
         self.refresh_projects()
@@ -308,11 +309,17 @@ class ProjectsTab(QWidget):
         goals_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         goals_table.horizontalHeader().setStretchLastSection(False)
 
-        # Set initial column widths
-        goals_table.setColumnWidth(0, 80)   # Filter
-        goals_table.setColumnWidth(1, 120)  # Total
-        goals_table.setColumnWidth(2, 120)  # Approved
-        goals_table.setColumnWidth(3, 80)   # Progress
+        # Restore saved column widths or use defaults
+        default_widths = [80, 120, 120, 80]  # Filter, Total, Approved, Progress
+        for col in range(4):
+            saved_width = self.settings.value(f'projects_goals_table_col_{col}')
+            if saved_width:
+                goals_table.setColumnWidth(col, int(saved_width))
+            else:
+                goals_table.setColumnWidth(col, default_widths[col])
+
+        # Connect column resize to save settings
+        goals_table.horizontalHeader().sectionResized.connect(self.save_goals_table_column_widths)
 
         goals_table.verticalHeader().setVisible(False)
         goals_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
@@ -372,6 +379,8 @@ class ProjectsTab(QWidget):
         goals_table.setMaximumHeight(table_height)
         goals_table.setMinimumHeight(table_height)
 
+        # Store reference to keep signal connection alive
+        self.current_goals_table = goals_table
         self.goals_layout.addWidget(goals_table)
 
     def display_next_steps(self, project: Project, goals: list[FilterGoalProgress]):
@@ -598,3 +607,10 @@ class ProjectsTab(QWidget):
             # Convert to integers (QSettings may return strings)
             sizes = [int(s) for s in saved_sizes]
             self.details_content_splitter.setSizes(sizes)
+
+    def save_goals_table_column_widths(self) -> None:
+        """Save the goals table column widths to settings."""
+        if self.current_goals_table:
+            for col in range(self.current_goals_table.columnCount()):
+                width = self.current_goals_table.columnWidth(col)
+                self.settings.setValue(f'projects_goals_table_col_{col}', width)
