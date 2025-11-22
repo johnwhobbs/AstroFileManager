@@ -49,11 +49,11 @@ class ImportTab(QWidget):
         # Buttons
         button_layout = QHBoxLayout()
 
-        self.import_files_btn = QPushButton('📁 Import Astro Files')
+        self.import_files_btn = QPushButton('Import Astro Files')
         self.import_files_btn.clicked.connect(self.import_files)
         button_layout.addWidget(self.import_files_btn)
 
-        self.import_folder_btn = QPushButton('📂 Import Folder')
+        self.import_folder_btn = QPushButton('Import Folder')
         self.import_folder_btn.clicked.connect(self.import_folder)
         button_layout.addWidget(self.import_folder_btn)
 
