@@ -549,7 +549,7 @@ class ProjectManager:
                 WHERE date_loc = ?
                 AND object = ?
                 AND imagetyp LIKE '%Light%'
-                AND (? IS NULL OR filter = ?)
+                AND (filter = ? OR (filter IS NULL AND ? IS NULL))
             ''', (date_loc, object_name, filter_name, filter_name))
 
             # Update filter goal counts for the project
