@@ -1,153 +1,150 @@
 # AstroFileManager
 
-A PyQt6-based desktop application for cataloging and managing astrophotography files. This high-performance application reads FITS header information from both XISF and FITS files, stores them in an optimized SQLite database, and provides powerful tools for browsing, analyzing, and organizing your imaging sessions.
+A comprehensive desktop application for managing astrophotography imaging campaigns. AstroFileManager catalogs your XISF and FITS files, tracks imaging projects across multiple nights, manages calibration frame libraries, and helps ensure you capture the right data for successful integration.
 
-## Features
+## What Does It Do?
 
-- **Multi-Format Support**:
-  - **XISF files**: Native support using xisf library
-  - **FITS files**: Full support using astropy library (.fits, .fit extensions)
-  - Unified metadata extraction across both formats
-  - File extension preserved during organization
-  - Alternative CCD temperature keywords (TEMPERAT, CCD_TEMP, etc.)
+AstroFileManager solves common astrophotography data management challenges:
 
-- **Flexible Import Modes**:
-  - **Import Only**: Store original file paths in database
-  - **Import and Organize**: Automatically copy files to organized structure during import
-  - Mode selection persists between sessions
+- **Organize thousands of files** from multiple imaging sessions
+- **Track multi-night imaging projects** with target frame counts per filter
+- **Match light frames to calibration frames** automatically
+- **Import quality grades** from PixInsight SubFrame Selector
+- **Monitor progress** toward your imaging goals
+- **Ensure complete calibration** before processing
 
-- **Automatic Metadata Extraction**: Reads FITS keywords including:
-  - Telescope and instrument information
-  - Object name (automatically NULL for calibration frames)
-  - Filter type
-  - Image type (Light Frame, Dark Frame, Flat Frame, Bias Frame)
-  - Exposure time (supports both EXPOSURE and EXPTIME keywords)
-  - CCD temperature (rounded to nearest degree for grouping)
-  - Binning settings
-  - Observation date with smart fallback:
-    - Prefers DATE-LOC (local time)
-    - Falls back to DATE-OBS (UTC) with timezone conversion
-    - Automatically adjusted by -12 hours for session grouping
-
-- **Dual-Section Catalog View**: Browse your images in an organized tree structure:
-  - **Light Frames**: Organized by Object → Filter → Date → Files
-  - **Calibration Frames**: Organized by frame type with intelligent grouping:
-    - Dark Frames: Exposure/Temp/Binning → Date → Files
-    - Flat Frames: Date → Filter/Temp/Binning → Files
-    - Bias Frames: Temp/Binning → Date → Files
-  - Temperature-based grouping (frames within ±0.5°C grouped together)
-
-- **Sessions Calibration Tracking**: Comprehensive session management with intelligent calibration matching:
-  - **Automatic Session Detection**: Groups light frames by date, object, and filter
-  - **Smart Calibration Matching**: Finds matching Darks, Bias, and Flats with tolerance-based criteria
-    - Darks: Exact exposure (±0.1s), ±1°C temperature, matching binning
-    - Bias: ±1°C temperature, matching binning
-    - Flats: Filter match, ±3°C temperature, exact date match, matching binning
-  - **Master Frame Detection**: Identifies and displays master calibration frames
-  - **Quality Scoring**: 0-100% quality score based on frame counts (100% = 20+ frames)
-  - **Status Indicators**: Visual color-coded status (Complete/Partial/Missing)
-  - **Smart Recommendations**: Specific guidance for missing or incomplete calibration
-  - **Session Reports**: Export comprehensive reports with calibration status and recommendations
-  - **Statistics Dashboard**: Real-time completion rate and session breakdowns
-  - **Advanced Filtering**: Status filter, missing-only mode, master frame toggle
-
-- **Activity Analytics**:
-  - GitHub-style activity heatmap showing imaging sessions throughout the year
-  - Visual representation of total exposure hours per night
-  - Filter by year to track imaging trends
-
-- **Maintenance Tools**:
-  - Database management with safe clear database function
-  - Search and replace functionality for bulk metadata corrections
-  - Fix inconsistent FITS keyword values across your entire catalog
-  - **File Organization**: Automatically organize files into structured folders with standardized naming
-    - Separate structures for Lights and Calibration frames (Darks, Flats, Bias)
-    - Preview organization plan before execution
-    - Preserves original files while creating organized copies
-    - Can also be triggered during import
-
-- **Settings Management**:
-  - Configure repository path for organized file storage
-  - Set timezone for DATE-OBS UTC conversion
-  - Choose between Standard and Dark themes
-  - Import mode preference (import only vs organize during import)
-
-- **Smart Data Handling**:
-  - Calibration frames automatically imported without object field
-  - Temperature rounding for intelligent frame grouping
-  - Duplicate detection using SHA256 file hashing
-  - Robust string-to-numeric conversion for all metadata fields
-
-- **Persistent Settings**: Window size, position, column widths, and preferences saved between sessions
-- **Dark Theme**: Easy-on-the-eyes dark interface perfect for nighttime use
-
-## Requirements
-
-- Python 3.7 or higher
-- PyQt6
-- xisf (Python XISF library)
-- astropy (for FITS file support)
-- sqlite3 (included with Python)
-
-## Installation
-
-1. Install the required Python packages:
+## Quick Start
 
 ```bash
+# Install dependencies
 pip install PyQt6 xisf astropy
-```
 
-2. Create the database using the database creation script:
-
-```bash
+# Create database
 python create_db.py
-```
 
-This creates `xisf_catalog.db` in the current directory.
-
-3. Run the GUI application:
-
-```bash
+# Launch application
 python AstroFileManager.py
 ```
 
-## Usage
+## Typical Workflows
 
-### Import Tab
+### Workflow 1: Starting a New Imaging Project
 
-**Import Mode Selection:**
+**Goal:** Set up a new multi-night imaging campaign
 
-Choose how files should be imported:
+1. **Create Project** (Projects tab → New Project)
+   - Choose template (Narrowband SHO, Broadband LRGB, or Custom)
+   - Set project name (e.g., "M31 Narrowband 2024")
+   - Define target frame counts per filter
 
-- **Import only (store original paths)**: Traditional mode - files remain in their original location, only metadata is stored in database
-- **Import and organize (copy to repository)**: Files are automatically copied to organized folder structure during import
-  - Requires repository path to be set in Settings tab
-  - Files organized by metadata (object, filter, date, exposure, temperature, binning)
-  - Original files are preserved
-  - Mode selection is saved between sessions
+2. **Import First Night's Data** (Import Files tab)
+   - Select "Import and organize" mode for automatic file organization
+   - Click "Import Folder" and select your night's captures
+   - Wait for import to complete
 
-**Import Files:**
-1. Select your preferred import mode using the radio buttons
-2. Click "Import Astro Files" to select individual files (XISF or FITS), or "Import Folder" to import all astro files from a folder and subfolders
-3. Supported formats: .xisf, .fits, .fit
-4. If "Import and organize" mode is selected, files will be copied to the repository structure during import
-5. Monitor progress in the log window (shows organization status if applicable)
-6. View import summary when complete
+3. **Assign Sessions** (View Catalog tab)
+   - Navigate to your light frames (expand Object → Filter → Date)
+   - Right-click on the date node
+   - Select "Assign to Project"
+   - Choose your project from dropdown
 
-**Import Log:**
-- Shows which mode is active
-- Displays repository path if organizing
-- Shows "Organized: filename" for successfully organized files
-- Shows warnings if organization fails (falls back to original path)
+4. **Monitor Progress** (Projects tab)
+   - View total frames captured vs target
+   - See which filters need more data
+   - Check "Next Steps" recommendations
+
+5. **Repeat** over multiple nights until targets are met
+
+### Workflow 2: Quality Grading and Final Selection
+
+**Goal:** Grade captured frames and update project progress
+
+1. **Grade Frames in PixInsight**
+   - Open SubFrame Selector
+   - Load all frames for your project
+   - Review quality metrics (FWHM, eccentricity, SNR)
+   - Approve/reject frames based on criteria
+   - Export CSV file with results
+
+2. **Import Quality Data** (Projects tab → Import Quality Data)
+   - Select the exported CSV file
+   - Review import results (matched, approved, rejected counts)
+   - System automatically updates project progress
+
+3. **Check Final Status** (Projects tab)
+   - View approved frame counts vs targets
+   - Identify filters that need more captures
+   - If targets met, mark project complete
+
+4. **Generate Integration Lists**
+   - Export file lists for WeightedBatchPreProcessing (future feature)
+   - Begin integration in PixInsight
+
+### Workflow 3: Managing Calibration Library
+
+**Goal:** Build and maintain calibration frame library
+
+1. **Capture Calibration Frames**
+   - Darks: Match exposure times and temperatures of your light frames
+   - Flats: Capture daily with each filter used
+   - Bias: Capture at camera operating temperature
+
+2. **Import Calibration Frames** (Import Files tab)
+   - Import darks, flats, and bias frames
+   - Application automatically recognizes frame types
+   - Calibration frames organized separately from lights
+
+3. **Check Calibration Status** (Sessions tab)
+   - View automatic session detection (by date, object, filter)
+   - See calibration matching results
+   - Identify missing calibration:
+     - Red: No calibration frames found
+     - Orange: Partial calibration available
+     - Green: Complete calibration ready
+
+4. **Fill Gaps** (Sessions tab → recommendations)
+   - Review specific recommendations for each session
+   - Example: "Capture dark frames: 300.0s exposure at ~-10°C, 1x1 binning (minimum 10, recommended 20+)"
+   - Capture missing calibration frames on next clear night
+
+5. **Export Session Report** (Sessions tab → Export Report)
+   - Generate comprehensive text report
+   - Use as shooting list for next session
+   - Track calibration library completeness
+
+### Workflow 4: Organizing Existing Data
+
+**Goal:** Import and organize historical astrophotography data
+
+1. **Set Repository Path** (Settings tab)
+   - Browse to your organized storage location
+   - Application will create standardized folder structure
+
+2. **Import Historical Data** (Import Files tab)
+   - Select "Import and organize" mode
+   - Import all your historical XISF/FITS files
+   - Files copied to organized structure while originals preserved
+
+3. **Review Organization** (View Catalog tab)
+   - Browse lights: Object → Filter → Date → Files
+   - Browse calibration: Frame Type → Grouping → Date → Files
+   - Verify all files imported correctly
+
+4. **Create Historical Projects** (Projects tab)
+   - Create projects for completed imaging runs
+   - Mark as "archived" for reference
+   - Track what you've already captured
+
+5. **Clean Up Metadata** (Maintenance tab)
+   - Use Search & Replace to fix inconsistent values
+   - Example: Standardize telescope name across all sessions
+   - Ensure consistent filter names
+
+## Application Tabs Overview
 
 ### View Catalog Tab
 
-Browse your XISF and FITS files in a dual-section hierarchical tree structure with intelligent lazy loading for optimal performance.
-
-**Performance Features:**
-- Lazy loading: Initially shows Objects → Filters, dates and files load when expanded
-- Background data loading with progress indicator
-- Non-blocking UI during refresh operations
+**Purpose:** Browse all imported files in hierarchical organization
 
 **Light Frames Section:**
 ```
@@ -155,433 +152,277 @@ Browse your XISF and FITS files in a dual-section hierarchical tree structure wi
   ▼ M31 (Object)
     ▼ Ha (Filter)
       ▼ 2024-10-15 (Date)
-        • M31_Ha_001.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
-        • M31_Ha_002.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
-      ▼ 2024-10-14
-        • M31_Ha_003.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
-    ▼ OIII
-      ▼ 2024-10-15
-        • M31_OIII_001.xisf [Light Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
+        • M31_Ha_001.xisf
+        • M31_Ha_002.xisf
 ```
 
 **Calibration Frames Section:**
 ```
 ▼ Calibration Frames
   ▼ Dark Frames
-    ▼ 300s_-10C_Bin1x1 (Exposure/Temp/Binning)
-      ▼ 2024-10-15 (Date)
-        • Dark_001.xisf [Dark Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
-        • Dark_002.xisf [Dark Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
+    ▼ 300s_-10C_Bin1x1
+      ▼ 2024-10-15
   ▼ Flat Frames
-    ▼ 2024-10-15 (Date)
-      ▼ Ha_-10C_Bin1x1 (Filter/Temp/Binning)
-        • Flat_001.xisf [Flat Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
+    ▼ 2024-10-15
+      ▼ Ha_-10C_Bin1x1
   ▼ Bias Frames
-    ▼ -10C_Bin1x1 (Temp/Binning)
-      ▼ 2024-10-15 (Date)
-        • Bias_001.xisf [Bias Frame] [Takahashi FSQ-106EDX3] [ZWO ASI2600MM Pro]
+    ▼ -10C_Bin1x1
 ```
 
-**Temperature Grouping:**
-- Frames with similar temperatures (within ±0.5°C) are grouped together
-- Example: frames at -10.2°C, -10.8°C, and -9.6°C all appear under "-10C"
-- This intelligent grouping helps match calibration frames to light frames
+**Key Features:**
+- Lazy loading for fast performance with large catalogs
+- Temperature grouping (frames within ±0.5°C)
+- Right-click to assign sessions to projects
+- Filter by image type and object
 
-**Displayed Information:**
-- **Name**: Hierarchical organization by frame type, object, filter, date, etc.
-- **Image Type**: Light Frame, Dark Frame, Flat Frame, Bias Frame
-- **Telescope**: Telescope name
-- **Instrument**: Camera/instrument name
+**When to Use:**
+- Browse your entire catalog
+- Find specific frames by object, filter, or date
+- Assign imaging sessions to projects
+- Verify import results
 
-**Navigation:**
-- Click the arrows to expand/collapse sections
-- Click "Refresh" to update the view after imports or changes
-- All calibration frames are now visible (previously hidden)
+### Projects Tab
+
+**Purpose:** Manage multi-night imaging campaigns with target goals
+
+**Main Features:**
+- **Project Creation:** Templates for common workflows (Narrowband, Broadband, Custom)
+- **Progress Tracking:** Compact table showing total and approved frame counts
+- **Edit Projects:** Modify project details and filter goals
+- **Quality Import:** Import PixInsight SubFrame Selector CSV data
+- **Next Steps:** Smart recommendations based on progress
+
+**Progress Display:**
+
+| Filter | Total | Approved | Progress |
+|--------|-------|----------|----------|
+| Ha     | 100/90 (111%) | 85/90 (94%) | ● 94%  |
+| OIII   | 50/90 (56%)   | 48/90 (53%) | ● 53%  |
+| SII    | 90/90 (100%)  | 90/90 (100%) | ● 100% |
+
+**Color-Coded Progress:**
+- ● Green (100%): Goal met
+- ● Light Green (75-99%): Excellent progress
+- ● Orange (50-74%): Moderate progress
+- ● Dark Orange (25-49%): Low progress
+- ● Red (0-24%): Just starting
+
+**Customization:**
+- Resizable table columns (Project Name, Object, Year, Status, Created)
+- Resizable filter goals table columns
+- Adjustable splitter between goals and recommendations
+- All preferences saved across sessions
+
+**When to Use:**
+- Plan new imaging campaigns
+- Track progress across multiple nights
+- Import quality grades from PixInsight
+- Know when you have enough data
+- Edit project goals as conditions change
 
 ### Sessions Tab
 
-The Sessions tab provides comprehensive calibration tracking with optimized performance for large catalogs. It automatically matches your imaging sessions with their required calibration frames (Darks, Bias, Flats), identifies missing calibration data, and provides specific recommendations for completing your calibration library.
+**Purpose:** Track calibration frame completeness for each imaging session
 
-**Performance Features:**
-- Pre-computed calibration matching (90% faster than individual queries)
-- Background data loading with progress feedback
-- Handles hundreds of sessions efficiently
-
-**Session Detection:**
-
-Sessions are automatically detected by grouping light frames that share:
-- Same date (after -12 hour adjustment for overnight sessions)
-- Same target object
-- Same filter
-
-Each unique combination creates a session entry that is then analyzed for calibration completeness.
-
-**Calibration Matching Criteria:**
-
-The system uses intelligent tolerance-based matching to find calibration frames:
-
-**Dark Frames:**
-- Exact exposure match (within ±0.1 seconds)
-- Temperature within ±1°C of session average
-- Matching X and Y binning
-
-**Bias Frames:**
-- Temperature within ±1°C of session average
-- Matching X and Y binning
-
-**Flat Frames:**
-- Exact filter match (or both NULL for no-filter imaging)
-- Temperature within ±3°C of session average (more flexible for dusk/dawn flats)
-- Exact date match (must be from same imaging session)
-- Matching X and Y binning
-
-**Master Frame Detection:**
-
-Master calibration frames are automatically identified when IMAGETYP contains "Master" (e.g., "Master Dark Frame", "Master Flat Frame"). Master frames are displayed with special "Master" badges and provide an alternative to having 10+ individual calibration frames.
+**How It Works:**
+1. Automatically detects sessions (by date + object + filter)
+2. Searches for matching calibration frames:
+   - **Darks:** Same exposure (±0.1s), similar temp (±1°C), matching binning
+   - **Bias:** Similar temp (±1°C), matching binning
+   - **Flats:** Same filter, similar temp (±3°C), same date, matching binning
+3. Scores calibration quality (0-100% based on frame counts)
+4. Provides specific recommendations for missing calibration
 
 **Status Indicators:**
+- **Green:** Complete (all three types, 10+ frames each or master available)
+- **Blue:** Complete with masters (master frames detected)
+- **Orange:** Partial (some calibration missing)
+- **Red:** Missing (no calibration found)
 
-Each session is color-coded based on calibration completeness:
-
-- **Green (Complete)**: All three calibration types present (Darks + Bias + Flats) with minimum 10 frames each OR master available
-- **Blue (Complete with Masters)**: All calibration types present AND at least one master frame available
-- **Orange (Partial)**: Some calibration frames available but not all types
-- **Red (Missing)**: No calibration frames found for any type
-
-**Quality Scoring:**
-
-Each calibration type receives a quality score (0-100%) based on frame count:
-- 100% = 20+ frames (recommended for best results)
-- Proportional scoring for 1-19 frames (e.g., 10 frames = 50%)
-- 0% = no matching frames
-
-Minimum of 10 frames is recommended for acceptable calibration quality.
-
-**Frame Count Indicators:**
-
-- **✓ 20 frames** - Excellent (sufficient frames)
-- **✓ 15 + 1 Master** - Excellent (some frames plus master available)
-- **⚠ 8 frames (need 10+)** - Warning (below minimum)
-- **✗ Missing** - Critical (no matching frames)
-
-**Filter Controls:**
-
-Use the top controls to focus on specific sessions:
-
-- **Status Filter**: Show All, Complete, Partial, or Missing sessions
-- **Missing Only**: Checkbox to show only sessions lacking some calibration
-- **Include Masters**: Toggle whether to count master frames in availability
-- **Export Report**: Generate comprehensive text report of all sessions
-
-**Session Details Panel:**
-
-Click any session to view detailed information:
-
-- Light frame count and average settings (exposure, temperature, binning)
-- Exact calibration frame counts for each type
-- Master frame availability indicators
-- Quality scores for each calibration type
-- Overall session status
-
-**Recommendations Panel:**
-
-For incomplete sessions, the system provides specific, actionable recommendations:
-
-**Example recommendations:**
+**Calibration Details Example:**
 ```
-• Capture dark frames: 300.0s exposure at ~-10°C, 1x1 binning (minimum 10, recommended 20+)
-• Add more bias frames: Currently 8, need at least 10 for good calibration
-• Capture flat frames: Ha, ~-10°C, 1x1 binning (minimum 10, recommended 20+)
-```
-
-For complete sessions:
-```
-✓ All calibration frames are present
-
-Optional improvements:
-• Consider adding more darks (currently 12, recommended 20+)
-• Consider adding more flats (currently 15, recommended 20+)
-```
-
-**Session Statistics:**
-
-The statistics panel at the top shows real-time summary:
-
-- **Total Sessions**: Count of all unique imaging sessions
-- **Complete**: Sessions with all calibration types present
-- **Partial**: Sessions with some calibration missing
-- **Missing**: Sessions with no calibration
-- **Completion Rate**: Percentage of sessions ready for processing
-
-**Export Session Report:**
-
-Click "Export Report" to generate a comprehensive text file containing:
-
-- All session details with calibration status
-- Quality scores for each calibration type
-- Specific recommendations for each incomplete session
-- Summary statistics and completion rate
-
-Example report excerpt:
-```
-================================================================================
 Session: 2024-11-07 - M31 - Ha
-Status: Partial
 Light Frames: 25 | Exposure: 300.0s | Temp: -10.2°C | Binning: 1x1
 
-  Darks (300.0s): 20 frames (Quality: 100%)
-  Bias: 25 frames (Quality: 100%)
-  Flats (Ha): 0 frames (Quality: 0%)
+  Darks (300.0s): ✓ 20 frames (Quality: 100%)
+  Bias: ✓ 25 frames (Quality: 100%)
+  Flats (Ha): ✗ Missing (Quality: 0%)
 
   Recommendations:
     • Capture flat frames: Ha, ~-10°C, 1x1 binning (minimum 10, recommended 20+)
 ```
 
-**Use Cases:**
-
-- **Pre-processing Planning**: Identify which sessions are ready to process
-- **Calibration Library Management**: Track which calibration frames you need to acquire
-- **Session Completeness**: Quickly see which imaging sessions lack calibration
-- **Master Frame Utilization**: Leverage master frames to avoid needing 20+ individual frames
-- **Quality Assessment**: Ensure you have sufficient calibration frames for best results
-- **Historical Analysis**: Review past sessions and identify gaps in calibration data
-
-**Tips:**
-
-- Sessions with master frames show in blue even with fewer individual frames
-- Use "Missing Only" filter to focus on sessions needing calibration
-- Export reports before imaging sessions to plan calibration frame acquisition
-- Temperature tolerances account for cooling variations between sessions
-- Flat frames must be from the exact same date as the imaging session
-- Aim for 20+ frames per calibration type for optimal results
-- Master frames reduce the need for large frame counts
-
-### Projects Tab
-
-The Projects tab provides project-based workflow management for tracking imaging campaigns across multiple sessions and nights. It helps you manage target frame counts per filter, track progress toward goals, and organize your workflow from initial capture through final integration.
-
-**Creating a Project:**
-
-1. Click "New Project" to open the project creation dialog
-2. Select a template:
-   - **Narrowband (SHO)**: 90 frames each of Ha, OIII, SII (270 total)
-   - **Broadband (LRGB)**: 270 frames of L, 270 each of R, G, B (1,080 total)
-   - **Custom**: Define your own filter goals
-3. Enter project details:
-   - **Project Name**: Unique identifier (e.g., "M31 Narrowband 2024")
-   - **Object Name**: Target object (e.g., "M31")
-   - **Year**: Optional year for reference
-   - **Description**: Optional notes about equipment, goals, etc.
-4. Review/adjust filter goals and target frame counts
-5. Click "Create Project"
-
-**Project Progress Tracking:**
-
-Each project displays progress in a compact, space-efficient table format:
-
-**Filter Goals Table:**
-- **Filter**: Filter name (Ha, OIII, SII, L, R, G, B, etc.)
-- **Total**: Total frames captured vs target (e.g., "100/100 (100%)")
-- **Approved**: Approved frames vs target (e.g., "95/100 (95%)")
-- **Progress**: Color-coded indicator showing approval progress
-  - **● Green (100%)**: Goal met (approved frames ≥ target)
-  - **● Light Green (75-99%)**: Excellent progress
-  - **● Orange (50-74%)**: Moderate progress
-  - **● Dark Orange (25-49%)**: Low progress
-  - **● Red (0-24%)**: Very low progress
-
-**Customization Features:**
-- Resizable table columns to fit your data
-- Adjustable splitter between Filter Goals and Next Steps sections
-- All resize preferences saved and restored across sessions
-- Compact format saves ~70% vertical space compared to progress bars
-
-**Assigning Sessions to Projects:**
-
-Sessions must be assigned to projects BEFORE importing quality data:
-
-1. Switch to the View Catalog tab
-2. Navigate to a session (date grouping under object/filter)
-3. Right-click on the session and select "Assign to Project"
-4. Choose the target project from the dropdown
-5. Optionally add notes about the session
-6. Click "Assign to Project"
-
-All light frames from that session are immediately linked to the project, and total frame counts are updated.
-
-**Importing Quality Data:**
-
-After grading frames in PixInsight SubFrame Selector:
-
-1. In PixInsight, grade your frames using SubFrame Selector
-2. Export the CSV file with quality metrics
-3. In AstroFileManager Projects tab, click "Import Quality Data"
-4. Select the CSV file exported from PixInsight
-5. Review the import results:
-   - Matched frames: Successfully updated with quality data
-   - Not found: Frames in CSV not in database
-   - Approved/Rejected counts
-   - Updated projects count
-
-The import automatically:
-- Matches frames by filename
-- Updates quality metrics (FWHM, eccentricity, SNR, stars, background)
-- Sets approval status (approved/rejected) from "Approved" column
-- Handles multiple approval formats:
-  - Boolean text: True/False, Yes/No, 1/0
-  - Numeric weight: Values > 0 = approved, 0 = rejected
-  - Works with any column name (Approved, Weight, etc.)
-- Recalculates project progress with approved counts
-- Updates session grading status
-
-**Supported CSV Formats:**
-- Standard PixInsight SubFrame Selector CSV with "Approved" column
-- Custom exports with True/False approval values
-- Weight-based columns with numeric values
-- Mixed format CSVs with various column names
-
-**Next Steps Recommendations:**
-
-For each project, the system provides specific guidance:
-
-**During capture phase:**
-```
-• Capture more frames:
-  - Ha: 35 more frames
-  - OIII: 45 more frames
-  - SII: 40 more frames
-```
-
-**After partial grading:**
-```
-• Grade frames in PixInsight SubFrame Selector
-• Import quality data CSV
-```
-
-**When goals are met:**
-```
-✓ All goals met! Ready to generate WBPP file lists
-```
-
-**Project Status Management:**
-
-- **Mark Complete**: Changes project status to "completed" when all goals are met
-- **Archive**: Moves project to archived status (hidden from active list)
-- **Delete Project**: Permanently removes project and unlinks all frames
-  - Frames remain in database but are unassigned
-  - Project data, sessions, and filter goals are deleted
-
-**Unassigned Sessions Warning:**
-
-The Projects tab displays a warning (⚠️) showing count of unassigned sessions that contain light frames. This helps ensure all your imaging sessions are properly tracked within projects.
-
-**Workflow Integration:**
-
-The typical workflow is:
-
-1. **Create Project**: Define your imaging campaign with filter goals
-2. **Capture Frames**: Use NINA or other capture software
-3. **Import Frames**: Import XISF files into AstroFileManager
-4. **Assign Sessions**: Assign newly imported sessions to your project
-5. **Continue Capturing**: Repeat over multiple nights until target counts reached
-6. **Grade in PixInsight**: Use SubFrame Selector to grade all frames
-7. **Import Quality Data**: Import CSV to update approval status
-8. **Check Progress**: Review approved counts vs targets
-9. **Capture More if Needed**: If insufficient approved frames, capture more
-10. **Mark Complete**: When goals met, mark project complete
-11. **Generate WBPP Lists**: Export file lists for integration (future feature)
-
-**Use Cases:**
-
-- **Multi-Night Projects**: Track progress across weeks or months of imaging
-- **Multiple Targets**: Manage several concurrent imaging projects
-- **Historical Tracking**: Separate projects by year or campaign
-- **Goal-Oriented Workflow**: Work toward specific frame count targets
-- **Quality-Based Planning**: Know exactly how many more frames to capture after grading
-
-**Tips:**
-
-- Assign sessions immediately after import, even before grading
-- Quality data can be imported weeks or months later
-- Partial CSV imports work - only frames in the CSV are updated
-- Projects can span calendar years (don't worry about Dec 31/Jan 1 boundaries)
-- Use descriptive project names to distinguish campaigns (e.g., "M31 Narrowband 2024" vs "M31 Narrowband 2025")
+**When to Use:**
+- Before starting preprocessing
+- Identify missing calibration frames
+- Plan calibration frame captures
+- Export session reports for reference
+- Ensure you have everything needed for WeightedBatchPreProcessing
 
 ### Analytics Tab
 
-Visualize your imaging activity with a GitHub-style activity heatmap:
+**Purpose:** Visualize imaging activity over time
 
-**Activity Heatmap:**
-- Shows imaging sessions throughout the year in a calendar-style grid
-- Each cell represents one day, color-coded by total exposure hours:
-  - Gray: No imaging activity
+**Features:**
+- GitHub-style activity heatmap
+- Shows imaging sessions throughout the year
+- Color intensity based on total exposure hours:
+  - Gray: No activity
   - Light blue: < 2 hours
   - Medium blue: 2-4 hours
   - Dark blue: 4-6 hours
   - Darkest blue: 6+ hours
-- Hover over any day to see the exact date and total exposure hours
-- Select different years using the dropdown to view historical data
+- Year selector for historical view
 
-**Use Cases:**
-- Track your imaging consistency and frequency
-- Identify your most productive imaging periods
-- Visualize seasonal patterns in your astrophotography workflow
-- Share your imaging statistics with the community
+**When to Use:**
+- Track imaging consistency
+- Identify productive periods
+- Share imaging statistics
+- Review seasonal patterns
+
+### Import Files Tab
+
+**Purpose:** Add new files to the catalog
+
+**Import Modes:**
+
+**1. Import Only (store original paths)**
+- Files remain in original location
+- Database stores paths to files
+- Good for: Organized storage you manage manually
+
+**2. Import and Organize (copy to repository)**
+- Files copied to standardized folder structure
+- Original files preserved
+- Database updated with new paths
+- Good for: Letting application manage organization
+
+**Supported Formats:**
+- XISF files (.xisf)
+- FITS files (.fits, .fit)
+- Both formats treated identically
+
+**Import Options:**
+- Import Files: Select individual files
+- Import Folder: Import entire folder with subdirectories recursively
+
+**When to Use:**
+- After each imaging session
+- When adding historical data
+- When reorganizing your library
 
 ### Maintenance Tab
 
-The Maintenance tab provides powerful tools for managing and cleaning up your catalog data.
+**Purpose:** Database management and bulk metadata corrections
 
 **Database Management:**
-- **Clear Database**: Safely remove all records from the database with confirmation dialog
-- This is useful when starting fresh or removing old data
+- Clear database safely with confirmation
+- Start fresh when needed
 
 **Search and Replace:**
+- Fix inconsistent FITS keyword values
+- Standardize telescope names
+- Normalize filter names
+- Correct object name typos
+- Update instrument names
 
-The search and replace tool allows you to fix inconsistent metadata across your entire catalog in bulk:
-
-1. **Select FITS Keyword**: Choose which metadata field to modify:
-   - TELESCOP (Telescope name)
-   - INSTRUME (Camera/Instrument)
-   - OBJECT (Target object name)
-   - FILTER (Filter name)
-   - IMAGETYP (Image type)
-   - DATE-LOC (Local date)
-
-2. **Select Current Value**: Choose from existing values in your database
-
-3. **Enter Replacement Value**: Type the corrected or standardized value
-
-4. **Replace**: Click to update all matching records
-   - Displays confirmation dialog showing what will be changed
-   - Reports number of records updated
-   - Automatically refreshes the value list
-
-**Common Use Cases:**
-- Standardize telescope names (e.g., "FSQ106" → "Takahashi FSQ-106EDX3")
-- Fix typos in object names (e.g., "M 31" → "M31")
-- Normalize filter names (e.g., "Hydrogen Alpha" → "Ha")
-- Correct instrument names across multiple imaging sessions
+**Example Use Cases:**
+```
+Telescope name: "FSQ106" → "Takahashi FSQ-106EDX3"
+Filter name: "Hydrogen Alpha" → "Ha"
+Object name: "M 31" → "M31"
+```
 
 **File Organization:**
+- Preview organization before execution
+- Copy files to standardized structure
+- Update database with new paths
+- Preserve original files
 
-The File Organization tool automatically organizes your XISF files into a structured folder hierarchy with standardized naming conventions:
+**When to Use:**
+- Fix metadata inconsistencies
+- Standardize naming conventions
+- Reorganize existing catalog
+- Database maintenance
 
-1. **Preview Organization Plan**: See how files will be organized before making any changes
-   - Shows source and destination paths for the first 10 files
-   - Displays total count of files to be organized
-   - No files are modified during preview
+### Settings Tab
 
-2. **Execute File Organization**: Copy files to the organized structure
-   - Creates a standardized folder hierarchy based on file type
-   - Renames files using metadata-based naming conventions
-   - Original files are preserved (not deleted)
-   - Updates database with new file paths
-   - Progress is logged in real-time
+**Purpose:** Configure application preferences
 
-**Folder Structure:**
+**Available Settings:**
 
-The organization system creates different structures based on image type:
+**Image Repository:**
+- Set path for organized file storage
+- Used by Import and Organize mode
+- Used by File Organization feature
+
+**Timezone:**
+- Set your local timezone
+- Important for DATE-OBS conversion
+- Ensures correct date grouping
+- Critical for master calibration frames
+
+**Theme:**
+- Standard (light theme)
+- Dark (optimized for nighttime use)
+
+**When to Use:**
+- Initial setup
+- When changing storage locations
+- When timezone changes
+- Theme preference adjustment
+
+## Detailed Technical Information
+
+### Database Schema
+
+**xisf_files table** - Core image metadata:
+- Unique file identification via SHA256 hash
+- Complete FITS header metadata
+- Project and session linkage
+- Quality metrics from SubFrame Selector
+- Approval status tracking
+
+**projects table** - Imaging campaigns:
+- Project name, object, description
+- Status tracking (active/completed/archived)
+- Date tracking
+
+**project_filter_goals table** - Target counts:
+- Filter-specific frame targets
+- Current total and approved counts
+- Progress tracking
+
+**project_sessions table** - Session assignments:
+- Links imaging sessions to projects
+- Tracks grading status
+- Stores quality metrics
+
+### Metadata Extraction
+
+**Automatic extraction from FITS headers:**
+- TELESCOP - Telescope name
+- INSTRUME - Camera/instrument
+- OBJECT - Target object (NULL for calibration)
+- FILTER - Filter name
+- IMAGETYP - Frame type (Light/Dark/Flat/Bias)
+- EXPOSURE or EXPTIME - Exposure time
+- CCD-TEMP, TEMPERAT, CCD_TEMP - Temperature
+- XBINNING, YBINNING - Binning
+- DATE-LOC or DATE-OBS - Observation date
+
+**Date Processing:**
+1. Prefers DATE-LOC (local time)
+2. Falls back to DATE-OBS (UTC) with timezone conversion
+3. Subtracts 12 hours for session grouping
+4. Groups overnight sessions under single date
+
+**Temperature Grouping:**
+- Frames within ±0.5°C grouped together
+- Example: -10.2°C, -10.8°C, -9.6°C all display as "-10C"
+- Simplifies calibration frame matching
+
+### File Organization Structure
 
 **Light Frames:**
 ```
@@ -620,270 +461,191 @@ Calibration/
 ```
 Example: `Calibration/Bias/-10C_Bin1x1/2024-10-15_Bias_-10C_Bin1x1_001.xisf`
 
-**Benefits:**
-- Easy matching of calibration frames to light frames
-- Flats organized by date for session-specific calibration (best practice)
-- Consistent naming across all imaging sessions
+**Why This Structure:**
+- Easy matching of calibration to light frames
+- Flats organized by date (session-specific calibration best practice)
+- Consistent naming across all sessions
 - Simplified workflow for stacking software
-- Organized by object and filter for easy browsing
-- Preserves original files as backup
+- Organized by object and filter for browsing
 
-**Note:** You must set a Repository Path in the Settings tab before using the File Organization feature.
+### CSV Quality Import Format
 
-### Settings Tab
+**Supported Formats:**
+- Standard PixInsight SubFrame Selector CSV
+- Custom exports with approval columns
+- Flexible column name handling
 
-Configure application preferences and database settings.
+**Approval Column Handling:**
+The importer automatically detects approval status from various formats:
 
-**Image Repository:**
-- **Repository Path**: Set the destination folder for organized XISF files
-- This path is used by the File Organization feature and the "Import and organize" mode
-- Browse to select a folder where organized files will be stored
+**Boolean Text Values:**
+- "True", "Yes", "1", "Approved" → approved
+- "False", "No", "0", "Rejected" → rejected
 
-**Timezone:**
-- **Timezone Selection**: Set your local timezone for DATE-OBS conversion
-- Dropdown includes 23 common timezones worldwide
-- Used when files have DATE-OBS (UTC) but no DATE-LOC
-- Important for master calibration frames which typically only have DATE-OBS
-- Ensures dates are correctly converted to local time for session grouping
-- Defaults to UTC if not set
+**Numeric Weight Values:**
+- Weight > 0 → approved
+- Weight = 0 → rejected
 
-**Theme:**
-- **Standard Theme**: Light theme for daytime use
-- **Dark Theme**: Dark theme optimized for nighttime use
+**Column Names:**
+- Works with "Approved", "Weight", or any column name
+- Specify column name during import
+- Default: "Approved" column
 
-All settings are automatically saved and persisted between sessions.
+**Required CSV Columns:**
+- "Index" - Row number
+- "File" - Filename or path
+- Approval column (configurable name)
 
-## Database Schema
+**Optional Quality Metrics:**
+- FWHM - Full Width Half Maximum
+- Eccentricity - Star eccentricity
+- SNRWeight - Signal-to-noise ratio
+- Stars - Star count
+- Median - Background level
 
-The SQLite database contains the following tables:
+### Performance Optimizations
 
-**xisf_files table** - Core image metadata:
-- `id`: Unique identifier (auto-increment)
-- `file_hash`: SHA256 hash of the file (prevents duplicates)
-- `filepath`: Full path to the file
-- `filename`: Filename only
-- `telescop`: Telescope name
-- `instrume`: Instrument/camera name
-- `object`: Target object name
-- `filter`: Filter name
-- `imagetyp`: Image type (Light Frame, Dark, Flat, etc.)
-- `exposure`: Exposure time in seconds
-- `ccd_temp`: CCD temperature in Celsius
-- `xbinning`: X-axis binning
-- `ybinning`: Y-axis binning
-- `date_loc`: Observation date (YYYY-MM-DD format, adjusted by -12 hours)
-- `project_id`: Links frame to imaging project
-- `session_assignment_id`: Links frame to project session
-- `fwhm`: Full Width Half Maximum (arcseconds)
-- `eccentricity`: Star eccentricity metric
-- `snr`: Signal-to-noise ratio weight
-- `star_count`: Number of detected stars
-- `background_level`: Median background level
-- `approval_status`: Frame grading status (not_graded/approved/rejected)
-- `grading_date`: Date frame was graded
-- `grading_notes`: Optional notes from grading
-- `created_at`: Record creation timestamp
-- `updated_at`: Record update timestamp
-
-**projects table** - Imaging campaigns:
-- `id`: Unique identifier
-- `name`: Project name (unique)
-- `object_name`: Target object
-- `description`: Optional project description
-- `year`: Optional year for reference
-- `start_date`: Project start date
-- `status`: Project status (active/completed/archived)
-- `created_at`: Project creation timestamp
-- `updated_at`: Project update timestamp
-
-**project_filter_goals table** - Target frame counts:
-- `id`: Unique identifier
-- `project_id`: Links to project
-- `filter`: Filter name
-- `target_count`: Target number of frames
-- `total_count`: Current total frames captured
-- `approved_count`: Current approved frames
-- `last_updated`: Last update timestamp
-
-**project_sessions table** - Session assignments:
-- `id`: Unique identifier
-- `project_id`: Links to project
-- `session_id`: Session identifier
-- `date_loc`: Session date
-- `object_name`: Object name
-- `filter`: Filter name
-- `frame_count`: Number of frames in session
-- `approved_count`: Number of approved frames
-- `rejected_count`: Number of rejected frames
-- `graded`: Whether session has been graded (0/1)
-- `avg_fwhm`: Average FWHM for session
-- `notes`: Optional session notes
-- `assigned_date`: Date session was assigned
-
-## Date Processing
-
-The application uses a smart fallback approach for date extraction:
-
-**Primary Method - DATE-LOC:**
-1. Reads the DATE-LOC timestamp from the FITS header (handles up to 7 decimal places in fractional seconds)
-2. Subtracts 12 hours (to normalize imaging sessions that span midnight)
-3. Stores only the date in YYYY-MM-DD format
-
-**Fallback Method - DATE-OBS:**
-If DATE-LOC is not available (common for master calibration frames):
-1. Reads the DATE-OBS timestamp from the FITS header (UTC time)
-2. Converts from UTC to your configured local timezone
-3. Subtracts 12 hours (to normalize imaging sessions that span midnight)
-4. Stores only the date in YYYY-MM-DD format
-
-**Session Grouping:**
-The 12-hour subtraction ensures that imaging sessions are grouped by their actual observation night rather than being split across calendar days. For example, images captured from 8 PM on November 7 to 2 AM on November 8 will all be grouped under "2024-11-07".
-
-## User Interface
-
-**Dark Theme:**
-The application features a dark theme optimized for nighttime use, with:
-- Dark gray backgrounds
-- High contrast text
-- Blue highlights for selections
-- Styled buttons with hover effects
-
-**Column Widths:**
-All column widths are resizable and automatically saved. Your preferred layout will be restored when you reopen the application.
-
-## File Hash Detection
-
-The application calculates a SHA256 hash for each imported file. If you attempt to import the same file again (even from a different location), it will update the existing record rather than creating a duplicate entry.
-
-## Settings Persistence
-
-The application automatically saves:
-- Window size and position
-- Column widths in all tables and tree views
-- All layout preferences
-
-Settings are stored using Qt's QSettings in platform-specific locations and are restored when you reopen the application.
-
-## Performance
-
-AstroFileManager is optimized to handle large catalogs efficiently, with several performance enhancements implemented:
-
-**Database Optimizations:**
-- **WAL Mode (Write-Ahead Logging)**: Enables concurrent reads during writes, 30-50% faster write operations
-- **64MB Cache**: Dramatically reduces disk I/O by keeping hot data in memory
-- **256MB Memory-Mapped I/O**: Direct memory access to database pages for 20-40% faster queries
-- **Composite Indexes**: Specialized indexes for catalog hierarchy and calibration matching (50-80% faster indexed queries)
+**Database:**
+- WAL mode for concurrent access (30-50% faster writes)
+- 64MB cache for hot data
+- 256MB memory-mapped I/O
+- Composite indexes for fast queries
 
 **Query Optimization:**
-- View Catalog: Reduced from 191-1000+ queries to 1-2 queries (99% reduction)
-- Sessions Tab: Reduced from 300+ queries to 4 queries (98% reduction)
-- Single hierarchical queries with in-memory aggregation
+- View Catalog: 1-2 queries (99% reduction from 191-1000+)
+- Sessions Tab: 4 queries (98% reduction from 300+)
 - Pre-computed calibration matching with caching
 
 **UI Responsiveness:**
-- **Background Threading**: Data loading happens in background threads
-- **Non-blocking UI**: Application remains responsive during large catalog loads
-- **Progress Indicators**: Slim progress bars show loading status
-- **Cancellable Operations**: Refresh operations can be interrupted
-
-**Lazy Loading:**
-- View Catalog initially loads only Objects → Filters (2 levels)
-- Dates and files loaded on-demand when tree nodes are expanded
-- 90% faster initial load time
-- 80% reduced memory footprint
-- Seamless expansion from cached data
+- Background threading for data loading
+- Non-blocking operations
+- Progress indicators
+- Cancellable operations
+- Lazy loading in View Catalog
 
 **Performance Metrics:**
-- Large catalogs (1000+ files): <0.5 second initial load
-- No UI freezing during data operations
-- Responsive with multiple simultaneous sessions
+- Large catalogs (1000+ files): <0.5s initial load
+- No UI freezing during operations
+- Responsive with multiple sessions
+
+### Calibration Matching Logic
+
+**Darks Matching Criteria:**
+- Exposure: Within ±0.1 seconds
+- Temperature: Within ±1°C
+- Binning: Exact match (X and Y)
+
+**Bias Matching Criteria:**
+- Temperature: Within ±1°C
+- Binning: Exact match (X and Y)
+- Exposure: Not checked (bias are zero-length exposures)
+
+**Flats Matching Criteria:**
+- Filter: Exact match (or both NULL)
+- Temperature: Within ±3°C (more flexible for dusk/dawn flats)
+- Date: Exact match (flats should be from same night)
+- Binning: Exact match (X and Y)
+
+**Master Frame Detection:**
+- IMAGETYP contains "Master" (e.g., "Master Dark Frame")
+- Displayed with special "Master" badges
+- Can substitute for 10+ individual frames
+- Reduces storage and processing requirements
+
+**Quality Scoring:**
+- 0-100% based on frame count
+- 100% = 20+ frames (recommended)
+- 50% = 10 frames (minimum acceptable)
+- 0% = no frames found
+- Masters boost quality score
+
+## Requirements
+
+- Python 3.7 or higher
+- PyQt6 (GUI framework)
+- xisf (XISF file support)
+- astropy (FITS file support)
+- sqlite3 (included with Python)
+
+## Installation
+
+```bash
+# Install dependencies
+pip install PyQt6 xisf astropy
+
+# Create database
+python create_db.py
+
+# Launch application
+python AstroFileManager.py
+```
 
 ## Troubleshooting
 
 **"Database not found" error:**
-- Make sure you've created the database using `create_db.py` first
-- The database file `xisf_catalog.db` must be in the same directory as the GUI script
+- Run `create_db.py` first
+- Database file must be in same directory as application
 
 **Date fields showing NULL:**
-- Files need either DATE-LOC or DATE-OBS FITS keyword
-- If using DATE-OBS, ensure timezone is set in Settings tab
-- The application supports dates with fractional seconds up to 7 digits (nanoseconds)
-- Dates are automatically normalized by subtracting 12 hours
+- Files need DATE-LOC or DATE-OBS keyword
+- Set timezone in Settings tab if using DATE-OBS
+- Check that timezone matches your imaging location
 
-**Organization failing during import:**
-- Check that repository path is set correctly in Settings tab
-- Ensure you have write permissions to the repository location
-- Check disk space is available
-- View import log for specific error messages
+**CSV import shows all rejected:**
+- Check approval column name (should be "Approved")
+- Verify CSV has True/False or 1/0 values
+- Review import results for column detection
 
-**Calibration frames not showing in View Catalog:**
-- Click the "Refresh" button to update the tree view
-- Expand the "Calibration Frames" section in the tree
-- Ensure frames have correct IMAGETYP keyword (Dark, Flat, or Bias)
+**Calibration frames not matching:**
+- Verify temperature within tolerance (±1°C for Darks/Bias, ±3°C for Flats)
+- Check binning matches exactly
+- For Darks: exposure must match within ±0.1s
+- For Flats: date must match exactly
 
-**Sessions tab showing no calibration matches:**
-- Verify calibration frames have been imported (check View Catalog tab)
-- Check that calibration frame temperatures are within tolerance (±1°C for Darks/Bias, ±3°C for Flats)
-- Ensure binning matches exactly (1x1, 2x2, etc.)
-- For Darks: verify exposure times match light frames (within ±0.1s)
-- For Flats: verify filter names match exactly and dates match exactly (same date as session)
-- Click "Refresh Sessions" to update the view
+**Slow performance:**
+- Normal for initial load of large catalogs
+- Subsequent operations should be fast
+- Check disk I/O (SSD recommended)
+- Ensure sufficient RAM for database cache
 
-**Sessions tab column widths resetting:**
-- Column widths are automatically saved when you resize them
-- Widths persist across tab switches and application restarts
-- If widths don't save, check that the application has write permissions for QSettings storage
-- Try resizing columns and closing/reopening the application to verify persistence
+**Files not importing:**
+- Verify XISF/FITS format validity
+- Check FITS header contains standard keywords
+- Review import log for specific errors
+- Ensure astropy library installed for FITS
 
-**Import errors:**
-- Check that your files are valid XISF or FITS format
-- Verify that the xisf and astropy Python libraries are installed correctly
-- Review the import log for specific error messages
-
-**Slow performance with large catalogs:**
-- Performance optimizations are automatic - no configuration needed
-- Initial catalog load should be <0.5s for 1000+ files
-- If performance is slow, try:
-  - Click Refresh to rebuild with optimized queries
-  - Check that composite indexes exist (run create_db.py if database is old)
-  - Ensure sufficient RAM available for database caching
-  - Check disk I/O performance (SSD recommended for large catalogs)
-
-**FITS files not importing:**
-- Ensure astropy library is installed: `pip install astropy`
-- Check that files are valid FITS format
-- Verify FITS header contains standard keywords
-- Review import log for specific error messages
-
-## File Structure
+## Project Structure
 
 ```
 AstroFileManager/
-├── create_db.py                    # Database creation script with indexes
-├── AstroFileManager.py             # Main GUI application
+├── create_db.py                    # Database creation with schema
+├── AstroFileManager.py             # Main application entry point
+├── constants.py                    # Configuration constants
 ├── core/
-│   ├── database.py                 # Database manager with optimizations
-│   └── calibration.py              # Calibration matching with caching
+│   ├── database.py                 # Database manager
+│   ├── calibration.py              # Calibration matching logic
+│   ├── project_manager.py          # Project CRUD operations
+│   └── project_templates.py        # Project templates
 ├── ui/
-│   ├── background_workers.py       # QThread workers for async loading
-│   ├── view_catalog_tab.py         # Catalog view with lazy loading
-│   └── sessions_tab.py             # Sessions tab with cached matching
-├── utils/
-│   ├── fits_reader.py              # FITS file reader using astropy
-│   └── file_organizer.py           # File organization utilities
+│   ├── background_workers.py       # Async data loading
+│   ├── view_catalog_tab.py         # Catalog browser
+│   ├── projects_tab.py             # Project management
+│   ├── sessions_tab.py             # Calibration tracking
+│   ├── analytics_tab.py            # Activity heatmap
+│   ├── import_tab.py               # File import
+│   ├── maintenance_tab.py          # Database tools
+│   ├── settings_tab.py             # Application settings
+│   ├── new_project_dialog.py       # Create project dialog
+│   └── edit_project_dialog.py      # Edit project dialog
 ├── import_export/
-│   └── import_worker.py            # Multi-format import worker
-├── xisf_catalog.db                 # SQLite database (created on first run)
-└── readme.md                       # This file
+│   ├── import_worker.py            # Multi-format import
+│   ├── csv_exporter.py             # CSV export
+│   └── subframe_selector_importer.py  # Quality data import
+├── utils/
+│   ├── fits_reader.py              # FITS file reader
+│   └── file_organizer.py           # File organization
+└── xisf_catalog.db                 # SQLite database (created on first run)
 ```
-
-## License
-
-This project is provided as-is for personal use in managing astrophotography files.
-
-## Contributing
-
-Feel free to submit issues or pull requests for improvements.
 
 ## Version History
 
@@ -894,8 +656,11 @@ Feel free to submit issues or pull requests for improvements.
   - Color-coded progress indicators with percentage bullets (● 100%)
   - ~70% vertical space savings while showing same data
   - Better space allocation: projects list gets 67% of screen, details get 33%
+  - Resizable project table columns with saved preferences
+  - Edit Project functionality to modify existing projects
 - **Resizable Components**: Full layout customization
   - Resizable table columns for Filter Goals table
+  - Resizable project table columns (Project Name, Object, Year, Status, Created)
   - Adjustable splitter between Filter Goals and Next Steps sections
   - Adjustable splitter between projects list and details panel
   - All resize preferences saved and restored across sessions
@@ -905,6 +670,11 @@ Feel free to submit issues or pull requests for improvements.
   - Handles boolean text (True/False, Yes/No, 1/0) and numeric weights
   - Changed default column from "Weight" to "Approved" for standard format
   - Supports mixed CSV formats with flexible column detection
+- **Edit Project Feature**: Modify existing projects
+  - Edit project name, object, year, and description
+  - Add/remove/update filter goals and target counts
+  - Validates project name uniqueness
+  - Recalculates frame counts after updates
 - **Tab Switching Fix**: Preserved project selection across tab switches
   - Selected project and details now persist when switching tabs
   - Fixed data clearing issue on tab navigation
@@ -923,7 +693,6 @@ Feel free to submit issues or pull requests for improvements.
   - Assign sessions to projects before quality grading
   - Import PixInsight SubFrame Selector CSV quality data
   - Dual progress tracking: total frames vs approved frames
-  - Color-coded progress bars with visual indicators
   - Smart "Next Steps" recommendations based on project status
   - Project status management (active/completed/archived)
   - Unassigned sessions warning for better workflow tracking
@@ -937,11 +706,6 @@ Feel free to submit issues or pull requests for improvements.
   - Assign sessions immediately after capture, before grading
   - Session notes and metadata tracking
   - Grading status indicators per session
-- **Database Migration**: Automatic schema upgrade for existing databases
-  - Migration script adds projects, filter goals, and session tables
-  - Adds quality metric columns to xisf_files table
-  - Safe idempotent migration (can run multiple times)
-  - Verification step ensures migration success
 - **Project Templates**: Pre-configured filter goals
   - Narrowband (SHO): 90 frames each of Ha, OIII, SII
   - Broadband (LRGB): 270 frames each of L, R, G, B
@@ -951,98 +715,70 @@ Feel free to submit issues or pull requests for improvements.
   - Projects span multiple nights and sessions
   - Projects can span calendar years
   - Separate projects for same target in different years
-- **Tab Navigation Fix**: Fixed tab change handler for correct refresh behavior
-  - Projects tab now refreshes when selected
-  - All tab indices corrected after Projects tab insertion
 
 **v2.1.0** - Sessions Tab: Comprehensive Calibration Tracking
 - **Sessions Tab**: New comprehensive calibration tracking system
   - Automatic session detection by grouping light frames (date + object + filter)
-  - Smart calibration matching with tolerance-based criteria:
-    - Darks: Exact exposure (±0.1s), ±1°C temperature, matching binning
-    - Bias: ±1°C temperature, matching binning
-    - Flats: Filter match, ±3°C temperature, exact date match, matching binning
+  - Smart calibration matching with tolerance-based criteria
   - Master frame detection and display with special badges
   - Quality scoring system (0-100%) based on frame counts
   - Color-coded status indicators (Complete/Partial/Missing/Complete with Masters)
   - Smart recommendations engine for missing or incomplete calibration
-  - Export comprehensive session reports with calibration status and recommendations
-  - Real-time statistics dashboard (total sessions, completion rate, breakdowns)
+  - Export comprehensive session reports
+  - Real-time statistics dashboard
   - Advanced filtering: status filter, missing-only mode, master frame toggle
-  - Session details panel with frame counts, settings, and quality scores
-- **Column Width Persistence**: Sessions tab column widths now save and restore (Issue #33)
-  - Automatic save on resize
-  - Widths persist across tab switches and application restarts
-  - Removed auto-resize that was overriding user preferences
-- **Code Cleanup**: Removed Statistics tab (previously deleted, incorrectly restored)
-- **Quality of Life**: Improved calibration workflow planning and gap identification
+- **Column Width Persistence**: Sessions tab column widths now save and restore
+- **Code Cleanup**: Removed Statistics tab
+- **Quality of Life**: Improved calibration workflow planning
 
 **v2.0.0** - Major Update: Integrated Workflow & Enhanced Data Handling
-- **Import Workflow Integration**: Added import mode selection (import only vs import and organize)
-  - Files can now be organized during import instead of as separate step
+- **Import Workflow Integration**: Added import mode selection
+  - Files can now be organized during import
   - Mode selection persists between sessions
-  - Warning shown if organize mode selected without repository path
 - **Timezone Support**: Added DATE-OBS with timezone conversion
   - Supports master calibration frames that only have DATE-OBS (UTC)
-  - 23 common timezones available in Settings tab
-  - Automatic fallback: DATE-LOC → DATE-OBS with timezone conversion
+  - 23 common timezones available
 - **View Catalog Improvements**: Dual-section tree view
   - Separated Light Frames and Calibration Frames sections
-  - All calibration frames now visible (Dark, Flat, Bias)
-  - Intelligent grouping: Darks by exposure/temp/binning, Flats by date/filter/temp/binning, Bias by temp/binning
+  - All calibration frames now visible
 - **Temperature Rounding**: Frames within ±0.5°C grouped together
-  - Applied to View Catalog display and file organization
-  - Helps match calibration frames to light frames
-  - Consistent across Dark, Flat, and Bias frames
 - **Enhanced Import Logic**:
-  - EXPTIME keyword support (FITS standard) in addition to EXPOSURE
+  - EXPTIME keyword support
   - Calibration frames automatically imported without object field
-  - Robust string-to-numeric conversion for all metadata fields
-  - Better error handling with detailed messages in import log
-- **Analytics Tab**: Replaced Statistics tab with GitHub-style activity heatmap
-  - Visual calendar showing imaging sessions throughout the year
-  - Color-coded by total exposure hours per night
-  - Year selector for historical data
-- **Code Cleanup**: Removed legacy migration tools
-  - Removed "Fix Calibration Frame Objects" (now handled during import)
-  - Removed "Re-extract Exposure Times" (now handled during import)
-  - Removed "Re-extract Dates" (now handled during import)
-- **Bug Fixes**:
-  - Fixed flat frame organization to group by date first (Issue #9)
-  - Fixed database filename not updated during organization (Issue #11)
-  - Fixed calibration frames not visible in View Catalog (Issue #13)
-  - Fixed flat frames incorrectly imported with object field (Issue #14)
-  - Fixed exposure time not importing from EXPTIME keyword (Issue #16)
-  - Fixed master frames missing dates (Issue #17)
-  - Fixed flat frames not grouping by temperature (Issue #20)
-  - Fixed file organization during import (Issue #23)
+  - Robust string-to-numeric conversion
+- **Analytics Tab**: Replaced Statistics tab with activity heatmap
 
 **v1.3.0** - File Organization Feature
 - Added automatic file organization with standardized naming conventions
-- Separate folder structures for Lights and Calibration frames (Darks, Flats, Bias)
+- Separate folder structures for Lights and Calibration frames
 - Preview organization plan before execution
-- Intelligent naming based on metadata (object, filter, date, exposure, temp, binning)
 - Repository path configuration in Settings tab
-- Preserves original files while creating organized copies
 
 **v1.2.0** - Maintenance and Settings Update
 - Added Maintenance tab with database management tools
 - Implemented search and replace functionality for bulk metadata corrections
 - Added Settings tab with theme configuration
-- Moved Clear Database function to Maintenance tab for better organization
-- Changed default tree view behavior to keep items collapsed
 
 **v1.1.0** - Statistics and UI Improvements
 - Enhanced statistics dashboard with equipment information
 - Improved column management and display
-- Modified displayed columns in catalog view
 
-**v1.0.0** - Initial release
-- Import and catalog XISF files from folders and subfolders
-- Hierarchical catalog view (Object → Filter → Date → Files)
-- Statistics dashboard with equipment information
-- Persistent settings (window size and column widths)
+**v1.0.0** - Initial Release
+- Import and catalog XISF files
+- Hierarchical catalog view
+- Statistics dashboard
+- Persistent settings
 - Dark theme UI
-- Light frame-only exposure calculations
-- Automatic date normalization (-12 hours)
 - SHA256 file hash duplicate detection
+
+## License
+
+This project is provided as-is for personal use in managing astrophotography files.
+
+## Contributing
+
+Feel free to submit issues or pull requests for improvements.
+
+## Support
+
+For questions, issues, or feature requests, please open an issue on GitHub.
