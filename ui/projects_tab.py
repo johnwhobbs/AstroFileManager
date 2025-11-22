@@ -47,22 +47,21 @@ class ProjectsTab(QWidget):
         # Top toolbar
         toolbar = QHBoxLayout()
 
-        self.new_project_btn = QPushButton("➕ New Project")
+        self.new_project_btn = QPushButton("New Project")
         self.new_project_btn.clicked.connect(self.create_new_project)
         toolbar.addWidget(self.new_project_btn)
 
-        self.edit_project_btn = QPushButton("✏️ Edit Project")
+        self.edit_project_btn = QPushButton("Edit Project")
         self.edit_project_btn.clicked.connect(self.edit_project)
         self.edit_project_btn.setEnabled(False)  # Disabled until project is selected
         toolbar.addWidget(self.edit_project_btn)
 
-        self.import_quality_btn = QPushButton("📥 Import Quality Data")
+        self.import_quality_btn = QPushButton("Import Quality Data")
         self.import_quality_btn.clicked.connect(self.import_quality_data)
         toolbar.addWidget(self.import_quality_btn)
 
-        self.refresh_btn = QPushButton("🔄 Refresh")
+        self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh_projects)
-        self.refresh_btn.setProperty("class", "secondary")
         toolbar.addWidget(self.refresh_btn)
 
         # Status filter
@@ -154,22 +153,20 @@ class ProjectsTab(QWidget):
         # Action buttons
         action_buttons = QHBoxLayout()
 
-        self.mark_complete_btn = QPushButton("✓ Mark Complete")
+        self.mark_complete_btn = QPushButton("Mark Complete")
         self.mark_complete_btn.clicked.connect(self.mark_project_complete)
         self.mark_complete_btn.setVisible(False)
-        self.mark_complete_btn.setProperty("class", "success")
         action_buttons.addWidget(self.mark_complete_btn)
 
-        self.archive_btn = QPushButton("📦 Archive")
+        self.archive_btn = QPushButton("Archive")
         self.archive_btn.clicked.connect(self.archive_project)
         self.archive_btn.setVisible(False)
-        self.archive_btn.setProperty("class", "secondary")
         action_buttons.addWidget(self.archive_btn)
 
-        self.delete_btn = QPushButton("🗑️ Delete Project")
+        self.delete_btn = QPushButton("Delete Project")
         self.delete_btn.clicked.connect(self.delete_project)
         self.delete_btn.setVisible(False)
-        self.delete_btn.setProperty("class", "danger")
+        self.delete_btn.setStyleSheet("color: #d9534f;")
         action_buttons.addWidget(self.delete_btn)
 
         action_buttons.addStretch()
@@ -219,15 +216,8 @@ class ProjectsTab(QWidget):
             year_text = str(project.year) if project.year else ""
             self.projects_table.setItem(row, 2, QTableWidgetItem(year_text))
 
-            # Status - with color coding
+            # Status
             status_item = QTableWidgetItem(project.status.title())
-            # Color code based on status
-            if project.status == 'active':
-                status_item.setForeground(QBrush(QColor("#0078d4")))  # Blue
-            elif project.status == 'completed':
-                status_item.setForeground(QBrush(QColor("#107c10")))  # Green
-            elif project.status == 'archived':
-                status_item.setForeground(QBrush(QColor("#888888")))  # Gray
             self.projects_table.setItem(row, 3, status_item)
 
             # Created date
