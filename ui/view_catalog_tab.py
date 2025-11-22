@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 from import_export.csv_exporter import CSVExporter
 from ui.background_workers import CatalogLoaderWorker
 from ui.assign_session_dialog import AssignSessionDialog
+from core.project_manager import ProjectManager
 
 
 class ViewCatalogTab(QWidget):
@@ -44,6 +45,7 @@ class ViewCatalogTab(QWidget):
         self.reimport_callback = reimport_callback
         self.loader_worker = None  # Background thread for loading catalog
         self.light_data_cache = []  # Cache for lazy loading light frames
+        self.project_manager = ProjectManager(db_path)  # For session assignment operations
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -248,17 +250,59 @@ class ViewCatalogTab(QWidget):
             elif action == reimport_action:
                 self.reimport_file(item)
         elif is_session:
-            # Session node - offer to assign to project
-            assign_action = menu.addAction("Assign to Project")
-            menu.addSeparator()
-            export_action = menu.addAction("Export This Group to CSV")
+            # Session node - check if already assigned to a project
+            date_loc = item.text(6)
+            parent = item.parent()
+            if parent:
+                parent_data = parent.data(0, Qt.ItemDataRole.UserRole)
+                if parent_data:
+                    object_name = parent_data.get('object')
+                    filter_name = parent_data.get('filter')
 
-            action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
+                    # Check if session is assigned
+                    assignment = self.project_manager.get_session_assignment(
+                        date_loc, object_name, filter_name
+                    )
 
-            if action == assign_action:
-                self.assign_session_to_project(item)
-            elif action == export_action:
-                self.export_tree_group_to_csv(item)
+                    if assignment:
+                        # Session is assigned - show unassign option
+                        project_id, assignment_id, project_name = assignment
+                        unassign_action = menu.addAction(f"Unassign from Project '{project_name}'")
+                        menu.addSeparator()
+                        export_action = menu.addAction("Export This Group to CSV")
+
+                        action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
+
+                        if action == unassign_action:
+                            self.unassign_session_from_project(item, project_name)
+                        elif action == export_action:
+                            self.export_tree_group_to_csv(item)
+                    else:
+                        # Session not assigned - show assign option
+                        assign_action = menu.addAction("Assign to Project")
+                        menu.addSeparator()
+                        export_action = menu.addAction("Export This Group to CSV")
+
+                        action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
+
+                        if action == assign_action:
+                            self.assign_session_to_project(item)
+                        elif action == export_action:
+                            self.export_tree_group_to_csv(item)
+                else:
+                    # Fallback if parent_data not available
+                    export_action = menu.addAction("Export This Group to CSV")
+                    action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
+
+                    if action == export_action:
+                        self.export_tree_group_to_csv(item)
+            else:
+                # Fallback if parent not available
+                export_action = menu.addAction("Export This Group to CSV")
+                action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
+
+                if action == export_action:
+                    self.export_tree_group_to_csv(item)
         else:
             # For other group nodes, offer export
             export_action = menu.addAction("Export This Group to CSV")
@@ -465,6 +509,72 @@ Imported: {result[11] or 'N/A'}
 
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to assign session: {e}')
+
+    def unassign_session_from_project(self, item: QTreeWidgetItem, project_name: str) -> None:
+        """
+        Unassign a session (date node) from a project.
+
+        Args:
+            item: Date node tree item
+            project_name: Name of the project (for confirmation message)
+        """
+        try:
+            # Get date_loc from column 6
+            date_loc = item.text(6)
+            if not date_loc:
+                QMessageBox.warning(self, 'Error', 'Could not determine session date')
+                return
+
+            # Get parent filter node to extract object and filter
+            parent = item.parent()
+            if not parent:
+                QMessageBox.warning(self, 'Error', 'Could not determine session details')
+                return
+
+            # Get object and filter from parent node's data
+            parent_data = parent.data(0, Qt.ItemDataRole.UserRole)
+            if not parent_data:
+                QMessageBox.warning(self, 'Error', 'Could not determine session details')
+                return
+
+            object_name = parent_data.get('object')
+            filter_name = parent_data.get('filter')
+
+            if not object_name:
+                QMessageBox.warning(self, 'Error', 'Could not determine object name')
+                return
+
+            # Confirm unassignment
+            frame_count = item.childCount()
+            filter_str = f" ({filter_name})" if filter_name else ""
+            reply = QMessageBox.question(
+                self,
+                'Confirm Unassignment',
+                f"Unassign this session from project '{project_name}'?\n\n"
+                f"Session: {date_loc}\n"
+                f"Object: {object_name}{filter_str}\n"
+                f"Frames: {frame_count}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                # Unassign the session
+                self.project_manager.unassign_session_from_project(
+                    date_loc=date_loc,
+                    object_name=object_name,
+                    filter_name=filter_name
+                )
+
+                self.status_callback(f'Session unassigned from project \'{project_name}\'')
+                QMessageBox.information(
+                    self,
+                    'Success',
+                    f'Session unassigned from project \'{project_name}\''
+                )
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to unassign session: {e}')
 
     def export_tree_group_to_csv(self, item: QTreeWidgetItem) -> None:
         """Export a tree group (and its children) to CSV."""
