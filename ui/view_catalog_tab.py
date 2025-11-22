@@ -104,11 +104,12 @@ class ViewCatalogTab(QWidget):
         self.catalog_object_filter.currentTextChanged.connect(self.refresh_catalog_view)
         filter_layout.addWidget(self.catalog_object_filter)
 
-        export_btn = QPushButton('Export to CSV')
+        export_btn = QPushButton('📊 Export to CSV')
         export_btn.clicked.connect(self.export_catalog_to_csv)
         filter_layout.addWidget(export_btn)
 
-        refresh_btn = QPushButton('Refresh')
+        refresh_btn = QPushButton('🔄 Refresh')
+        refresh_btn.setProperty("class", "secondary")
         refresh_btn.clicked.connect(self.refresh_catalog_view)
         filter_layout.addWidget(refresh_btn)
 

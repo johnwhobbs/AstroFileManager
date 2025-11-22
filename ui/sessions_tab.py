@@ -51,7 +51,8 @@ class SessionsTab(QWidget):
         controls_layout = QHBoxLayout()
 
         # Refresh button
-        refresh_btn = QPushButton('Refresh Sessions')
+        refresh_btn = QPushButton('🔄 Refresh Sessions')
+        refresh_btn.setProperty("class", "secondary")
         refresh_btn.clicked.connect(self.refresh_sessions)
         controls_layout.addWidget(refresh_btn)
 
@@ -74,7 +75,7 @@ class SessionsTab(QWidget):
         controls_layout.addWidget(self.include_masters_checkbox)
 
         # Export button
-        export_btn = QPushButton('Export Report')
+        export_btn = QPushButton('📄 Export Report')
         export_btn.clicked.connect(self.export_session_report)
         controls_layout.addWidget(export_btn)
 
