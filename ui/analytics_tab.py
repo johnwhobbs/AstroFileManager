@@ -46,7 +46,8 @@ class AnalyticsTab(QWidget):
         year_layout.addWidget(self.year_combo)
         year_layout.addStretch()
 
-        refresh_analytics_btn = QPushButton('Refresh')
+        refresh_analytics_btn = QPushButton('🔄 Refresh')
+        refresh_analytics_btn.setProperty("class", "secondary")
         refresh_analytics_btn.clicked.connect(self.refresh_analytics)
         year_layout.addWidget(refresh_analytics_btn)
 

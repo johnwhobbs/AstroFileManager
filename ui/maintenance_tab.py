@@ -51,9 +51,9 @@ class MaintenanceTab(QWidget):
         clear_info = QLabel("Clear all records from the database:")
         clear_layout.addWidget(clear_info)
 
-        self.clear_db_btn = QPushButton('Clear Database')
+        self.clear_db_btn = QPushButton('🗑️ Clear Database')
         self.clear_db_btn.clicked.connect(self.clear_database)
-        self.clear_db_btn.setStyleSheet("QPushButton { background-color: #8b0000; color: white; } QPushButton:hover { background-color: #a00000; }")
+        self.clear_db_btn.setProperty("class", "danger")
         clear_layout.addWidget(self.clear_db_btn)
 
         clear_group.setLayout(clear_layout)
@@ -101,7 +101,7 @@ class MaintenanceTab(QWidget):
         # Replace button
         button_layout = QHBoxLayout()
         button_layout.addStretch()
-        self.replace_btn = QPushButton('Replace Values')
+        self.replace_btn = QPushButton('🔄 Replace Values')
         self.replace_btn.clicked.connect(self.replace_values)
         button_layout.addWidget(self.replace_btn)
         replace_layout.addLayout(button_layout)
@@ -121,7 +121,8 @@ class MaintenanceTab(QWidget):
         master_temp_layout.addWidget(master_temp_help)
 
         # Refresh button
-        refresh_masters_btn = QPushButton('Refresh Master Frames List')
+        refresh_masters_btn = QPushButton('🔄 Refresh Master Frames List')
+        refresh_masters_btn.setProperty("class", "secondary")
         refresh_masters_btn.clicked.connect(self.refresh_master_frames_list)
         master_temp_layout.addWidget(refresh_masters_btn)
 
@@ -151,9 +152,9 @@ class MaintenanceTab(QWidget):
         # Tag button
         tag_button_layout = QHBoxLayout()
         tag_button_layout.addStretch()
-        tag_masters_btn = QPushButton('Tag Selected Masters')
+        tag_masters_btn = QPushButton('🏷️ Tag Selected Masters')
         tag_masters_btn.clicked.connect(self.tag_master_frames)
-        tag_masters_btn.setStyleSheet("QPushButton { background-color: #2d7a2d; color: white; } QPushButton:hover { background-color: #3d8a3d; }")
+        tag_masters_btn.setProperty("class", "success")
         tag_button_layout.addWidget(tag_masters_btn)
         master_temp_layout.addLayout(tag_button_layout)
 
@@ -168,14 +169,15 @@ class MaintenanceTab(QWidget):
         organize_layout.addWidget(organize_info)
 
         # Preview button
-        preview_btn = QPushButton('Preview Organization Plan')
+        preview_btn = QPushButton('👁️ Preview Organization Plan')
+        preview_btn.setProperty("class", "secondary")
         preview_btn.clicked.connect(self.preview_organization)
         organize_layout.addWidget(preview_btn)
 
         # Execute button
-        execute_btn = QPushButton('Execute File Organization')
+        execute_btn = QPushButton('▶️ Execute File Organization')
         execute_btn.clicked.connect(self.execute_organization)
-        execute_btn.setStyleSheet("QPushButton { background-color: #2d7a2d; color: white; } QPushButton:hover { background-color: #3d8a3d; }")
+        execute_btn.setProperty("class", "success")
         organize_layout.addWidget(execute_btn)
 
         # Organization log
