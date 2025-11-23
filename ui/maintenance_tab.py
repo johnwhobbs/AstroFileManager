@@ -13,7 +13,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
     QLabel, QTextEdit, QGroupBox, QComboBox, QLineEdit, QListWidget,
     QListWidgetItem, QDoubleSpinBox, QRadioButton, QButtonGroup, QDialog,
-    QDialogButtonBox, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+    QDialogButtonBox, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+    QTabWidget
 )
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QColor
@@ -44,6 +45,34 @@ class MaintenanceTab(QWidget):
     def init_ui(self) -> None:
         """Initialize the UI components."""
         layout = QVBoxLayout(self)
+
+        # Create tab widget
+        tab_widget = QTabWidget()
+
+        # Create three tabs
+        database_tab = QWidget()
+        calibration_tab = QWidget()
+        organization_tab = QWidget()
+
+        # Add tabs to tab widget
+        tab_widget.addTab(database_tab, "Database")
+        tab_widget.addTab(calibration_tab, "Calibration Frames")
+        tab_widget.addTab(organization_tab, "File Organization")
+
+        # Set up each tab
+        self._setup_database_tab(database_tab)
+        self._setup_calibration_tab(calibration_tab)
+        self._setup_organization_tab(organization_tab)
+
+        # Add tab widget to main layout
+        layout.addWidget(tab_widget)
+
+        # Populate initial values
+        self.on_keyword_changed()
+
+    def _setup_database_tab(self, tab: QWidget) -> None:
+        """Set up the Database tab with database management and search/replace sections."""
+        layout = QVBoxLayout(tab)
 
         # Clear Database section
         clear_group = QGroupBox("Database Management")
@@ -109,6 +138,13 @@ class MaintenanceTab(QWidget):
 
         replace_group.setLayout(replace_layout)
         layout.addWidget(replace_group)
+
+        # Add stretch to push everything to the top
+        layout.addStretch()
+
+    def _setup_calibration_tab(self, tab: QWidget) -> None:
+        """Set up the Calibration Frames tab with master frame tagging and cleanup sections."""
+        layout = QVBoxLayout(tab)
 
         # Master Frame Temperature Tagging section
         master_temp_group = QGroupBox("Master Frame Temperature Tagging")
@@ -273,6 +309,13 @@ class MaintenanceTab(QWidget):
         remove_orphans_group.setLayout(remove_orphans_layout)
         layout.addWidget(remove_orphans_group)
 
+        # Add stretch to push everything to the top
+        layout.addStretch()
+
+    def _setup_organization_tab(self, tab: QWidget) -> None:
+        """Set up the File Organization tab."""
+        layout = QVBoxLayout(tab)
+
         # File Organization section
         organize_group = QGroupBox("File Organization")
         organize_layout = QVBoxLayout()
@@ -305,9 +348,6 @@ class MaintenanceTab(QWidget):
 
         # Add stretch to push everything to the top
         layout.addStretch()
-
-        # Populate initial values
-        self.on_keyword_changed()
 
     def on_keyword_changed(self) -> None:
         """Update the current value dropdown when keyword selection changes."""
