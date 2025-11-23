@@ -38,7 +38,7 @@ class ExportProjectDialog(QDialog):
         self.worker = None
         self.destination_path = None
 
-        self.setWindowTitle(f"Export Project: {project_name}")
+        self.setWindowTitle(f"Checkout Project: {project_name}")
         self.setMinimumWidth(600)
         self.setMinimumHeight(400)
 
@@ -49,7 +49,7 @@ class ExportProjectDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # Info section
-        info_group = QGroupBox("Export Information")
+        info_group = QGroupBox("Checkout Information")
         info_layout = QVBoxLayout()
 
         info_text = QTextBrowser()
@@ -83,10 +83,10 @@ class ExportProjectDialog(QDialog):
         layout.addWidget(dest_group)
 
         # Progress section
-        progress_group = QGroupBox("Export Progress")
+        progress_group = QGroupBox("Checkout Progress")
         progress_layout = QVBoxLayout()
 
-        self.status_label = QLabel("Ready to export")
+        self.status_label = QLabel("Ready to checkout")
         progress_layout.addWidget(self.status_label)
 
         self.progress_bar = QProgressBar()
@@ -106,7 +106,7 @@ class ExportProjectDialog(QDialog):
         button_layout = QHBoxLayout()
         button_layout.addStretch()
 
-        self.export_btn = QPushButton("Start Export")
+        self.export_btn = QPushButton("Start Checkout")
         self.export_btn.clicked.connect(self.start_export)
         self.export_btn.setEnabled(False)
         button_layout.addWidget(self.export_btn)
@@ -142,7 +142,7 @@ class ExportProjectDialog(QDialog):
         self.browse_btn.setEnabled(False)
         self.close_btn.setEnabled(False)
 
-        self.status_label.setText("Starting export...")
+        self.status_label.setText("Starting checkout...")
         self.progress_bar.setValue(0)
         self.results_label.setText("")
 
@@ -168,7 +168,7 @@ class ExportProjectDialog(QDialog):
     def on_export_finished(self, light_count: int, dark_count: int,
                           flat_count: int, bias_count: int):
         """Handle successful export completion."""
-        self.status_label.setText("Export completed successfully!")
+        self.status_label.setText("Checkout completed successfully!")
         self.progress_bar.setValue(100)
 
         results_html = f"""
@@ -187,14 +187,14 @@ class ExportProjectDialog(QDialog):
 
         QMessageBox.information(
             self,
-            "Export Complete",
-            f"Successfully exported {light_count + dark_count + flat_count + bias_count} files\n\n"
+            "Checkout Complete",
+            f"Successfully checked out {light_count + dark_count + flat_count + bias_count} files\n\n"
             f"Destination: {self.destination_path}"
         )
 
     def on_export_error(self, error_message: str):
         """Handle export error."""
-        self.status_label.setText("Export failed")
+        self.status_label.setText("Checkout failed")
         self.results_label.setText(f"<span style='color: red;'><b>Error:</b> {error_message}</span>")
 
         # Re-enable controls
@@ -202,15 +202,15 @@ class ExportProjectDialog(QDialog):
         self.browse_btn.setEnabled(True)
         self.close_btn.setEnabled(True)
 
-        QMessageBox.critical(self, "Export Failed", error_message)
+        QMessageBox.critical(self, "Checkout Failed", error_message)
 
     def closeEvent(self, event):
         """Handle dialog close event."""
         if self.worker and self.worker.isRunning():
             reply = QMessageBox.question(
                 self,
-                "Export in Progress",
-                "Export is still in progress. Do you want to cancel and close?",
+                "Checkout in Progress",
+                "Checkout is still in progress. Do you want to cancel and close?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )
