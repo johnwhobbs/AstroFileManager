@@ -1198,13 +1198,14 @@ class MaintenanceTab(QWidget):
             # Find orphaned flat frames (no matching light frames)
             cursor.execute('''
                 SELECT DISTINCT
-                    i.id, i.filepath, i.filename, i.filter, i.ccd_temp, i.xbinning, i.ybinning, i.imagetyp
+                    i.id, i.filepath, i.filename, i.filter, i.date_loc, i.ccd_temp, i.xbinning, i.ybinning, i.imagetyp
                 FROM xisf_files i
                 WHERE i.imagetyp LIKE '%Flat%'
                   AND NOT EXISTS (
                       SELECT 1 FROM xisf_files light
                       WHERE light.imagetyp LIKE '%Light%'
                         AND (light.filter = i.filter OR (light.filter IS NULL AND i.filter IS NULL))
+                        AND light.date_loc = i.date_loc
                         AND ABS(COALESCE(light.ccd_temp, 0) - COALESCE(i.ccd_temp, 0)) <= 3.0
                         AND light.xbinning = i.xbinning
                         AND light.ybinning = i.ybinning
@@ -1308,7 +1309,7 @@ class MaintenanceTab(QWidget):
                 if frame_type == 'darks':
                     imagetyp = frame[7]
                 elif frame_type == 'flats':
-                    imagetyp = frame[7]
+                    imagetyp = frame[8]
                 elif frame_type == 'bias':
                     imagetyp = frame[6]
                 table.setItem(row, 1, QTableWidgetItem(imagetyp))
@@ -1323,8 +1324,9 @@ class MaintenanceTab(QWidget):
                     params = f"Exp:{frame[3]:.1f}s, Temp:{temp_str}, Bin{int(frame[5])}x{int(frame[6])}"
                 elif frame_type == 'flats':
                     filt = frame[3] or "None"
-                    temp_str = f"{frame[4]:.1f}°C" if frame[4] is not None else "N/A"
-                    params = f"Filter:{filt}, Temp:{temp_str}, Bin{int(frame[5])}x{int(frame[6])}"
+                    date = frame[4] or "N/A"
+                    temp_str = f"{frame[5]:.1f}°C" if frame[5] is not None else "N/A"
+                    params = f"Filter:{filt}, Date:{date}, Temp:{temp_str}, Bin{int(frame[6])}x{int(frame[7])}"
                 elif frame_type == 'bias':
                     temp_str = f"{frame[3]:.1f}°C" if frame[3] is not None else "N/A"
                     params = f"Temp:{temp_str}, Bin{int(frame[4])}x{int(frame[5])}"
