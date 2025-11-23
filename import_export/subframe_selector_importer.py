@@ -183,7 +183,7 @@ class SubFrameSelectorImporter:
             'approval_status': approval_status,
             'fwhm': self._parse_float(get_value('FWHM')),
             'eccentricity': self._parse_float(get_value('Eccentricity')),
-            'snr': self._parse_float(get_value('SNRWeight')),
+            'snr': self._parse_float(get_value('SNR') or get_value('SNRWeight')),
             'star_count': self._parse_int(get_value('Stars')),
             'background_level': self._parse_float(get_value('Median')),
             'grading_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
