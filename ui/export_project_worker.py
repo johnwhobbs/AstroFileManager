@@ -201,17 +201,42 @@ class ExportProjectWorker(QThread):
 
     def _find_dark_files(self, cursor, exposure: float, temp: float,
                         xbin: int, ybin: int) -> Set[str]:
-        """Find matching dark frame file paths."""
+        """
+        Find matching dark frame file paths.
+
+        Prefers master frames if available; otherwise returns non-master frames.
+        """
         temp_tolerance = self.calibration_matcher.temp_tolerance_darks
         exp_tolerance = self.calibration_matcher.exposure_tolerance
 
         temp_min = temp - temp_tolerance if temp else -999
         temp_max = temp + temp_tolerance if temp else 999
 
+        # First, check for master dark frames
+        cursor.execute(f'''
+            SELECT DISTINCT filepath
+            FROM xisf_files
+            WHERE imagetyp LIKE '%Master%'
+                AND imagetyp LIKE '%Dark%'
+                AND ABS(exposure - ?) < {exp_tolerance}
+                AND ccd_temp BETWEEN ? AND ?
+                AND xbinning = ?
+                AND ybinning = ?
+                AND filepath IS NOT NULL
+        ''', (exposure, temp_min, temp_max, xbin, ybin))
+
+        master_frames = {row[0] for row in cursor.fetchall()}
+
+        # If master frames exist, return only those
+        if master_frames:
+            return master_frames
+
+        # Otherwise, return non-master dark frames
         cursor.execute(f'''
             SELECT DISTINCT filepath
             FROM xisf_files
             WHERE imagetyp LIKE '%Dark%'
+                AND imagetyp NOT LIKE '%Master%'
                 AND ABS(exposure - ?) < {exp_tolerance}
                 AND ccd_temp BETWEEN ? AND ?
                 AND xbinning = ?
@@ -223,17 +248,41 @@ class ExportProjectWorker(QThread):
 
     def _find_flat_files(self, cursor, filt: str, temp: float,
                         xbin: int, ybin: int, date_loc: str) -> Set[str]:
-        """Find matching flat frame file paths."""
+        """
+        Find matching flat frame file paths.
+
+        Prefers master frames if available; otherwise returns non-master frames.
+        """
         temp_tolerance = self.calibration_matcher.temp_tolerance_flats
 
         temp_min = temp - temp_tolerance if temp else -999
         temp_max = temp + temp_tolerance if temp else 999
 
-        # Try to find flats from same date first
+        # First, try to find master flats from same date
+        cursor.execute('''
+            SELECT DISTINCT filepath
+            FROM xisf_files
+            WHERE imagetyp LIKE '%Master%'
+                AND imagetyp LIKE '%Flat%'
+                AND (filter = ? OR (filter IS NULL AND ? IS NULL))
+                AND ccd_temp BETWEEN ? AND ?
+                AND xbinning = ?
+                AND ybinning = ?
+                AND date_loc = ?
+                AND filepath IS NOT NULL
+        ''', (filt, filt, temp_min, temp_max, xbin, ybin, date_loc))
+
+        master_flats = {row[0] for row in cursor.fetchall()}
+
+        if master_flats:
+            return master_flats
+
+        # Try to find non-master flats from same date
         cursor.execute('''
             SELECT DISTINCT filepath
             FROM xisf_files
             WHERE imagetyp LIKE '%Flat%'
+                AND imagetyp NOT LIKE '%Master%'
                 AND (filter = ? OR (filter IS NULL AND ? IS NULL))
                 AND ccd_temp BETWEEN ? AND ?
                 AND xbinning = ?
@@ -244,36 +293,81 @@ class ExportProjectWorker(QThread):
 
         flats = {row[0] for row in cursor.fetchall()}
 
-        # If no flats from same date, look for any matching flats
-        if not flats:
-            cursor.execute('''
-                SELECT DISTINCT filepath
-                FROM xisf_files
-                WHERE imagetyp LIKE '%Flat%'
-                    AND (filter = ? OR (filter IS NULL AND ? IS NULL))
-                    AND ccd_temp BETWEEN ? AND ?
-                    AND xbinning = ?
-                    AND ybinning = ?
-                    AND filepath IS NOT NULL
-                ORDER BY date_loc DESC
-                LIMIT 50
-            ''', (filt, filt, temp_min, temp_max, xbin, ybin))
+        if flats:
+            return flats
 
-            flats = {row[0] for row in cursor.fetchall()}
+        # If no flats from same date, look for master flats from any date
+        cursor.execute('''
+            SELECT DISTINCT filepath
+            FROM xisf_files
+            WHERE imagetyp LIKE '%Master%'
+                AND imagetyp LIKE '%Flat%'
+                AND (filter = ? OR (filter IS NULL AND ? IS NULL))
+                AND ccd_temp BETWEEN ? AND ?
+                AND xbinning = ?
+                AND ybinning = ?
+                AND filepath IS NOT NULL
+            ORDER BY date_loc DESC
+            LIMIT 50
+        ''', (filt, filt, temp_min, temp_max, xbin, ybin))
 
-        return flats
+        master_flats = {row[0] for row in cursor.fetchall()}
+
+        if master_flats:
+            return master_flats
+
+        # Finally, look for any non-master matching flats
+        cursor.execute('''
+            SELECT DISTINCT filepath
+            FROM xisf_files
+            WHERE imagetyp LIKE '%Flat%'
+                AND imagetyp NOT LIKE '%Master%'
+                AND (filter = ? OR (filter IS NULL AND ? IS NULL))
+                AND ccd_temp BETWEEN ? AND ?
+                AND xbinning = ?
+                AND ybinning = ?
+                AND filepath IS NOT NULL
+            ORDER BY date_loc DESC
+            LIMIT 50
+        ''', (filt, filt, temp_min, temp_max, xbin, ybin))
+
+        return {row[0] for row in cursor.fetchall()}
 
     def _find_bias_files(self, cursor, temp: float, xbin: int, ybin: int) -> Set[str]:
-        """Find matching bias frame file paths."""
+        """
+        Find matching bias frame file paths.
+
+        Prefers master frames if available; otherwise returns non-master frames.
+        """
         temp_tolerance = self.calibration_matcher.temp_tolerance_bias
 
         temp_min = temp - temp_tolerance if temp else -999
         temp_max = temp + temp_tolerance if temp else 999
 
+        # First, check for master bias frames
+        cursor.execute('''
+            SELECT DISTINCT filepath
+            FROM xisf_files
+            WHERE imagetyp LIKE '%Master%'
+                AND imagetyp LIKE '%Bias%'
+                AND ccd_temp BETWEEN ? AND ?
+                AND xbinning = ?
+                AND ybinning = ?
+                AND filepath IS NOT NULL
+        ''', (temp_min, temp_max, xbin, ybin))
+
+        master_frames = {row[0] for row in cursor.fetchall()}
+
+        # If master frames exist, return only those
+        if master_frames:
+            return master_frames
+
+        # Otherwise, return non-master bias frames
         cursor.execute('''
             SELECT DISTINCT filepath
             FROM xisf_files
             WHERE imagetyp LIKE '%Bias%'
+                AND imagetyp NOT LIKE '%Master%'
                 AND ccd_temp BETWEEN ? AND ?
                 AND xbinning = ?
                 AND ybinning = ?
