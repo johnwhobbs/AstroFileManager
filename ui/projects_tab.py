@@ -15,24 +15,28 @@ from PyQt6.QtGui import QColor, QBrush
 from typing import Optional
 
 from core.project_manager import ProjectManager, Project, FilterGoalProgress
+from core.calibration import CalibrationMatcher
 from ui.new_project_dialog import NewProjectDialog
+from ui.export_project_dialog import ExportProjectDialog
 from import_export.subframe_selector_importer import SubFrameSelectorImporter
 
 
 class ProjectsTab(QWidget):
     """Tab for managing imaging projects."""
 
-    def __init__(self, db_path: str, settings: QSettings):
+    def __init__(self, db_path: str, settings: QSettings, calibration_matcher: CalibrationMatcher):
         """
         Initialize Projects tab.
 
         Args:
             db_path: Path to SQLite database
             settings: QSettings object for storing user preferences
+            calibration_matcher: CalibrationMatcher instance for finding calibration frames
         """
         super().__init__()
         self.db_path = db_path
         self.settings = settings
+        self.calibration_matcher = calibration_matcher
         self.project_manager = ProjectManager(db_path)
         self.selected_project_id: Optional[int] = None
         self.current_goals_table: Optional[QTableWidget] = None  # Keep reference for signal connection
@@ -152,6 +156,11 @@ class ProjectsTab(QWidget):
 
         # Action buttons
         action_buttons = QHBoxLayout()
+
+        self.export_files_btn = QPushButton("Export Files for Processing")
+        self.export_files_btn.clicked.connect(self.export_project_files)
+        self.export_files_btn.setVisible(False)
+        action_buttons.addWidget(self.export_files_btn)
 
         self.mark_complete_btn = QPushButton("Mark Complete")
         self.mark_complete_btn.clicked.connect(self.mark_project_complete)
@@ -297,6 +306,7 @@ class ProjectsTab(QWidget):
         self.display_next_steps(project, goals)
 
         # Show action buttons
+        self.export_files_btn.setVisible(True)  # Always visible when project selected
         self.mark_complete_btn.setVisible(project.status == 'active')
         self.archive_btn.setVisible(project.status in ['active', 'completed'])
         self.delete_btn.setVisible(True)
@@ -471,6 +481,7 @@ class ProjectsTab(QWidget):
         self.info_label.setText("Select a project to view details")
         self.goals_group.setVisible(False)
         self.next_steps_group.setVisible(False)
+        self.export_files_btn.setVisible(False)
         self.mark_complete_btn.setVisible(False)
         self.archive_btn.setVisible(False)
         self.delete_btn.setVisible(False)
@@ -616,6 +627,28 @@ class ProjectsTab(QWidget):
             QMessageBox.critical(
                 self, "Import Failed", f"Failed to import quality data:\n{str(e)}"
             )
+
+    def export_project_files(self):
+        """Export project files with calibration frames for processing."""
+        if not self.selected_project_id:
+            QMessageBox.warning(self, "No Project Selected", "Please select a project first")
+            return
+
+        # Get project info
+        project = self.project_manager.get_project(self.selected_project_id)
+        if not project:
+            QMessageBox.warning(self, "Error", "Could not load project information")
+            return
+
+        # Open export dialog
+        dialog = ExportProjectDialog(
+            db_path=self.db_path,
+            project_id=self.selected_project_id,
+            project_name=project.name,
+            calibration_matcher=self.calibration_matcher,
+            parent=self
+        )
+        dialog.exec()
 
     def save_splitter_state(self) -> None:
         """Save the splitter sizes to settings."""
