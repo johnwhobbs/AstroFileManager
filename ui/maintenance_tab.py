@@ -12,7 +12,9 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
     QLabel, QTextEdit, QGroupBox, QComboBox, QLineEdit, QListWidget,
-    QListWidgetItem, QDoubleSpinBox
+    QListWidgetItem, QDoubleSpinBox, QRadioButton, QButtonGroup, QDialog,
+    QDialogButtonBox, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+    QTabWidget
 )
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QColor
@@ -43,6 +45,34 @@ class MaintenanceTab(QWidget):
     def init_ui(self) -> None:
         """Initialize the UI components."""
         layout = QVBoxLayout(self)
+
+        # Create tab widget
+        tab_widget = QTabWidget()
+
+        # Create three tabs
+        database_tab = QWidget()
+        calibration_tab = QWidget()
+        organization_tab = QWidget()
+
+        # Add tabs to tab widget
+        tab_widget.addTab(database_tab, "Database")
+        tab_widget.addTab(calibration_tab, "Calibration Frames")
+        tab_widget.addTab(organization_tab, "File Organization")
+
+        # Set up each tab
+        self._setup_database_tab(database_tab)
+        self._setup_calibration_tab(calibration_tab)
+        self._setup_organization_tab(organization_tab)
+
+        # Add tab widget to main layout
+        layout.addWidget(tab_widget)
+
+        # Populate initial values
+        self.on_keyword_changed()
+
+    def _setup_database_tab(self, tab: QWidget) -> None:
+        """Set up the Database tab with database management and search/replace sections."""
+        layout = QVBoxLayout(tab)
 
         # Clear Database section
         clear_group = QGroupBox("Database Management")
@@ -109,6 +139,13 @@ class MaintenanceTab(QWidget):
         replace_group.setLayout(replace_layout)
         layout.addWidget(replace_group)
 
+        # Add stretch to push everything to the top
+        layout.addStretch()
+
+    def _setup_calibration_tab(self, tab: QWidget) -> None:
+        """Set up the Calibration Frames tab with master frame tagging and cleanup sections."""
+        layout = QVBoxLayout(tab)
+
         # Master Frame Temperature Tagging section
         master_temp_group = QGroupBox("Master Frame Temperature Tagging")
         master_temp_layout = QVBoxLayout()
@@ -160,6 +197,125 @@ class MaintenanceTab(QWidget):
         master_temp_group.setLayout(master_temp_layout)
         layout.addWidget(master_temp_group)
 
+        # Remove Duplicate Calibration Frames section
+        remove_dupes_group = QGroupBox("Remove Duplicate Calibration Frames")
+        remove_dupes_layout = QVBoxLayout()
+
+        remove_dupes_info = QLabel("Identify and remove individual calibration frames when master frames exist:")
+        remove_dupes_layout.addWidget(remove_dupes_info)
+
+        remove_dupes_help = QLabel("When a master flat, dark, or bias frame exists, individual frames with matching parameters are redundant.")
+        remove_dupes_help.setStyleSheet("color: #888888; font-size: 10px;")
+        remove_dupes_layout.addWidget(remove_dupes_help)
+
+        # Scan button
+        scan_dupes_btn = QPushButton('Scan for Duplicates')
+        scan_dupes_btn.clicked.connect(self.scan_for_duplicates)
+        remove_dupes_layout.addWidget(scan_dupes_btn)
+
+        # Results display
+        self.dupes_results_label = QLabel("No scan performed yet")
+        self.dupes_results_label.setStyleSheet("padding: 10px; background-color: #f0f0f0; border-radius: 3px;")
+        self.dupes_results_label.setWordWrap(True)
+        remove_dupes_layout.addWidget(self.dupes_results_label)
+
+        # Preview button
+        self.preview_dupes_btn = QPushButton('Preview Duplicate List')
+        self.preview_dupes_btn.clicked.connect(self.preview_duplicates)
+        self.preview_dupes_btn.setEnabled(False)
+        remove_dupes_layout.addWidget(self.preview_dupes_btn)
+
+        # Removal options
+        options_label = QLabel("Removal action:")
+        remove_dupes_layout.addWidget(options_label)
+
+        self.removal_button_group = QButtonGroup()
+
+        self.remove_db_only_radio = QRadioButton("Remove from database only (keep files on disk)")
+        self.remove_db_only_radio.setChecked(True)
+        self.removal_button_group.addButton(self.remove_db_only_radio)
+        remove_dupes_layout.addWidget(self.remove_db_only_radio)
+
+        self.remove_db_and_files_radio = QRadioButton("Remove from database AND delete files from disk")
+        self.removal_button_group.addButton(self.remove_db_and_files_radio)
+        remove_dupes_layout.addWidget(self.remove_db_and_files_radio)
+
+        # Remove button
+        remove_dupes_button_layout = QHBoxLayout()
+        remove_dupes_button_layout.addStretch()
+        self.remove_dupes_btn = QPushButton('Remove Duplicates')
+        self.remove_dupes_btn.clicked.connect(self.remove_duplicates)
+        self.remove_dupes_btn.setEnabled(False)
+        self.remove_dupes_btn.setStyleSheet("QPushButton { background-color: #8b0000; color: white; } QPushButton:hover { background-color: #a00000; }")
+        remove_dupes_button_layout.addWidget(self.remove_dupes_btn)
+        remove_dupes_layout.addLayout(remove_dupes_button_layout)
+
+        remove_dupes_group.setLayout(remove_dupes_layout)
+        layout.addWidget(remove_dupes_group)
+
+        # Remove Orphaned Calibration Frames section
+        remove_orphans_group = QGroupBox("Remove Orphaned Calibration Frames")
+        remove_orphans_layout = QVBoxLayout()
+
+        remove_orphans_info = QLabel("Identify calibration frames that have no matching light frames:")
+        remove_orphans_layout.addWidget(remove_orphans_info)
+
+        remove_orphans_help = QLabel("Orphaned frames are calibration frames without corresponding light frames in your database.")
+        remove_orphans_help.setStyleSheet("color: #888888; font-size: 10px;")
+        remove_orphans_layout.addWidget(remove_orphans_help)
+
+        # Scan button
+        scan_orphans_btn = QPushButton('Scan for Orphaned Frames')
+        scan_orphans_btn.clicked.connect(self.scan_for_orphaned_frames)
+        remove_orphans_layout.addWidget(scan_orphans_btn)
+
+        # Results display
+        self.orphans_results_label = QLabel("No scan performed yet")
+        self.orphans_results_label.setStyleSheet("padding: 10px; background-color: #f0f0f0; border-radius: 3px;")
+        self.orphans_results_label.setWordWrap(True)
+        remove_orphans_layout.addWidget(self.orphans_results_label)
+
+        # Preview button
+        self.preview_orphans_btn = QPushButton('Preview Orphaned List')
+        self.preview_orphans_btn.clicked.connect(self.preview_orphaned_frames)
+        self.preview_orphans_btn.setEnabled(False)
+        remove_orphans_layout.addWidget(self.preview_orphans_btn)
+
+        # Removal options
+        orphan_options_label = QLabel("Removal action:")
+        remove_orphans_layout.addWidget(orphan_options_label)
+
+        self.orphan_removal_button_group = QButtonGroup()
+
+        self.orphan_remove_db_only_radio = QRadioButton("Remove from database only (keep files on disk)")
+        self.orphan_remove_db_only_radio.setChecked(True)
+        self.orphan_removal_button_group.addButton(self.orphan_remove_db_only_radio)
+        remove_orphans_layout.addWidget(self.orphan_remove_db_only_radio)
+
+        self.orphan_remove_db_and_files_radio = QRadioButton("Remove from database AND delete files from disk")
+        self.orphan_removal_button_group.addButton(self.orphan_remove_db_and_files_radio)
+        remove_orphans_layout.addWidget(self.orphan_remove_db_and_files_radio)
+
+        # Remove button
+        remove_orphans_button_layout = QHBoxLayout()
+        remove_orphans_button_layout.addStretch()
+        self.remove_orphans_btn = QPushButton('Remove Orphaned Frames')
+        self.remove_orphans_btn.clicked.connect(self.remove_orphaned_frames)
+        self.remove_orphans_btn.setEnabled(False)
+        self.remove_orphans_btn.setStyleSheet("QPushButton { background-color: #8b0000; color: white; } QPushButton:hover { background-color: #a00000; }")
+        remove_orphans_button_layout.addWidget(self.remove_orphans_btn)
+        remove_orphans_layout.addLayout(remove_orphans_button_layout)
+
+        remove_orphans_group.setLayout(remove_orphans_layout)
+        layout.addWidget(remove_orphans_group)
+
+        # Add stretch to push everything to the top
+        layout.addStretch()
+
+    def _setup_organization_tab(self, tab: QWidget) -> None:
+        """Set up the File Organization tab."""
+        layout = QVBoxLayout(tab)
+
         # File Organization section
         organize_group = QGroupBox("File Organization")
         organize_layout = QVBoxLayout()
@@ -192,9 +348,6 @@ class MaintenanceTab(QWidget):
 
         # Add stretch to push everything to the top
         layout.addStretch()
-
-        # Populate initial values
-        self.on_keyword_changed()
 
     def on_keyword_changed(self) -> None:
         """Update the current value dropdown when keyword selection changes."""
@@ -761,3 +914,574 @@ class MaintenanceTab(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to tag master frames: {e}')
+
+    def scan_for_duplicates(self) -> None:
+        """Scan for duplicate calibration frames where masters exist."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Store duplicate data for later use
+            self.duplicate_data = {
+                'darks': [],
+                'flats': [],
+                'bias': []
+            }
+
+            total_count = 0
+            total_size = 0
+
+            # Find duplicate dark frames
+            cursor.execute('''
+                SELECT DISTINCT
+                    i.id, i.filepath, i.filename, i.exposure, i.ccd_temp, i.xbinning, i.ybinning
+                FROM xisf_files i
+                WHERE i.imagetyp LIKE '%Dark%'
+                  AND i.imagetyp NOT LIKE '%Master%'
+                  AND EXISTS (
+                      SELECT 1 FROM xisf_files m
+                      WHERE m.imagetyp LIKE '%Master%Dark%'
+                        AND ABS(m.exposure - i.exposure) < 0.1
+                        AND ABS(COALESCE(m.ccd_temp, 0) - COALESCE(i.ccd_temp, 0)) < 5
+                        AND m.xbinning = i.xbinning
+                        AND m.ybinning = i.ybinning
+                  )
+            ''')
+            darks = cursor.fetchall()
+            self.duplicate_data['darks'] = darks
+            total_count += len(darks)
+
+            # Find duplicate flat frames
+            cursor.execute('''
+                SELECT DISTINCT
+                    i.id, i.filepath, i.filename, i.filter, i.date_loc, i.ccd_temp, i.xbinning, i.ybinning
+                FROM xisf_files i
+                WHERE i.imagetyp LIKE '%Flat%'
+                  AND i.imagetyp NOT LIKE '%Master%'
+                  AND EXISTS (
+                      SELECT 1 FROM xisf_files m
+                      WHERE m.imagetyp LIKE '%Master%Flat%'
+                        AND (m.filter = i.filter OR (m.filter IS NULL AND i.filter IS NULL))
+                        AND m.date_loc = i.date_loc
+                        AND ABS(COALESCE(m.ccd_temp, 0) - COALESCE(i.ccd_temp, 0)) < 5
+                        AND m.xbinning = i.xbinning
+                        AND m.ybinning = i.ybinning
+                  )
+            ''')
+            flats = cursor.fetchall()
+            self.duplicate_data['flats'] = flats
+            total_count += len(flats)
+
+            # Find duplicate bias frames
+            cursor.execute('''
+                SELECT DISTINCT
+                    i.id, i.filepath, i.filename, i.ccd_temp, i.xbinning, i.ybinning
+                FROM xisf_files i
+                WHERE i.imagetyp LIKE '%Bias%'
+                  AND i.imagetyp NOT LIKE '%Master%'
+                  AND EXISTS (
+                      SELECT 1 FROM xisf_files m
+                      WHERE m.imagetyp LIKE '%Master%Bias%'
+                        AND ABS(COALESCE(m.ccd_temp, 0) - COALESCE(i.ccd_temp, 0)) < 5
+                        AND m.xbinning = i.xbinning
+                        AND m.ybinning = i.ybinning
+                  )
+            ''')
+            bias = cursor.fetchall()
+            self.duplicate_data['bias'] = bias
+            total_count += len(bias)
+
+            # Calculate total file size
+            for frame_type in ['darks', 'flats', 'bias']:
+                for row in self.duplicate_data[frame_type]:
+                    filepath = row[1]  # filepath is second column
+                    if filepath and os.path.exists(filepath):
+                        total_size += os.path.getsize(filepath)
+
+            conn.close()
+
+            # Format size
+            size_str = self._format_file_size(total_size)
+
+            # Update results label
+            if total_count == 0:
+                self.dupes_results_label.setText(
+                    "No duplicate calibration frames found.\n"
+                    "All individual frames have no corresponding master frames."
+                )
+                self.preview_dupes_btn.setEnabled(False)
+                self.remove_dupes_btn.setEnabled(False)
+            else:
+                results_text = (
+                    f"<b>Found {total_count} duplicate calibration frames:</b><br>"
+                    f"• Dark frames: {len(darks)} files<br>"
+                    f"• Flat frames: {len(flats)} files<br>"
+                    f"• Bias frames: {len(bias)} files<br>"
+                    f"<br><b>Total disk space: {size_str}</b>"
+                )
+                self.dupes_results_label.setText(results_text)
+                self.preview_dupes_btn.setEnabled(True)
+                self.remove_dupes_btn.setEnabled(True)
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to scan for duplicates: {e}')
+
+    def _format_file_size(self, size_bytes: int) -> str:
+        """Format file size in human-readable format."""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size_bytes < 1024.0:
+                return f"{size_bytes:.1f} {unit}"
+            size_bytes /= 1024.0
+        return f"{size_bytes:.1f} PB"
+
+    def preview_duplicates(self) -> None:
+        """Show a dialog with the list of duplicate files."""
+        if not hasattr(self, 'duplicate_data'):
+            QMessageBox.warning(self, 'No Data', 'Please scan for duplicates first.')
+            return
+
+        # Create dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Duplicate Calibration Frames Preview")
+        dialog.setMinimumWidth(800)
+        dialog.setMinimumHeight(600)
+
+        layout = QVBoxLayout(dialog)
+
+        # Info label
+        total_count = sum(len(self.duplicate_data[t]) for t in ['darks', 'flats', 'bias'])
+        info_label = QLabel(f"The following {total_count} files will be removed:")
+        layout.addWidget(info_label)
+
+        # Create table
+        table = QTableWidget()
+        table.setColumnCount(4)
+        table.setHorizontalHeaderLabels(['Type', 'Filename', 'Parameters', 'Path'])
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+
+        # Populate table
+        row = 0
+        for frame_type, frames in self.duplicate_data.items():
+            for frame in frames:
+                table.insertRow(row)
+
+                # Type
+                type_label = frame_type.capitalize()[:-1]  # Remove trailing 's'
+                table.setItem(row, 0, QTableWidgetItem(type_label))
+
+                # Filename
+                filename = frame[2]  # filename column
+                table.setItem(row, 1, QTableWidgetItem(filename))
+
+                # Parameters
+                if frame_type == 'darks':
+                    params = f"Exp:{frame[3]:.1f}s, Temp:{frame[4]:.1f}°C, Bin{int(frame[5])}x{int(frame[6])}"
+                elif frame_type == 'flats':
+                    filt = frame[3] or "None"
+                    params = f"Filter:{filt}, Date:{frame[4]}, Temp:{frame[5]:.1f}°C, Bin{int(frame[6])}x{int(frame[7])}"
+                elif frame_type == 'bias':
+                    params = f"Temp:{frame[3]:.1f}°C, Bin{int(frame[4])}x{int(frame[5])}"
+                table.setItem(row, 2, QTableWidgetItem(params))
+
+                # Path
+                filepath = frame[1]
+                table.setItem(row, 3, QTableWidgetItem(filepath or "N/A"))
+
+                row += 1
+
+        # Resize columns
+        table.resizeColumnsToContents()
+        layout.addWidget(table)
+
+        # Close button
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        dialog.exec()
+
+    def remove_duplicates(self) -> None:
+        """Remove duplicate calibration frames based on user selection."""
+        if not hasattr(self, 'duplicate_data'):
+            QMessageBox.warning(self, 'No Data', 'Please scan for duplicates first.')
+            return
+
+        total_count = sum(len(self.duplicate_data[t]) for t in ['darks', 'flats', 'bias'])
+        if total_count == 0:
+            QMessageBox.information(self, 'No Duplicates', 'No duplicate frames to remove.')
+            return
+
+        # Determine action
+        delete_files = self.remove_db_and_files_radio.isChecked()
+        action_text = "remove from database AND delete files from disk" if delete_files else "remove from database only"
+
+        # Confirm
+        reply = QMessageBox.question(
+            self, 'Confirm Removal',
+            f'Are you sure you want to {action_text}?\n\n'
+            f'This will affect {total_count} calibration frames.\n\n'
+            f'Individual frames will be removed where master frames exist.\n'
+            f'Master frames will NOT be affected.\n\n'
+            f'This action cannot be undone!',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            removed_count = 0
+            deleted_files_count = 0
+            errors = []
+
+            # Collect all IDs and filepaths
+            all_frames = []
+            for frame_type in ['darks', 'flats', 'bias']:
+                for frame in self.duplicate_data[frame_type]:
+                    file_id = frame[0]
+                    filepath = frame[1]
+                    all_frames.append((file_id, filepath))
+
+            # Remove from database and optionally delete files
+            for file_id, filepath in all_frames:
+                try:
+                    # Remove from database
+                    cursor.execute('DELETE FROM xisf_files WHERE id = ?', (file_id,))
+                    removed_count += 1
+
+                    # Delete file if requested
+                    if delete_files and filepath and os.path.exists(filepath):
+                        os.remove(filepath)
+                        deleted_files_count += 1
+
+                        # Try to clean up empty directories
+                        try:
+                            parent_dir = os.path.dirname(filepath)
+                            if parent_dir and os.path.isdir(parent_dir) and not os.listdir(parent_dir):
+                                os.rmdir(parent_dir)
+                        except:
+                            pass  # Ignore cleanup errors
+
+                except Exception as e:
+                    errors.append(f"File ID {file_id}: {str(e)}")
+
+            conn.commit()
+            conn.close()
+
+            # Show results
+            message = f'Successfully removed {removed_count} duplicate frame(s) from database.'
+            if delete_files:
+                message += f'\n{deleted_files_count} file(s) deleted from disk.'
+
+            if errors:
+                message += f'\n\nErrors encountered:\n' + '\n'.join(errors[:5])
+                if len(errors) > 5:
+                    message += f'\n... and {len(errors) - 5} more'
+                QMessageBox.warning(self, 'Completed with Errors', message)
+            else:
+                QMessageBox.information(self, 'Success', message)
+
+            # Clear duplicate data and reset UI
+            self.duplicate_data = None
+            self.dupes_results_label.setText("No scan performed yet")
+            self.preview_dupes_btn.setEnabled(False)
+            self.remove_dupes_btn.setEnabled(False)
+
+            # Log to import tab if available
+            if self.import_log_widget:
+                self.import_log_widget.append(f'\nRemoved {removed_count} duplicate calibration frames')
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to remove duplicates: {e}')
+
+    def scan_for_orphaned_frames(self) -> None:
+        """Scan for orphaned calibration frames with no matching light frames."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Store orphaned data for later use
+            self.orphaned_data = {
+                'darks': [],
+                'flats': [],
+                'bias': []
+            }
+
+            total_count = 0
+            total_size = 0
+
+            # Find orphaned dark frames (no matching light frames)
+            cursor.execute('''
+                SELECT DISTINCT
+                    i.id, i.filepath, i.filename, i.exposure, i.ccd_temp, i.xbinning, i.ybinning, i.imagetyp
+                FROM xisf_files i
+                WHERE i.imagetyp LIKE '%Dark%'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM xisf_files light
+                      WHERE light.imagetyp LIKE '%Light%'
+                        AND ABS(light.exposure - i.exposure) < 0.1
+                        AND ABS(COALESCE(light.ccd_temp, 0) - COALESCE(i.ccd_temp, 0)) <= 1.0
+                        AND light.xbinning = i.xbinning
+                        AND light.ybinning = i.ybinning
+                  )
+            ''')
+            darks = cursor.fetchall()
+            self.orphaned_data['darks'] = darks
+            total_count += len(darks)
+
+            # Find orphaned flat frames (no matching light frames)
+            cursor.execute('''
+                SELECT DISTINCT
+                    i.id, i.filepath, i.filename, i.filter, i.date_loc, i.ccd_temp, i.xbinning, i.ybinning, i.imagetyp
+                FROM xisf_files i
+                WHERE i.imagetyp LIKE '%Flat%'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM xisf_files light
+                      WHERE light.imagetyp LIKE '%Light%'
+                        AND (light.filter = i.filter OR (light.filter IS NULL AND i.filter IS NULL))
+                        AND light.date_loc = i.date_loc
+                        AND ABS(COALESCE(light.ccd_temp, 0) - COALESCE(i.ccd_temp, 0)) <= 3.0
+                        AND light.xbinning = i.xbinning
+                        AND light.ybinning = i.ybinning
+                  )
+            ''')
+            flats = cursor.fetchall()
+            self.orphaned_data['flats'] = flats
+            total_count += len(flats)
+
+            # Find orphaned bias frames (no matching light frames)
+            cursor.execute('''
+                SELECT DISTINCT
+                    i.id, i.filepath, i.filename, i.ccd_temp, i.xbinning, i.ybinning, i.imagetyp
+                FROM xisf_files i
+                WHERE i.imagetyp LIKE '%Bias%'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM xisf_files light
+                      WHERE light.imagetyp LIKE '%Light%'
+                        AND ABS(COALESCE(light.ccd_temp, 0) - COALESCE(i.ccd_temp, 0)) <= 1.0
+                        AND light.xbinning = i.xbinning
+                        AND light.ybinning = i.ybinning
+                  )
+            ''')
+            bias = cursor.fetchall()
+            self.orphaned_data['bias'] = bias
+            total_count += len(bias)
+
+            # Calculate total file size
+            for frame_type in ['darks', 'flats', 'bias']:
+                for row in self.orphaned_data[frame_type]:
+                    filepath = row[1]  # filepath is second column
+                    if filepath and os.path.exists(filepath):
+                        total_size += os.path.getsize(filepath)
+
+            conn.close()
+
+            # Format size
+            size_str = self._format_file_size(total_size)
+
+            # Update results label
+            if total_count == 0:
+                self.orphans_results_label.setText(
+                    "No orphaned calibration frames found.\n"
+                    "All calibration frames have corresponding light frames."
+                )
+                self.preview_orphans_btn.setEnabled(False)
+                self.remove_orphans_btn.setEnabled(False)
+            else:
+                results_text = (
+                    f"<b>Found {total_count} orphaned calibration frames:</b><br>"
+                    f"• Dark frames: {len(darks)} files<br>"
+                    f"• Flat frames: {len(flats)} files<br>"
+                    f"• Bias frames: {len(bias)} files<br>"
+                    f"<br><b>Total disk space: {size_str}</b>"
+                )
+                self.orphans_results_label.setText(results_text)
+                self.preview_orphans_btn.setEnabled(True)
+                self.remove_orphans_btn.setEnabled(True)
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to scan for orphaned frames: {e}')
+
+    def preview_orphaned_frames(self) -> None:
+        """Show a dialog with the list of orphaned files."""
+        if not hasattr(self, 'orphaned_data'):
+            QMessageBox.warning(self, 'No Data', 'Please scan for orphaned frames first.')
+            return
+
+        # Create dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Orphaned Calibration Frames Preview")
+        dialog.setMinimumWidth(900)
+        dialog.setMinimumHeight(600)
+
+        layout = QVBoxLayout(dialog)
+
+        # Info label
+        total_count = sum(len(self.orphaned_data[t]) for t in ['darks', 'flats', 'bias'])
+        info_label = QLabel(f"The following {total_count} calibration frames have no matching light frames:")
+        layout.addWidget(info_label)
+
+        # Create table
+        table = QTableWidget()
+        table.setColumnCount(5)
+        table.setHorizontalHeaderLabels(['Type', 'Frame Type', 'Filename', 'Parameters', 'Path'])
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+
+        # Populate table
+        row = 0
+        for frame_type, frames in self.orphaned_data.items():
+            for frame in frames:
+                table.insertRow(row)
+
+                # Type
+                type_label = frame_type.capitalize()[:-1]  # Remove trailing 's'
+                table.setItem(row, 0, QTableWidgetItem(type_label))
+
+                # Frame Type (imagetyp from database)
+                if frame_type == 'darks':
+                    imagetyp = frame[7]
+                elif frame_type == 'flats':
+                    imagetyp = frame[8]
+                elif frame_type == 'bias':
+                    imagetyp = frame[6]
+                table.setItem(row, 1, QTableWidgetItem(imagetyp))
+
+                # Filename
+                filename = frame[2]  # filename column
+                table.setItem(row, 2, QTableWidgetItem(filename))
+
+                # Parameters
+                if frame_type == 'darks':
+                    temp_str = f"{frame[4]:.1f}°C" if frame[4] is not None else "N/A"
+                    params = f"Exp:{frame[3]:.1f}s, Temp:{temp_str}, Bin{int(frame[5])}x{int(frame[6])}"
+                elif frame_type == 'flats':
+                    filt = frame[3] or "None"
+                    date = frame[4] or "N/A"
+                    temp_str = f"{frame[5]:.1f}°C" if frame[5] is not None else "N/A"
+                    params = f"Filter:{filt}, Date:{date}, Temp:{temp_str}, Bin{int(frame[6])}x{int(frame[7])}"
+                elif frame_type == 'bias':
+                    temp_str = f"{frame[3]:.1f}°C" if frame[3] is not None else "N/A"
+                    params = f"Temp:{temp_str}, Bin{int(frame[4])}x{int(frame[5])}"
+                table.setItem(row, 3, QTableWidgetItem(params))
+
+                # Path
+                filepath = frame[1]
+                table.setItem(row, 4, QTableWidgetItem(filepath or "N/A"))
+
+                row += 1
+
+        # Resize columns
+        table.resizeColumnsToContents()
+        layout.addWidget(table)
+
+        # Close button
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        dialog.exec()
+
+    def remove_orphaned_frames(self) -> None:
+        """Remove orphaned calibration frames based on user selection."""
+        if not hasattr(self, 'orphaned_data'):
+            QMessageBox.warning(self, 'No Data', 'Please scan for orphaned frames first.')
+            return
+
+        total_count = sum(len(self.orphaned_data[t]) for t in ['darks', 'flats', 'bias'])
+        if total_count == 0:
+            QMessageBox.information(self, 'No Orphaned Frames', 'No orphaned frames to remove.')
+            return
+
+        # Determine action
+        delete_files = self.orphan_remove_db_and_files_radio.isChecked()
+        action_text = "remove from database AND delete files from disk" if delete_files else "remove from database only"
+
+        # Confirm
+        reply = QMessageBox.question(
+            self, 'Confirm Removal',
+            f'Are you sure you want to {action_text}?\n\n'
+            f'This will affect {total_count} calibration frames.\n\n'
+            f'These frames have no matching light frames in your database.\n\n'
+            f'This action cannot be undone!',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            removed_count = 0
+            deleted_files_count = 0
+            errors = []
+
+            # Collect all IDs and filepaths
+            all_frames = []
+            for frame_type in ['darks', 'flats', 'bias']:
+                for frame in self.orphaned_data[frame_type]:
+                    file_id = frame[0]
+                    filepath = frame[1]
+                    all_frames.append((file_id, filepath))
+
+            # Remove from database and optionally delete files
+            for file_id, filepath in all_frames:
+                try:
+                    # Remove from database
+                    cursor.execute('DELETE FROM xisf_files WHERE id = ?', (file_id,))
+                    removed_count += 1
+
+                    # Delete file if requested
+                    if delete_files and filepath and os.path.exists(filepath):
+                        os.remove(filepath)
+                        deleted_files_count += 1
+
+                        # Try to clean up empty directories
+                        try:
+                            parent_dir = os.path.dirname(filepath)
+                            if parent_dir and os.path.isdir(parent_dir) and not os.listdir(parent_dir):
+                                os.rmdir(parent_dir)
+                        except:
+                            pass  # Ignore cleanup errors
+
+                except Exception as e:
+                    errors.append(f"File ID {file_id}: {str(e)}")
+
+            conn.commit()
+            conn.close()
+
+            # Show results
+            message = f'Successfully removed {removed_count} orphaned frame(s) from database.'
+            if delete_files:
+                message += f'\n{deleted_files_count} file(s) deleted from disk.'
+
+            if errors:
+                message += f'\n\nErrors encountered:\n' + '\n'.join(errors[:5])
+                if len(errors) > 5:
+                    message += f'\n... and {len(errors) - 5} more'
+                QMessageBox.warning(self, 'Completed with Errors', message)
+            else:
+                QMessageBox.information(self, 'Success', message)
+
+            # Clear orphaned data and reset UI
+            self.orphaned_data = None
+            self.orphans_results_label.setText("No scan performed yet")
+            self.preview_orphans_btn.setEnabled(False)
+            self.remove_orphans_btn.setEnabled(False)
+
+            # Log to import tab if available
+            if self.import_log_widget:
+                self.import_log_widget.append(f'\nRemoved {removed_count} orphaned calibration frames')
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to remove orphaned frames: {e}')
