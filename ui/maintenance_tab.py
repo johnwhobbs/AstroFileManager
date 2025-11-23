@@ -556,7 +556,12 @@ class MaintenanceTab(QWidget):
         """Clear all records from the database."""
         reply = QMessageBox.question(
             self, 'Confirm Clear',
-            'Are you sure you want to delete all records from the database?',
+            'Are you sure you want to delete all records from the database?\n\n'
+            'This will clear:\n'
+            '- All frame data\n'
+            '- All projects\n'
+            '- All project sessions\n'
+            '- All project filter goals',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
@@ -565,7 +570,14 @@ class MaintenanceTab(QWidget):
             try:
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
+
+                # Delete from all tables
+                # Order matters: delete child tables first to avoid foreign key issues
+                cursor.execute('DELETE FROM project_sessions')
+                cursor.execute('DELETE FROM project_filter_goals')
+                cursor.execute('DELETE FROM projects')
                 cursor.execute('DELETE FROM xisf_files')
+
                 conn.commit()
                 conn.close()
 
