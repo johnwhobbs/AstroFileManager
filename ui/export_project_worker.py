@@ -77,7 +77,7 @@ class ExportProjectWorker(QThread):
                           len(calib_files['bias']))
 
             if total_files == 0:
-                self.error_occurred.emit("No files to export")
+                self.error_occurred.emit("No files to checkout")
                 return
 
             copied_count = 0
@@ -114,7 +114,7 @@ class ExportProjectWorker(QThread):
                 progress = 15 + int((copied_count / total_files) * 70)
                 self.progress_updated.emit(progress, f"Copying files ({copied_count}/{total_files})...")
 
-            self.progress_updated.emit(100, "Export complete!")
+            self.progress_updated.emit(100, "Checkout complete!")
             self.finished_successfully.emit(
                 len(light_frames),
                 len(calib_files['darks']),
@@ -123,7 +123,7 @@ class ExportProjectWorker(QThread):
             )
 
         except Exception as e:
-            self.error_occurred.emit(f"Export failed: {str(e)}")
+            self.error_occurred.emit(f"Checkout failed: {str(e)}")
 
     def _get_project_light_frames(self) -> List[str]:
         """Get all light frame file paths for the project."""

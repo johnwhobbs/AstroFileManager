@@ -157,7 +157,7 @@ class ProjectsTab(QWidget):
         # Action buttons
         action_buttons = QHBoxLayout()
 
-        self.export_files_btn = QPushButton("Export Files for Processing")
+        self.export_files_btn = QPushButton("Checkout Files for Processing")
         self.export_files_btn.clicked.connect(self.export_project_files)
         self.export_files_btn.setVisible(False)
         action_buttons.addWidget(self.export_files_btn)
