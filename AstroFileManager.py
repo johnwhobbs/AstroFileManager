@@ -81,7 +81,7 @@ class XISFCatalogGUI(QMainWindow):
             reimport_callback=self.import_tab.start_import
         )
         self.analytics_tab = AnalyticsTab(self.db_path, self.settings)
-        self.projects_tab = ProjectsTab(self.db_path, self.settings)
+        self.projects_tab = ProjectsTab(self.db_path, self.settings, self.calibration)
 
         # Set cross-tab dependencies after all tabs are created
         self.import_tab.clear_db_btn = self.maintenance_tab.clear_db_btn
