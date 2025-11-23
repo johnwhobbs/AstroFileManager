@@ -766,6 +766,9 @@ Imported: {result[11] or 'N/A'}
 
             self.catalog_object_filter.blockSignals(False)
 
+            # Save expanded state before clearing
+            expanded_paths = self._save_expanded_state()
+
             # Clear and build tree
             self.catalog_tree.setUpdatesEnabled(False)
             self.catalog_tree.clear()
@@ -779,6 +782,9 @@ Imported: {result[11] or 'N/A'}
             calib_data = result.get('calib_data', {})
             if any(calib_data.values()):  # If any calibration data exists
                 self._build_calibration_frames_from_data(calib_data)
+
+            # Restore expanded state
+            self._restore_expanded_state(expanded_paths)
 
             self.catalog_tree.setUpdatesEnabled(True)
 
@@ -1141,3 +1147,60 @@ Imported: {result[11] or 'N/A'}
             if color:
                 for col in range(9):
                     file_item.setBackground(col, QBrush(color))
+
+    def _save_expanded_state(self) -> set:
+        """
+        Save the expanded state of all tree items.
+
+        Returns:
+            Set of tuples representing paths to expanded items
+        """
+        expanded_paths = set()
+
+        def save_item_state(item: QTreeWidgetItem, path: tuple = ()):
+            """Recursively save expanded state."""
+            # Create path using item text from column 0
+            current_path = path + (item.text(0),)
+
+            # If item is expanded, save its path
+            if item.isExpanded():
+                expanded_paths.add(current_path)
+
+            # Process children
+            for i in range(item.childCount()):
+                save_item_state(item.child(i), current_path)
+
+        # Process all top-level items
+        root = self.catalog_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            save_item_state(root.child(i))
+
+        return expanded_paths
+
+    def _restore_expanded_state(self, expanded_paths: set):
+        """
+        Restore the expanded state of tree items.
+
+        Args:
+            expanded_paths: Set of tuples representing paths to expanded items
+        """
+        if not expanded_paths:
+            return
+
+        def restore_item_state(item: QTreeWidgetItem, path: tuple = ()):
+            """Recursively restore expanded state."""
+            # Create path using item text from column 0
+            current_path = path + (item.text(0),)
+
+            # If this path was expanded, expand it
+            if current_path in expanded_paths:
+                item.setExpanded(True)
+
+            # Process children
+            for i in range(item.childCount()):
+                restore_item_state(item.child(i), current_path)
+
+        # Process all top-level items
+        root = self.catalog_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            restore_item_state(root.child(i))
