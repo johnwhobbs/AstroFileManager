@@ -465,6 +465,101 @@ class ProjectManager:
         finally:
             conn.close()
 
+    def get_session_assignment(
+        self,
+        date_loc: str,
+        object_name: str,
+        filter_name: Optional[str] = None
+    ) -> Optional[Tuple[int, int, str]]:
+        """
+        Check if a session is assigned to a project.
+
+        Args:
+            date_loc: Session date
+            object_name: Object name
+            filter_name: Optional filter name
+
+        Returns:
+            Tuple of (project_id, assignment_id, project_name) if assigned, None otherwise
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT ps.project_id, ps.id, p.name
+                FROM project_sessions ps
+                JOIN projects p ON ps.project_id = p.id
+                WHERE ps.date_loc = ?
+                AND ps.object_name = ?
+                AND (ps.filter = ? OR (ps.filter IS NULL AND ? IS NULL))
+            ''', (date_loc, object_name, filter_name, filter_name))
+
+            result = cursor.fetchone()
+            return result if result else None
+
+        finally:
+            conn.close()
+
+    def unassign_session_from_project(
+        self,
+        date_loc: str,
+        object_name: str,
+        filter_name: Optional[str] = None
+    ):
+        """
+        Unassign a session from a project.
+
+        Args:
+            date_loc: Session date
+            object_name: Object name
+            filter_name: Optional filter name
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            # Get the project_id before deleting
+            cursor.execute('''
+                SELECT project_id
+                FROM project_sessions
+                WHERE date_loc = ?
+                AND object_name = ?
+                AND (filter = ? OR (filter IS NULL AND ? IS NULL))
+            ''', (date_loc, object_name, filter_name, filter_name))
+
+            result = cursor.fetchone()
+            if not result:
+                return  # Session not assigned
+
+            project_id = result[0]
+
+            # Delete the session assignment
+            cursor.execute('''
+                DELETE FROM project_sessions
+                WHERE date_loc = ?
+                AND object_name = ?
+                AND (filter = ? OR (filter IS NULL AND ? IS NULL))
+            ''', (date_loc, object_name, filter_name, filter_name))
+
+            # Unlink frames from project
+            cursor.execute('''
+                UPDATE xisf_files
+                SET project_id = NULL, session_assignment_id = NULL
+                WHERE date_loc = ?
+                AND object = ?
+                AND imagetyp LIKE '%Light%'
+                AND (filter = ? OR (filter IS NULL AND ? IS NULL))
+            ''', (date_loc, object_name, filter_name, filter_name))
+
+            # Update filter goal counts for the project
+            self._update_filter_goal_counts(cursor, project_id)
+
+            conn.commit()
+
+        finally:
+            conn.close()
+
     def delete_project(self, project_id: int):
         """
         Delete a project and all related data.
