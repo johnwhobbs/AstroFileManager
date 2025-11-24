@@ -100,6 +100,12 @@ class ViewCatalogTab(QWidget):
         self.catalog_imagetype_filter.currentTextChanged.connect(self.refresh_catalog_view)
         filter_layout.addWidget(self.catalog_imagetype_filter)
 
+        filter_layout.addWidget(QLabel("Approval:"))
+        self.catalog_approval_filter = QComboBox()
+        self.catalog_approval_filter.addItems(['All', 'Approved', 'Rejected', 'Not Graded'])
+        self.catalog_approval_filter.currentTextChanged.connect(self.refresh_catalog_view)
+        filter_layout.addWidget(self.catalog_approval_filter)
+
         filter_layout.addWidget(QLabel("Object:"))
         self.catalog_object_filter = QComboBox()
         self.catalog_object_filter.addItem('All')
@@ -138,9 +144,10 @@ class ViewCatalogTab(QWidget):
 
         # Tree widget with expanded columns
         self.catalog_tree = QTreeWidget()
-        self.catalog_tree.setColumnCount(9)
+        self.catalog_tree.setColumnCount(14)
         self.catalog_tree.setHeaderLabels([
-            'Name', 'Image Type', 'Filter', 'Exposure', 'Temp', 'Binning', 'Date', 'Telescope', 'Instrument'
+            'Name', 'Image Type', 'Filter', 'Exposure', 'Temp', 'Binning', 'Date',
+            'FWHM', 'Ecc', 'SNR', 'Stars', 'Status', 'Telescope', 'Instrument'
         ])
         # Set initial column widths
         self.catalog_tree.setColumnWidth(0, 300)
@@ -150,8 +157,13 @@ class ViewCatalogTab(QWidget):
         self.catalog_tree.setColumnWidth(4, 60)
         self.catalog_tree.setColumnWidth(5, 70)
         self.catalog_tree.setColumnWidth(6, 100)
-        self.catalog_tree.setColumnWidth(7, 120)
-        self.catalog_tree.setColumnWidth(8, 120)
+        self.catalog_tree.setColumnWidth(7, 70)   # FWHM
+        self.catalog_tree.setColumnWidth(8, 60)   # Ecc
+        self.catalog_tree.setColumnWidth(9, 60)   # SNR
+        self.catalog_tree.setColumnWidth(10, 60)  # Stars
+        self.catalog_tree.setColumnWidth(11, 80)  # Status
+        self.catalog_tree.setColumnWidth(12, 120) # Telescope
+        self.catalog_tree.setColumnWidth(13, 120) # Instrument
 
         # Enable context menu
         self.catalog_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -226,6 +238,14 @@ class ViewCatalogTab(QWidget):
         is_session = item.childCount() > 0 and item.text(6) and '(' in item.text(0)
 
         if is_file:
+            # Approval actions (only for light frames)
+            imagetyp = item.text(1)
+            if 'Light' in imagetyp:
+                approve_action = menu.addAction("✓ Approve Frame")
+                reject_action = menu.addAction("✗ Reject Frame")
+                clear_grading_action = menu.addAction("○ Clear Grading")
+                menu.addSeparator()
+
             show_path_action = menu.addAction("Show Full Path")
             copy_path_action = menu.addAction("Copy Path to Clipboard")
             open_location_action = menu.addAction("Open File Location")
@@ -236,6 +256,18 @@ class ViewCatalogTab(QWidget):
             reimport_action = menu.addAction("Re-import File")
 
             action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
+
+            # Handle approval actions
+            if 'Light' in imagetyp:
+                if action == approve_action:
+                    self.approve_frame(item)
+                    return
+                elif action == reject_action:
+                    self.reject_frame(item)
+                    return
+                elif action == clear_grading_action:
+                    self.clear_frame_grading(item)
+                    return
 
             if action == show_path_action:
                 self.show_file_path(item)
@@ -1204,3 +1236,68 @@ Imported: {result[11] or 'N/A'}
         root = self.catalog_tree.invisibleRootItem()
         for i in range(root.childCount()):
             restore_item_state(root.child(i))
+
+    def approve_frame(self, item: QTreeWidgetItem) -> None:
+        """Mark a frame as approved."""
+        self._update_approval_status(item, 'approved')
+
+    def reject_frame(self, item: QTreeWidgetItem) -> None:
+        """Mark a frame as rejected."""
+        self._update_approval_status(item, 'rejected')
+
+    def clear_frame_grading(self, item: QTreeWidgetItem) -> None:
+        """Clear the grading status of a frame."""
+        self._update_approval_status(item, 'not_graded')
+
+    def _update_approval_status(self, item: QTreeWidgetItem, status: str) -> None:
+        """
+        Update the approval status of a frame in the database.
+
+        Args:
+            item: Tree widget item representing the file
+            status: New approval status ('approved', 'rejected', or 'not_graded')
+        """
+        from datetime import datetime
+
+        filename = item.text(0)
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Update approval status
+            grading_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S') if status != 'not_graded' else None
+
+            cursor.execute('''
+                UPDATE xisf_files
+                SET approval_status = ?, grading_date = ?
+                WHERE filename = ?
+            ''', (status, grading_date, filename))
+
+            conn.commit()
+            conn.close()
+
+            # Update the item display
+            if status == 'approved':
+                item.setText(11, '✓ Approved')
+                color = QColor(200, 255, 200)  # Light green
+            elif status == 'rejected':
+                item.setText(11, '✗ Rejected')
+                color = QColor(255, 200, 200)  # Light red
+            else:
+                item.setText(11, '○ Not Graded')
+                color = None
+
+            # Update item color
+            if color:
+                for col in range(14):
+                    item.setBackground(col, QBrush(color))
+            else:
+                # Clear background to show default
+                for col in range(14):
+                    item.setBackground(col, QBrush())
+
+            self.status_callback(f"Frame {filename} marked as {status}")
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to update approval status: {e}')

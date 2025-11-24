@@ -126,16 +126,19 @@ class SessionsTab(QWidget):
 
         # Sessions tree widget
         self.sessions_tree = QTreeWidget()
-        self.sessions_tree.setColumnCount(6)
+        self.sessions_tree.setColumnCount(9)
         self.sessions_tree.setHeaderLabels([
-            'Session', 'Status', 'Light Frames', 'Darks', 'Bias', 'Flats'
+            'Session', 'Status', 'Light Frames', 'FWHM', 'SNR', 'Approved', 'Darks', 'Bias', 'Flats'
         ])
         self.sessions_tree.setColumnWidth(0, 250)
         self.sessions_tree.setColumnWidth(1, 100)
         self.sessions_tree.setColumnWidth(2, 120)
-        self.sessions_tree.setColumnWidth(3, 150)
-        self.sessions_tree.setColumnWidth(4, 150)
-        self.sessions_tree.setColumnWidth(5, 150)
+        self.sessions_tree.setColumnWidth(3, 80)   # FWHM
+        self.sessions_tree.setColumnWidth(4, 80)   # SNR
+        self.sessions_tree.setColumnWidth(5, 100)  # Approved
+        self.sessions_tree.setColumnWidth(6, 150)  # Darks
+        self.sessions_tree.setColumnWidth(7, 150)  # Bias
+        self.sessions_tree.setColumnWidth(8, 150)  # Flats
         self.sessions_tree.itemClicked.connect(self.on_session_clicked)
         layout.addWidget(self.sessions_tree)
 
@@ -250,7 +253,7 @@ class SessionsTab(QWidget):
             missing_count = 0
 
             for session_data in sessions:
-                date, obj, filt, frame_count, avg_exp, avg_temp, xbin, ybin = session_data
+                date, obj, filt, frame_count, avg_exp, avg_temp, xbin, ybin, avg_fwhm, avg_snr, approved_count, rejected_count = session_data
 
                 # Find matching calibration frames from cache (no database queries)
                 darks_info = self.calibration.find_matching_darks_from_cache(
@@ -286,13 +289,20 @@ class SessionsTab(QWidget):
                 session_item.setText(0, session_name)
                 session_item.setText(1, status)
                 session_item.setText(2, f"{frame_count} frames")
-                session_item.setText(3, darks_info['display'])
-                session_item.setText(4, bias_info['display'])
-                session_item.setText(5, flats_info['display'])
+
+                # Quality metrics
+                session_item.setText(3, f"{avg_fwhm:.2f}" if avg_fwhm is not None else 'N/A')
+                session_item.setText(4, f"{avg_snr:.1f}" if avg_snr is not None else 'N/A')
+                session_item.setText(5, f"{approved_count}/{frame_count}" if approved_count else '0/{}'.format(frame_count))
+
+                # Calibration info
+                session_item.setText(6, darks_info['display'])
+                session_item.setText(7, bias_info['display'])
+                session_item.setText(8, flats_info['display'])
 
                 # Set status color (only for non-complete sessions)
                 if status != 'Complete':
-                    for col in range(6):
+                    for col in range(9):
                         session_item.setForeground(col, status_color)
 
                 # Store session data for details view
@@ -305,6 +315,10 @@ class SessionsTab(QWidget):
                     'avg_temp': avg_temp,
                     'xbinning': xbin,
                     'ybinning': ybin,
+                    'avg_fwhm': avg_fwhm,
+                    'avg_snr': avg_snr,
+                    'approved_count': approved_count,
+                    'rejected_count': rejected_count,
                     'darks': darks_info,
                     'bias': bias_info,
                     'flats': flats_info,
@@ -338,6 +352,20 @@ class SessionsTab(QWidget):
 
         details.append(f"<b>Binning:</b> {session_data['xbinning']}x{session_data['ybinning']}<br>")
         details.append(f"<b>Status:</b> {session_data['status']}<br>")
+
+        # Quality metrics
+        details.append("<h4>Quality Metrics:</h4>")
+        avg_fwhm = session_data.get('avg_fwhm')
+        details.append(f"<b>Average FWHM:</b> {avg_fwhm:.2f} arcsec<br>" if avg_fwhm is not None else "<b>Average FWHM:</b> N/A<br>")
+
+        avg_snr = session_data.get('avg_snr')
+        details.append(f"<b>Average SNR:</b> {avg_snr:.1f}<br>" if avg_snr is not None else "<b>Average SNR:</b> N/A<br>")
+
+        approved_count = session_data.get('approved_count', 0)
+        rejected_count = session_data.get('rejected_count', 0)
+        not_graded_count = session_data['frame_count'] - approved_count - rejected_count
+        approval_pct = (approved_count / session_data['frame_count'] * 100) if session_data['frame_count'] > 0 else 0
+        details.append(f"<b>Approval:</b> {approved_count} approved ({approval_pct:.0f}%), {rejected_count} rejected, {not_graded_count} not graded<br>")
 
         details.append("<h4>Calibration Frames:</h4>")
 
