@@ -82,7 +82,8 @@ class CatalogLoaderWorker(QThread):
                 where_conditions.append('approval_status = ?')
                 params.append('rejected')
             elif self.approval_filter == 'Not Graded':
-                where_conditions.append('approval_status = ?')
+                # Handle both 'not_graded' and NULL (for older records)
+                where_conditions.append('(approval_status = ? OR approval_status IS NULL)')
                 params.append('not_graded')
 
             where_clause = ' AND '.join(where_conditions)

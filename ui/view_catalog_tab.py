@@ -257,6 +257,10 @@ class ViewCatalogTab(QWidget):
 
             action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
 
+            # Check if user cancelled the menu
+            if action is None:
+                return
+
             # Handle approval actions
             if 'Light' in imagetyp:
                 if action == approve_action:
@@ -1324,6 +1328,10 @@ Imported: {result[11] or 'N/A'}
                     item.setBackground(col, QBrush())
 
             self.status_callback(f"Frame {filename} marked as {status}")
+
+            # If an approval filter is active, refresh the view to apply the filter
+            if hasattr(self, 'catalog_approval_filter') and self.catalog_approval_filter.currentText() != 'All':
+                self.refresh_catalog_view()
 
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to update approval status: {e}')
