@@ -240,7 +240,13 @@ class ViewCatalogTab(QWidget):
         if is_file:
             # Approval actions (only for light frames)
             imagetyp = item.text(1)
-            if 'Light' in imagetyp:
+
+            # Initialize approval action variables
+            approve_action = None
+            reject_action = None
+            clear_grading_action = None
+
+            if 'light' in imagetyp.lower():
                 approve_action = menu.addAction("✓ Approve Frame")
                 reject_action = menu.addAction("✗ Reject Frame")
                 clear_grading_action = menu.addAction("○ Clear Grading")
@@ -257,19 +263,30 @@ class ViewCatalogTab(QWidget):
 
             action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
 
+            print(f"DEBUG: Menu action selected: {action}")
+            print(f"DEBUG: imagetyp = {imagetyp}")
+            print(f"DEBUG: approve_action = {approve_action}")
+            print(f"DEBUG: reject_action = {reject_action}")
+            print(f"DEBUG: clear_grading_action = {clear_grading_action}")
+
             # Check if user cancelled the menu
             if action is None:
+                print("DEBUG: User cancelled menu")
                 return
 
             # Handle approval actions
-            if 'Light' in imagetyp:
+            if 'light' in imagetyp.lower():
+                print("DEBUG: Checking approval actions for Light frame")
                 if action == approve_action:
+                    print("DEBUG: Approve action matched")
                     self.approve_frame(item)
                     return
                 elif action == reject_action:
+                    print("DEBUG: Reject action matched")
                     self.reject_frame(item)
                     return
                 elif action == clear_grading_action:
+                    print("DEBUG: Clear grading action matched")
                     self.clear_frame_grading(item)
                     return
 
@@ -1269,14 +1286,17 @@ Imported: {result[11] or 'N/A'}
 
     def approve_frame(self, item: QTreeWidgetItem) -> None:
         """Mark a frame as approved."""
+        print("DEBUG: approve_frame called")
         self._update_approval_status(item, 'approved')
 
     def reject_frame(self, item: QTreeWidgetItem) -> None:
         """Mark a frame as rejected."""
+        print("DEBUG: reject_frame called")
         self._update_approval_status(item, 'rejected')
 
     def clear_frame_grading(self, item: QTreeWidgetItem) -> None:
         """Clear the grading status of a frame."""
+        print("DEBUG: clear_frame_grading called")
         self._update_approval_status(item, 'not_graded')
 
     def _update_approval_status(self, item: QTreeWidgetItem, status: str) -> None:
@@ -1290,6 +1310,7 @@ Imported: {result[11] or 'N/A'}
         from datetime import datetime
 
         filename = item.text(0)
+        print(f"DEBUG: _update_approval_status called for {filename} with status {status}")
 
         try:
             conn = sqlite3.connect(self.db_path)
