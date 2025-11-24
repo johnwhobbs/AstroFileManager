@@ -92,8 +92,7 @@ class CatalogLoaderWorker(QThread):
 
                 where_clause = ' AND '.join(where_conditions)
 
-                # Debug output
-                query = f'''
+                cursor.execute(f'''
                     SELECT
                         object, filter, date_loc, filename, imagetyp,
                         exposure, ccd_temp, xbinning, ybinning, telescop, instrume,
@@ -101,14 +100,8 @@ class CatalogLoaderWorker(QThread):
                     FROM xisf_files
                     WHERE {where_clause}
                     ORDER BY object, filter NULLS FIRST, date_loc DESC, filename
-                '''
-                print(f"DEBUG: Approval filter = {self.approval_filter}")
-                print(f"DEBUG: WHERE clause = {where_clause}")
-                print(f"DEBUG: Params = {params}")
-
-                cursor.execute(query, params)
+                ''', params)
                 result['light_data'] = cursor.fetchall()
-                print(f"DEBUG: Retrieved {len(result['light_data'])} light frames")
 
             # Load calibration frames if needed
             if self.imagetype_filter not in ['Light']:
