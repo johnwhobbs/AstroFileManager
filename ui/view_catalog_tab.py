@@ -964,7 +964,7 @@ Imported: {result[11] or 'N/A'}
 
             # Add file nodes for this date
             for row in sorted(date_stats['rows'], key=lambda x: x[3]):  # Sort by filename
-                obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume = row
+                obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume, fwhm, eccentricity, snr, star_count, approval_status = row
 
                 file_item = QTreeWidgetItem(date_item)
                 file_item.setText(0, filename)
@@ -975,14 +975,40 @@ Imported: {result[11] or 'N/A'}
                 binning = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
                 file_item.setText(5, binning)
                 file_item.setText(6, date_loc or 'N/A')
-                file_item.setText(7, telescop or 'N/A')
-                file_item.setText(8, instrume or 'N/A')
 
-                # Apply color coding
-                color = self.get_item_color(imagetyp)
-                if color:
-                    for col in range(9):
-                        file_item.setBackground(col, QBrush(color))
+                # Quality metrics columns
+                file_item.setText(7, f"{fwhm:.2f}" if fwhm is not None else '')
+                file_item.setText(8, f"{eccentricity:.2f}" if eccentricity is not None else '')
+                file_item.setText(9, f"{snr:.1f}" if snr is not None else '')
+                file_item.setText(10, f"{star_count}" if star_count is not None else '')
+
+                # Approval status with icon
+                if approval_status == 'approved':
+                    file_item.setText(11, '✓ Approved')
+                elif approval_status == 'rejected':
+                    file_item.setText(11, '✗ Rejected')
+                else:
+                    file_item.setText(11, '○ Not Graded')
+
+                file_item.setText(12, telescop or 'N/A')
+                file_item.setText(13, instrume or 'N/A')
+
+                # Apply color coding based on approval status
+                approval_color = None
+                if approval_status == 'approved':
+                    approval_color = QColor(200, 255, 200)  # Light green
+                elif approval_status == 'rejected':
+                    approval_color = QColor(255, 200, 200)  # Light red
+
+                if approval_color:
+                    for col in range(14):
+                        file_item.setBackground(col, QBrush(approval_color))
+                else:
+                    # Apply imagetyp color coding for non-graded frames
+                    color = self.get_item_color(imagetyp)
+                    if color:
+                        for col in range(14):
+                            file_item.setBackground(col, QBrush(color))
 
         # Mark as loaded by removing lazy_load flag
         item_data['lazy_load'] = False
