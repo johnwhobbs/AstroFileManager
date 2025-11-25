@@ -137,6 +137,13 @@ class ProjectsTab(QWidget):
         self.goals_group.setVisible(False)
         self.details_content_splitter.addWidget(self.goals_group)
 
+        # Sessions assigned to project
+        self.sessions_group = QGroupBox("Assigned Sessions")
+        self.sessions_layout = QVBoxLayout()
+        self.sessions_group.setLayout(self.sessions_layout)
+        self.sessions_group.setVisible(False)
+        self.details_content_splitter.addWidget(self.sessions_group)
+
         # Next steps / recommendations
         self.next_steps_group = QGroupBox("Next Steps")
         next_steps_layout = QVBoxLayout()
@@ -302,6 +309,10 @@ class ProjectsTab(QWidget):
         goals = self.project_manager.get_filter_goals(project_id)
         self.display_filter_goals(goals)
 
+        # Load and display sessions
+        sessions = self.project_manager.get_project_sessions(project_id)
+        self.display_sessions(sessions)
+
         # Generate next steps
         self.display_next_steps(project, goals)
 
@@ -414,6 +425,98 @@ class ProjectsTab(QWidget):
         self.current_goals_table = goals_table
         self.goals_layout.addWidget(goals_table)
 
+    def display_sessions(self, sessions: list):
+        """
+        Display sessions assigned to the project with quality metrics.
+
+        Args:
+            sessions: List of session tuples from get_project_sessions
+        """
+        # Clear existing widgets
+        for i in reversed(range(self.sessions_layout.count())):
+            widget = self.sessions_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+
+        if not sessions:
+            self.sessions_group.setVisible(False)
+            return
+
+        self.sessions_group.setVisible(True)
+
+        # Create table
+        sessions_table = QTableWidget()
+        sessions_table.setRowCount(len(sessions))
+        sessions_table.setColumnCount(6)
+        sessions_table.setHorizontalHeaderLabels([
+            "Date", "Filter", "Frames", "Approved", "FWHM", "Status"
+        ])
+
+        # Configure table appearance
+        sessions_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        sessions_table.horizontalHeader().setStretchLastSection(False)
+
+        # Set column widths
+        default_widths = [100, 80, 80, 100, 80, 80]
+        for col in range(6):
+            sessions_table.setColumnWidth(col, default_widths[col])
+
+        sessions_table.verticalHeader().setVisible(False)
+        sessions_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        sessions_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        sessions_table.setShowGrid(True)
+
+        # Set compact row height
+        sessions_table.verticalHeader().setDefaultSectionSize(30)
+
+        # Populate table
+        for row, session in enumerate(sessions):
+            session_id, date_loc, filter_name, frame_count, approved_count, rejected_count, graded, avg_fwhm = session
+
+            # Date
+            date_item = QTableWidgetItem(date_loc if date_loc else "")
+            sessions_table.setItem(row, 0, date_item)
+
+            # Filter
+            filter_item = QTableWidgetItem(filter_name if filter_name else "No filter")
+            sessions_table.setItem(row, 1, filter_item)
+
+            # Frame count
+            frames_item = QTableWidgetItem(str(frame_count if frame_count else 0))
+            sessions_table.setItem(row, 2, frames_item)
+
+            # Approved count with percentage
+            if frame_count and frame_count > 0:
+                approved_pct = (approved_count * 100 // frame_count) if approved_count else 0
+                approved_text = f"{approved_count}/{frame_count} ({approved_pct}%)"
+            else:
+                approved_text = "0/0 (0%)"
+            approved_item = QTableWidgetItem(approved_text)
+            sessions_table.setItem(row, 3, approved_item)
+
+            # Average FWHM
+            fwhm_item = QTableWidgetItem(f"{avg_fwhm:.2f}\"" if avg_fwhm is not None else "N/A")
+            sessions_table.setItem(row, 4, fwhm_item)
+
+            # Grading status
+            if graded:
+                status_text = "✓ Graded"
+                status_color = "#5cb85c"  # Green
+            else:
+                status_text = "○ Ungraded"
+                status_color = "#888888"  # Gray
+
+            status_item = QTableWidgetItem(status_text)
+            status_item.setForeground(QBrush(QColor(status_color)))
+            sessions_table.setItem(row, 5, status_item)
+
+        # Set reasonable height based on content
+        table_height = sessions_table.horizontalHeader().height() + (len(sessions) * 30) + 10
+        sessions_table.setMaximumHeight(min(table_height, 300))  # Cap at 300px
+        sessions_table.setMinimumHeight(min(table_height, 100))
+
+        self.sessions_layout.addWidget(sessions_table)
+
     def display_next_steps(self, project: Project, goals: list[FilterGoalProgress]):
         """
         Display next steps / recommendations.
@@ -480,6 +583,7 @@ class ProjectsTab(QWidget):
         self.selected_project_id = None
         self.info_label.setText("Select a project to view details")
         self.goals_group.setVisible(False)
+        self.sessions_group.setVisible(False)
         self.next_steps_group.setVisible(False)
         self.export_files_btn.setVisible(False)
         self.mark_complete_btn.setVisible(False)
