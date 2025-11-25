@@ -1354,8 +1354,17 @@ Imported: {result[11] or 'N/A'}
             # Get filenames from items
             filenames = [item.text(0) for item in items]
 
-            # Build bulk update query
+            # Get project_ids for affected frames before update
             placeholders = ','.join(['?'] * len(filenames))
+            cursor.execute(f'''
+                SELECT DISTINCT project_id
+                FROM xisf_files
+                WHERE filename IN ({placeholders})
+                AND project_id IS NOT NULL
+            ''', filenames)
+            project_ids = [row[0] for row in cursor.fetchall()]
+
+            # Build bulk update query
             cursor.execute(f'''
                 UPDATE xisf_files
                 SET approval_status = ?, grading_date = ?
@@ -1364,6 +1373,10 @@ Imported: {result[11] or 'N/A'}
 
             conn.commit()
             conn.close()
+
+            # Recalculate project counts for all affected projects
+            for project_id in project_ids:
+                self.project_manager.recalculate_project_counts(project_id)
 
             # Update visual display for all items
             if status == 'approved':
@@ -1411,6 +1424,11 @@ Imported: {result[11] or 'N/A'}
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
+            # Get project_id before update (if frame is assigned to a project)
+            cursor.execute('SELECT project_id FROM xisf_files WHERE filename = ?', (filename,))
+            result = cursor.fetchone()
+            project_id = result[0] if result and result[0] else None
+
             # Update approval status
             grading_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S') if status != 'not_graded' else None
 
@@ -1422,6 +1440,10 @@ Imported: {result[11] or 'N/A'}
 
             conn.commit()
             conn.close()
+
+            # Recalculate project counts if frame is part of a project
+            if project_id:
+                self.project_manager.recalculate_project_counts(project_id)
 
             # Update the item display
             if status == 'approved':
