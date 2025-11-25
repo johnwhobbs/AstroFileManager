@@ -591,3 +591,31 @@ class ProjectManager:
 
         finally:
             conn.close()
+
+    def get_project_sessions(self, project_id: int):
+        """
+        Get all sessions assigned to a project with quality metrics.
+
+        Args:
+            project_id: Project ID
+
+        Returns:
+            List of tuples: (session_id, date_loc, filter, frame_count,
+                           approved_count, rejected_count, graded, avg_fwhm)
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT session_id, date_loc, filter, frame_count,
+                       approved_count, rejected_count, graded, avg_fwhm
+                FROM project_sessions
+                WHERE project_id = ?
+                ORDER BY date_loc DESC, filter
+            ''', (project_id,))
+
+            return cursor.fetchall()
+
+        finally:
+            conn.close()
