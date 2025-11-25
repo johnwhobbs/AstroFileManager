@@ -33,6 +33,8 @@ class FilterGoalProgress:
     approved_count: int
     remaining: int
     approved_remaining: int
+    avg_fwhm: Optional[float] = None
+    avg_snr: Optional[float] = None
 
 
 class ProjectManager:
@@ -164,7 +166,7 @@ class ProjectManager:
 
     def get_filter_goals(self, project_id: int) -> List[FilterGoalProgress]:
         """
-        Get filter goals and progress for a project.
+        Get filter goals and progress for a project with quality metrics.
 
         Args:
             project_id: Project ID
@@ -185,13 +187,29 @@ class ProjectManager:
 
             goals = []
             for filter_name, target, total, approved in cursor.fetchall():
+                # Get average FWHM and SNR for this filter
+                cursor.execute('''
+                    SELECT AVG(fwhm), AVG(snr)
+                    FROM xisf_files
+                    WHERE project_id = ?
+                    AND COALESCE(filter, '') = COALESCE(?, '')
+                    AND imagetyp LIKE '%Light%'
+                    AND fwhm IS NOT NULL
+                ''', (project_id, filter_name))
+
+                avg_result = cursor.fetchone()
+                avg_fwhm = avg_result[0] if avg_result and avg_result[0] else None
+                avg_snr = avg_result[1] if avg_result and avg_result[1] else None
+
                 goals.append(FilterGoalProgress(
                     filter=filter_name,
                     target_count=target,
                     total_count=total,
                     approved_count=approved,
                     remaining=max(0, target - total),
-                    approved_remaining=max(0, target - approved)
+                    approved_remaining=max(0, target - approved),
+                    avg_fwhm=avg_fwhm,
+                    avg_snr=avg_snr
                 ))
 
             return goals
@@ -588,34 +606,6 @@ class ProjectManager:
             cursor.execute('DELETE FROM projects WHERE id = ?', (project_id,))
 
             conn.commit()
-
-        finally:
-            conn.close()
-
-    def get_project_sessions(self, project_id: int):
-        """
-        Get all sessions assigned to a project with quality metrics.
-
-        Args:
-            project_id: Project ID
-
-        Returns:
-            List of tuples: (session_id, date_loc, filter, frame_count,
-                           approved_count, rejected_count, graded, avg_fwhm)
-        """
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute('''
-                SELECT session_id, date_loc, filter, frame_count,
-                       approved_count, rejected_count, graded, avg_fwhm
-                FROM project_sessions
-                WHERE project_id = ?
-                ORDER BY date_loc DESC, filter
-            ''', (project_id,))
-
-            return cursor.fetchall()
 
         finally:
             conn.close()
