@@ -165,6 +165,9 @@ class ViewCatalogTab(QWidget):
         self.catalog_tree.setColumnWidth(12, 120) # Telescope
         self.catalog_tree.setColumnWidth(13, 120) # Instrument
 
+        # Enable multi-selection
+        self.catalog_tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+
         # Enable context menu
         self.catalog_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.catalog_tree.customContextMenuRequested.connect(self.show_catalog_context_menu)
@@ -229,8 +232,39 @@ class ViewCatalogTab(QWidget):
         if not item:
             return
 
+        # Get all selected items
+        selected_items = self.catalog_tree.selectedItems()
+
         menu = QMenu()
 
+        # Check if multiple items are selected
+        if len(selected_items) > 1:
+            # Filter to only light frame files (no group nodes, only light frames)
+            light_frames = [
+                item for item in selected_items
+                if item.childCount() == 0 and '(' not in item.text(0) and 'light' in item.text(1).lower()
+            ]
+
+            if light_frames:
+                # Show bulk approval actions
+                bulk_approve_action = menu.addAction(f"✓ Approve {len(light_frames)} Frame(s)")
+                bulk_reject_action = menu.addAction(f"✗ Reject {len(light_frames)} Frame(s)")
+                bulk_clear_action = menu.addAction(f"○ Clear Grading for {len(light_frames)} Frame(s)")
+
+                action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
+
+                if action is None:
+                    return
+
+                if action == bulk_approve_action:
+                    self.bulk_approve_frames(light_frames)
+                elif action == bulk_reject_action:
+                    self.bulk_reject_frames(light_frames)
+                elif action == bulk_clear_action:
+                    self.bulk_clear_grading(light_frames)
+                return
+
+        # Single item context menu
         # Only show file operations if this is a file item (has no children and is not a group node)
         is_file = item.childCount() == 0 and '(' not in item.text(0)
 
@@ -1285,6 +1319,81 @@ Imported: {result[11] or 'N/A'}
     def clear_frame_grading(self, item: QTreeWidgetItem) -> None:
         """Clear the grading status of a frame."""
         self._update_approval_status(item, 'not_graded')
+
+    def bulk_approve_frames(self, items: list) -> None:
+        """Mark multiple frames as approved."""
+        self._bulk_update_approval_status(items, 'approved')
+
+    def bulk_reject_frames(self, items: list) -> None:
+        """Mark multiple frames as rejected."""
+        self._bulk_update_approval_status(items, 'rejected')
+
+    def bulk_clear_grading(self, items: list) -> None:
+        """Clear grading status for multiple frames."""
+        self._bulk_update_approval_status(items, 'not_graded')
+
+    def _bulk_update_approval_status(self, items: list, status: str) -> None:
+        """
+        Update approval status for multiple frames in bulk.
+
+        Args:
+            items: List of QTreeWidgetItem objects representing files
+            status: New approval status ('approved', 'rejected', or 'not_graded')
+        """
+        from datetime import datetime
+
+        if not items:
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            grading_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S') if status != 'not_graded' else None
+
+            # Get filenames from items
+            filenames = [item.text(0) for item in items]
+
+            # Build bulk update query
+            placeholders = ','.join(['?'] * len(filenames))
+            cursor.execute(f'''
+                UPDATE xisf_files
+                SET approval_status = ?, grading_date = ?
+                WHERE filename IN ({placeholders})
+            ''', [status, grading_date] + filenames)
+
+            conn.commit()
+            conn.close()
+
+            # Update visual display for all items
+            if status == 'approved':
+                status_text = '✓ Approved'
+                color = QColor(200, 255, 200)  # Light green
+            elif status == 'rejected':
+                status_text = '✗ Rejected'
+                color = QColor(255, 200, 200)  # Light red
+            else:
+                status_text = '○ Not Graded'
+                color = None
+
+            for item in items:
+                item.setText(11, status_text)
+                if color:
+                    for col in range(14):
+                        item.setBackground(col, QBrush(color))
+                else:
+                    # Clear background
+                    for col in range(14):
+                        item.setBackground(col, QBrush())
+
+            self.status_callback(f"{len(items)} frame(s) marked as {status}")
+
+            # If an approval filter is active, refresh the view to apply the filter
+            if hasattr(self, 'catalog_approval_filter') and self.catalog_approval_filter.currentText() != 'All':
+                self.refresh_catalog_view()
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to update approval status: {e}')
 
     def _update_approval_status(self, item: QTreeWidgetItem, status: str) -> None:
         """
