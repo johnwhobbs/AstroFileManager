@@ -110,6 +110,8 @@ class ProjectsTab(QWidget):
         # Restore column order
         saved_order = self.settings.value('projects_table_col_order')
         if saved_order:
+            # Convert to integers (QSettings may return strings)
+            saved_order = [int(idx) for idx in saved_order]
             for visual_index, logical_index in enumerate(saved_order):
                 self.projects_table.horizontalHeader().moveSection(
                     self.projects_table.horizontalHeader().visualIndex(logical_index),
@@ -364,6 +366,8 @@ class ProjectsTab(QWidget):
         # Restore column order
         saved_order = self.settings.value('projects_goals_table_col_order')
         if saved_order:
+            # Convert to integers (QSettings may return strings)
+            saved_order = [int(idx) for idx in saved_order]
             for visual_index, logical_index in enumerate(saved_order):
                 goals_table.horizontalHeader().moveSection(
                     goals_table.horizontalHeader().visualIndex(logical_index),
