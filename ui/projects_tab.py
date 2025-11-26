@@ -93,9 +93,10 @@ class ProjectsTab(QWidget):
             "Project Name", "Object", "Year", "Status", "Created"
         ])
 
-        # Make columns resizable
+        # Make columns resizable and movable
         self.projects_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.projects_table.horizontalHeader().setStretchLastSection(True)
+        self.projects_table.horizontalHeader().setSectionsMovable(True)
 
         # Set initial column widths or restore from settings
         default_widths = [200, 150, 80, 100, 100]  # Project Name, Object, Year, Status, Created
@@ -106,8 +107,18 @@ class ProjectsTab(QWidget):
             else:
                 self.projects_table.setColumnWidth(col, default_widths[col])
 
-        # Connect column resize to save settings
+        # Restore column order
+        saved_order = self.settings.value('projects_table_col_order')
+        if saved_order:
+            for visual_index, logical_index in enumerate(saved_order):
+                self.projects_table.horizontalHeader().moveSection(
+                    self.projects_table.horizontalHeader().visualIndex(logical_index),
+                    visual_index
+                )
+
+        # Connect column resize and move to save settings
         self.projects_table.horizontalHeader().sectionResized.connect(self.save_projects_table_column_widths)
+        self.projects_table.horizontalHeader().sectionMoved.connect(self.save_projects_table_column_order)
 
         self.projects_table.setSelectionBehavior(
             QTableWidget.SelectionBehavior.SelectRows
@@ -336,9 +347,10 @@ class ProjectsTab(QWidget):
         goals_table.setColumnCount(6)
         goals_table.setHorizontalHeaderLabels(["Filter", "Total", "Approved", "FWHM", "SNR", "Progress"])
 
-        # Configure table appearance - make columns resizable
+        # Configure table appearance - make columns resizable and movable
         goals_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         goals_table.horizontalHeader().setStretchLastSection(False)
+        goals_table.horizontalHeader().setSectionsMovable(True)
 
         # Restore saved column widths or use defaults
         default_widths = [80, 120, 120, 70, 70, 80]  # Filter, Total, Approved, FWHM, SNR, Progress
@@ -349,8 +361,18 @@ class ProjectsTab(QWidget):
             else:
                 goals_table.setColumnWidth(col, default_widths[col])
 
-        # Connect column resize to save settings
+        # Restore column order
+        saved_order = self.settings.value('projects_goals_table_col_order')
+        if saved_order:
+            for visual_index, logical_index in enumerate(saved_order):
+                goals_table.horizontalHeader().moveSection(
+                    goals_table.horizontalHeader().visualIndex(logical_index),
+                    visual_index
+                )
+
+        # Connect column resize and move to save settings
         goals_table.horizontalHeader().sectionResized.connect(self.save_goals_table_column_widths)
+        goals_table.horizontalHeader().sectionMoved.connect(self.save_goals_table_column_order)
 
         goals_table.verticalHeader().setVisible(False)
         goals_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
@@ -697,8 +719,21 @@ class ProjectsTab(QWidget):
                 width = self.current_goals_table.columnWidth(col)
                 self.settings.setValue(f'projects_goals_table_col_{col}', width)
 
+    def save_goals_table_column_order(self) -> None:
+        """Save the goals table column order to settings."""
+        if self.current_goals_table:
+            header = self.current_goals_table.horizontalHeader()
+            order = [header.logicalIndex(i) for i in range(header.count())]
+            self.settings.setValue('projects_goals_table_col_order', order)
+
     def save_projects_table_column_widths(self) -> None:
         """Save the projects table column widths to settings."""
         for col in range(self.projects_table.columnCount()):
             width = self.projects_table.columnWidth(col)
             self.settings.setValue(f'projects_table_col_{col}', width)
+
+    def save_projects_table_column_order(self) -> None:
+        """Save the projects table column order to settings."""
+        header = self.projects_table.horizontalHeader()
+        order = [header.logicalIndex(i) for i in range(header.count())]
+        self.settings.setValue('projects_table_col_order', order)
