@@ -147,6 +147,8 @@ class SessionsTab(QWidget):
         # Restore column order
         saved_order = self.settings.value('sessions_tree_col_order')
         if saved_order:
+            # Convert to integers (QSettings may return strings)
+            saved_order = [int(idx) for idx in saved_order]
             for visual_index, logical_index in enumerate(saved_order):
                 self.sessions_tree.header().moveSection(
                     self.sessions_tree.header().visualIndex(logical_index),

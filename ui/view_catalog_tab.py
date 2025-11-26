@@ -166,6 +166,8 @@ class ViewCatalogTab(QWidget):
         # Restore column order
         saved_order = self.settings.value('catalog_tree_col_order')
         if saved_order:
+            # Convert to integers (QSettings may return strings)
+            saved_order = [int(idx) for idx in saved_order]
             for visual_index, logical_index in enumerate(saved_order):
                 self.catalog_tree.header().moveSection(
                     self.catalog_tree.header().visualIndex(logical_index),
