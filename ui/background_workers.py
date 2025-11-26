@@ -18,7 +18,7 @@ class CatalogLoaderWorker(QThread):
     data_ready = pyqtSignal(dict)  # Loaded data
     error_occurred = pyqtSignal(str)  # Error message
 
-    def __init__(self, db_path: str, imagetype_filter: str, object_filter: str):
+    def __init__(self, db_path: str, imagetype_filter: str, object_filter: str, approval_filter: str = 'All'):
         """
         Initialize catalog loader worker.
 
@@ -26,11 +26,13 @@ class CatalogLoaderWorker(QThread):
             db_path: Path to SQLite database
             imagetype_filter: Filter for image type (All, Light, Dark, etc.)
             object_filter: Filter for object name (All or specific object)
+            approval_filter: Filter for approval status (All, Approved, Rejected, Not Graded)
         """
         super().__init__()
         self.db_path = db_path
         self.imagetype_filter = imagetype_filter
         self.object_filter = object_filter
+        self.approval_filter = approval_filter
 
     def run(self):
         """Load catalog data in background thread."""
@@ -72,15 +74,29 @@ class CatalogLoaderWorker(QThread):
                 where_conditions.append('imagetyp LIKE ?')
                 params.append('%Master%')
 
-            where_clause = ' AND '.join(where_conditions)
+            # Add approval status filter (only applies to light frames)
+            if self.approval_filter == 'Approved':
+                where_conditions.append('approval_status = ?')
+                params.append('approved')
+            elif self.approval_filter == 'Rejected':
+                where_conditions.append('approval_status = ?')
+                params.append('rejected')
+            elif self.approval_filter == 'Not Graded':
+                # Handle both 'not_graded' and NULL (for older records)
+                where_conditions.append('(approval_status = ? OR approval_status IS NULL)')
+                params.append('not_graded')
 
             # Load light frames if needed
             if self.imagetype_filter not in ['Dark', 'Flat', 'Bias']:
                 self.progress_updated.emit("Loading light frames...")
+
+                where_clause = ' AND '.join(where_conditions)
+
                 cursor.execute(f'''
                     SELECT
                         object, filter, date_loc, filename, imagetyp,
-                        exposure, ccd_temp, xbinning, ybinning, telescop, instrume
+                        exposure, ccd_temp, xbinning, ybinning, telescop, instrume,
+                        fwhm, eccentricity, snr, star_count, approval_status
                     FROM xisf_files
                     WHERE {where_clause}
                     ORDER BY object, filter NULLS FIRST, date_loc DESC, filename
@@ -192,7 +208,11 @@ class SessionsLoaderWorker(QThread):
                     COUNT(*) as frame_count,
                     AVG(exposure) as avg_exposure,
                     AVG(ccd_temp) as avg_temp,
-                    xbinning, ybinning
+                    xbinning, ybinning,
+                    AVG(fwhm) as avg_fwhm,
+                    AVG(snr) as avg_snr,
+                    SUM(CASE WHEN approval_status = 'approved' THEN 1 ELSE 0 END) as approved_count,
+                    SUM(CASE WHEN approval_status = 'rejected' THEN 1 ELSE 0 END) as rejected_count
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Light%'
                     AND date_loc IS NOT NULL

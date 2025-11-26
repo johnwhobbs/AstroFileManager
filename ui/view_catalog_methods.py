@@ -38,9 +38,10 @@ def refresh_catalog_view(self) -> None:
         # Get filter values
         imagetype_filter = self.catalog_imagetype_filter.currentText()
         object_filter = self.catalog_object_filter.currentText()
+        approval_filter = self.catalog_approval_filter.currentText()
 
         # Create and start worker
-        self.loader_worker = CatalogLoaderWorker(self.db_path, imagetype_filter, object_filter)
+        self.loader_worker = CatalogLoaderWorker(self.db_path, imagetype_filter, object_filter, approval_filter)
         self.loader_worker.progress_updated.connect(self._on_catalog_progress)
         self.loader_worker.data_ready.connect(self._on_catalog_data_ready)
         self.loader_worker.error_occurred.connect(self._on_catalog_error)
@@ -144,7 +145,7 @@ def _build_light_frames_from_data(self, light_data: list) -> None:
 
     # First pass: aggregate counts
     for row in light_data:
-        obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume = row
+        obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume, fwhm, eccentricity, snr, star_count, approval_status = row
 
         if obj not in obj_files:
             obj_files[obj] = {'count': 0, 'exposure': 0}
@@ -165,7 +166,7 @@ def _build_light_frames_from_data(self, light_data: list) -> None:
 
     # Second pass: build tree
     for row in light_data:
-        obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume = row
+        obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume, fwhm, eccentricity, snr, star_count, approval_status = row
 
         # Create object node if new
         if obj != current_obj:
@@ -207,14 +208,40 @@ def _build_light_frames_from_data(self, light_data: list) -> None:
         binning = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
         file_item.setText(5, binning)
         file_item.setText(6, date_loc or 'N/A')
-        file_item.setText(7, telescop or 'N/A')
-        file_item.setText(8, instrume or 'N/A')
 
-        # Apply color coding
-        color = self.get_item_color(imagetyp)
-        if color:
-            for col in range(9):
-                file_item.setBackground(col, QBrush(color))
+        # Quality metrics columns
+        file_item.setText(7, f"{fwhm:.2f}" if fwhm is not None else '')
+        file_item.setText(8, f"{eccentricity:.2f}" if eccentricity is not None else '')
+        file_item.setText(9, f"{snr:.1f}" if snr is not None else '')
+        file_item.setText(10, f"{star_count}" if star_count is not None else '')
+
+        # Approval status with icon
+        if approval_status == 'approved':
+            file_item.setText(11, '✓ Approved')
+        elif approval_status == 'rejected':
+            file_item.setText(11, '✗ Rejected')
+        else:
+            file_item.setText(11, '○ Not Graded')
+
+        file_item.setText(12, telescop or 'N/A')
+        file_item.setText(13, instrume or 'N/A')
+
+        # Apply color coding based on approval status
+        approval_color = None
+        if approval_status == 'approved':
+            approval_color = QColor(200, 255, 200)  # Light green
+        elif approval_status == 'rejected':
+            approval_color = QColor(255, 200, 200)  # Light red
+
+        if approval_color:
+            for col in range(14):
+                file_item.setBackground(col, QBrush(approval_color))
+        else:
+            # Apply imagetyp color coding for non-graded frames
+            color = self.get_item_color(imagetyp)
+            if color:
+                for col in range(14):
+                    file_item.setBackground(col, QBrush(color))
 
 
 def _build_calibration_frames_from_data(self, calib_data: dict) -> None:

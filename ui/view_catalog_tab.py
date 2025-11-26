@@ -100,6 +100,12 @@ class ViewCatalogTab(QWidget):
         self.catalog_imagetype_filter.currentTextChanged.connect(self.refresh_catalog_view)
         filter_layout.addWidget(self.catalog_imagetype_filter)
 
+        filter_layout.addWidget(QLabel("Approval:"))
+        self.catalog_approval_filter = QComboBox()
+        self.catalog_approval_filter.addItems(['All', 'Approved', 'Rejected', 'Not Graded'])
+        self.catalog_approval_filter.currentTextChanged.connect(self.refresh_catalog_view)
+        filter_layout.addWidget(self.catalog_approval_filter)
+
         filter_layout.addWidget(QLabel("Object:"))
         self.catalog_object_filter = QComboBox()
         self.catalog_object_filter.addItem('All')
@@ -138,20 +144,42 @@ class ViewCatalogTab(QWidget):
 
         # Tree widget with expanded columns
         self.catalog_tree = QTreeWidget()
-        self.catalog_tree.setColumnCount(9)
+        self.catalog_tree.setColumnCount(14)
         self.catalog_tree.setHeaderLabels([
-            'Name', 'Image Type', 'Filter', 'Exposure', 'Temp', 'Binning', 'Date', 'Telescope', 'Instrument'
+            'Name', 'Image Type', 'Filter', 'Exposure', 'Temp', 'Binning', 'Date',
+            'FWHM', 'Ecc', 'SNR', 'Stars', 'Status', 'Telescope', 'Instrument'
         ])
-        # Set initial column widths
-        self.catalog_tree.setColumnWidth(0, 300)
-        self.catalog_tree.setColumnWidth(1, 120)
-        self.catalog_tree.setColumnWidth(2, 80)
-        self.catalog_tree.setColumnWidth(3, 80)
-        self.catalog_tree.setColumnWidth(4, 60)
-        self.catalog_tree.setColumnWidth(5, 70)
-        self.catalog_tree.setColumnWidth(6, 100)
-        self.catalog_tree.setColumnWidth(7, 120)
-        self.catalog_tree.setColumnWidth(8, 120)
+
+        # Make columns resizable and movable
+        self.catalog_tree.header().setSectionsMovable(True)
+        self.catalog_tree.header().setStretchLastSection(True)
+
+        # Set initial column widths or restore from settings
+        default_widths = [300, 120, 80, 80, 60, 70, 100, 70, 60, 60, 60, 80, 120, 120]
+        for col in range(14):
+            saved_width = self.settings.value(f'catalog_tree_col_{col}')
+            if saved_width:
+                self.catalog_tree.setColumnWidth(col, int(saved_width))
+            else:
+                self.catalog_tree.setColumnWidth(col, default_widths[col])
+
+        # Restore column order
+        saved_order = self.settings.value('catalog_tree_col_order')
+        if saved_order:
+            # Convert to integers (QSettings may return strings)
+            saved_order = [int(idx) for idx in saved_order]
+            for visual_index, logical_index in enumerate(saved_order):
+                self.catalog_tree.header().moveSection(
+                    self.catalog_tree.header().visualIndex(logical_index),
+                    visual_index
+                )
+
+        # Connect signals to save settings
+        self.catalog_tree.header().sectionResized.connect(self.save_catalog_tree_column_widths)
+        self.catalog_tree.header().sectionMoved.connect(self.save_catalog_tree_column_order)
+
+        # Enable multi-selection
+        self.catalog_tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
 
         # Enable context menu
         self.catalog_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -217,8 +245,39 @@ class ViewCatalogTab(QWidget):
         if not item:
             return
 
+        # Get all selected items
+        selected_items = self.catalog_tree.selectedItems()
+
         menu = QMenu()
 
+        # Check if multiple items are selected
+        if len(selected_items) > 1:
+            # Filter to only light frame files (no group nodes, only light frames)
+            light_frames = [
+                item for item in selected_items
+                if item.childCount() == 0 and '(' not in item.text(0) and 'light' in item.text(1).lower()
+            ]
+
+            if light_frames:
+                # Show bulk approval actions
+                bulk_approve_action = menu.addAction(f"✓ Approve {len(light_frames)} Frame(s)")
+                bulk_reject_action = menu.addAction(f"✗ Reject {len(light_frames)} Frame(s)")
+                bulk_clear_action = menu.addAction(f"○ Clear Grading for {len(light_frames)} Frame(s)")
+
+                action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
+
+                if action is None:
+                    return
+
+                if action == bulk_approve_action:
+                    self.bulk_approve_frames(light_frames)
+                elif action == bulk_reject_action:
+                    self.bulk_reject_frames(light_frames)
+                elif action == bulk_clear_action:
+                    self.bulk_clear_grading(light_frames)
+                return
+
+        # Single item context menu
         # Only show file operations if this is a file item (has no children and is not a group node)
         is_file = item.childCount() == 0 and '(' not in item.text(0)
 
@@ -226,6 +285,20 @@ class ViewCatalogTab(QWidget):
         is_session = item.childCount() > 0 and item.text(6) and '(' in item.text(0)
 
         if is_file:
+            # Approval actions (only for light frames)
+            imagetyp = item.text(1)
+
+            # Initialize approval action variables
+            approve_action = None
+            reject_action = None
+            clear_grading_action = None
+
+            if 'light' in imagetyp.lower():
+                approve_action = menu.addAction("✓ Approve Frame")
+                reject_action = menu.addAction("✗ Reject Frame")
+                clear_grading_action = menu.addAction("○ Clear Grading")
+                menu.addSeparator()
+
             show_path_action = menu.addAction("Show Full Path")
             copy_path_action = menu.addAction("Copy Path to Clipboard")
             open_location_action = menu.addAction("Open File Location")
@@ -236,6 +309,22 @@ class ViewCatalogTab(QWidget):
             reimport_action = menu.addAction("Re-import File")
 
             action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
+
+            # Check if user cancelled the menu
+            if action is None:
+                return
+
+            # Handle approval actions
+            if 'light' in imagetyp.lower():
+                if action == approve_action:
+                    self.approve_frame(item)
+                    return
+                elif action == reject_action:
+                    self.reject_frame(item)
+                    return
+                elif action == clear_grading_action:
+                    self.clear_frame_grading(item)
+                    return
 
             if action == show_path_action:
                 self.show_file_path(item)
@@ -715,9 +804,10 @@ Imported: {result[11] or 'N/A'}
             # Get filter values
             imagetype_filter = self.catalog_imagetype_filter.currentText()
             object_filter = self.catalog_object_filter.currentText()
+            approval_filter = self.catalog_approval_filter.currentText()
 
             # Create and start worker
-            self.loader_worker = CatalogLoaderWorker(self.db_path, imagetype_filter, object_filter)
+            self.loader_worker = CatalogLoaderWorker(self.db_path, imagetype_filter, object_filter, approval_filter)
             self.loader_worker.progress_updated.connect(self._on_catalog_progress)
             self.loader_worker.data_ready.connect(self._on_catalog_data_ready)
             self.loader_worker.error_occurred.connect(self._on_catalog_error)
@@ -932,7 +1022,7 @@ Imported: {result[11] or 'N/A'}
 
             # Add file nodes for this date
             for row in sorted(date_stats['rows'], key=lambda x: x[3]):  # Sort by filename
-                obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume = row
+                obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume, fwhm, eccentricity, snr, star_count, approval_status = row
 
                 file_item = QTreeWidgetItem(date_item)
                 file_item.setText(0, filename)
@@ -943,14 +1033,40 @@ Imported: {result[11] or 'N/A'}
                 binning = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
                 file_item.setText(5, binning)
                 file_item.setText(6, date_loc or 'N/A')
-                file_item.setText(7, telescop or 'N/A')
-                file_item.setText(8, instrume or 'N/A')
 
-                # Apply color coding
-                color = self.get_item_color(imagetyp)
-                if color:
-                    for col in range(9):
-                        file_item.setBackground(col, QBrush(color))
+                # Quality metrics columns
+                file_item.setText(7, f"{fwhm:.2f}" if fwhm is not None else '')
+                file_item.setText(8, f"{eccentricity:.2f}" if eccentricity is not None else '')
+                file_item.setText(9, f"{snr:.1f}" if snr is not None else '')
+                file_item.setText(10, f"{star_count}" if star_count is not None else '')
+
+                # Approval status with icon
+                if approval_status == 'approved':
+                    file_item.setText(11, '✓ Approved')
+                elif approval_status == 'rejected':
+                    file_item.setText(11, '✗ Rejected')
+                else:
+                    file_item.setText(11, '○ Not Graded')
+
+                file_item.setText(12, telescop or 'N/A')
+                file_item.setText(13, instrume or 'N/A')
+
+                # Apply color coding based on approval status
+                approval_color = None
+                if approval_status == 'approved':
+                    approval_color = QColor(200, 255, 200)  # Light green
+                elif approval_status == 'rejected':
+                    approval_color = QColor(255, 200, 200)  # Light red
+
+                if approval_color:
+                    for col in range(14):
+                        file_item.setBackground(col, QBrush(approval_color))
+                else:
+                    # Apply imagetyp color coding for non-graded frames
+                    color = self.get_item_color(imagetyp)
+                    if color:
+                        for col in range(14):
+                            file_item.setBackground(col, QBrush(color))
 
         # Mark as loaded by removing lazy_load flag
         item_data['lazy_load'] = False
@@ -1204,3 +1320,181 @@ Imported: {result[11] or 'N/A'}
         root = self.catalog_tree.invisibleRootItem()
         for i in range(root.childCount()):
             restore_item_state(root.child(i))
+
+    def approve_frame(self, item: QTreeWidgetItem) -> None:
+        """Mark a frame as approved."""
+        self._update_approval_status(item, 'approved')
+
+    def reject_frame(self, item: QTreeWidgetItem) -> None:
+        """Mark a frame as rejected."""
+        self._update_approval_status(item, 'rejected')
+
+    def clear_frame_grading(self, item: QTreeWidgetItem) -> None:
+        """Clear the grading status of a frame."""
+        self._update_approval_status(item, 'not_graded')
+
+    def bulk_approve_frames(self, items: list) -> None:
+        """Mark multiple frames as approved."""
+        self._bulk_update_approval_status(items, 'approved')
+
+    def bulk_reject_frames(self, items: list) -> None:
+        """Mark multiple frames as rejected."""
+        self._bulk_update_approval_status(items, 'rejected')
+
+    def bulk_clear_grading(self, items: list) -> None:
+        """Clear grading status for multiple frames."""
+        self._bulk_update_approval_status(items, 'not_graded')
+
+    def _bulk_update_approval_status(self, items: list, status: str) -> None:
+        """
+        Update approval status for multiple frames in bulk.
+
+        Args:
+            items: List of QTreeWidgetItem objects representing files
+            status: New approval status ('approved', 'rejected', or 'not_graded')
+        """
+        from datetime import datetime
+
+        if not items:
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            grading_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S') if status != 'not_graded' else None
+
+            # Get filenames from items
+            filenames = [item.text(0) for item in items]
+
+            # Get project_ids for affected frames before update
+            placeholders = ','.join(['?'] * len(filenames))
+            cursor.execute(f'''
+                SELECT DISTINCT project_id
+                FROM xisf_files
+                WHERE filename IN ({placeholders})
+                AND project_id IS NOT NULL
+            ''', filenames)
+            project_ids = [row[0] for row in cursor.fetchall()]
+
+            # Build bulk update query
+            cursor.execute(f'''
+                UPDATE xisf_files
+                SET approval_status = ?, grading_date = ?
+                WHERE filename IN ({placeholders})
+            ''', [status, grading_date] + filenames)
+
+            conn.commit()
+            conn.close()
+
+            # Recalculate project counts for all affected projects
+            for project_id in project_ids:
+                self.project_manager.recalculate_project_counts(project_id)
+
+            # Update visual display for all items
+            if status == 'approved':
+                status_text = '✓ Approved'
+                color = QColor(200, 255, 200)  # Light green
+            elif status == 'rejected':
+                status_text = '✗ Rejected'
+                color = QColor(255, 200, 200)  # Light red
+            else:
+                status_text = '○ Not Graded'
+                color = None
+
+            for item in items:
+                item.setText(11, status_text)
+                if color:
+                    for col in range(14):
+                        item.setBackground(col, QBrush(color))
+                else:
+                    # Clear background
+                    for col in range(14):
+                        item.setBackground(col, QBrush())
+
+            self.status_callback(f"{len(items)} frame(s) marked as {status}")
+
+            # If an approval filter is active, refresh the view to apply the filter
+            if hasattr(self, 'catalog_approval_filter') and self.catalog_approval_filter.currentText() != 'All':
+                self.refresh_catalog_view()
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to update approval status: {e}')
+
+    def _update_approval_status(self, item: QTreeWidgetItem, status: str) -> None:
+        """
+        Update the approval status of a frame in the database.
+
+        Args:
+            item: Tree widget item representing the file
+            status: New approval status ('approved', 'rejected', or 'not_graded')
+        """
+        from datetime import datetime
+
+        filename = item.text(0)
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Get project_id before update (if frame is assigned to a project)
+            cursor.execute('SELECT project_id FROM xisf_files WHERE filename = ?', (filename,))
+            result = cursor.fetchone()
+            project_id = result[0] if result and result[0] else None
+
+            # Update approval status
+            grading_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S') if status != 'not_graded' else None
+
+            cursor.execute('''
+                UPDATE xisf_files
+                SET approval_status = ?, grading_date = ?
+                WHERE filename = ?
+            ''', (status, grading_date, filename))
+
+            conn.commit()
+            conn.close()
+
+            # Recalculate project counts if frame is part of a project
+            if project_id:
+                self.project_manager.recalculate_project_counts(project_id)
+
+            # Update the item display
+            if status == 'approved':
+                item.setText(11, '✓ Approved')
+                color = QColor(200, 255, 200)  # Light green
+            elif status == 'rejected':
+                item.setText(11, '✗ Rejected')
+                color = QColor(255, 200, 200)  # Light red
+            else:
+                item.setText(11, '○ Not Graded')
+                color = None
+
+            # Update item color
+            if color:
+                for col in range(14):
+                    item.setBackground(col, QBrush(color))
+            else:
+                # Clear background to show default
+                for col in range(14):
+                    item.setBackground(col, QBrush())
+
+            self.status_callback(f"Frame {filename} marked as {status}")
+
+            # If an approval filter is active, refresh the view to apply the filter
+            if hasattr(self, 'catalog_approval_filter') and self.catalog_approval_filter.currentText() != 'All':
+                self.refresh_catalog_view()
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to update approval status: {e}')
+
+    def save_catalog_tree_column_widths(self) -> None:
+        """Save the catalog tree column widths to settings."""
+        for col in range(self.catalog_tree.columnCount()):
+            width = self.catalog_tree.columnWidth(col)
+            self.settings.setValue(f'catalog_tree_col_{col}', width)
+
+    def save_catalog_tree_column_order(self) -> None:
+        """Save the catalog tree column order to settings."""
+        header = self.catalog_tree.header()
+        order = [header.logicalIndex(i) for i in range(header.count())]
+        self.settings.setValue('catalog_tree_col_order', order)
