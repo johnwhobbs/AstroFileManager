@@ -149,21 +149,32 @@ class ViewCatalogTab(QWidget):
             'Name', 'Image Type', 'Filter', 'Exposure', 'Temp', 'Binning', 'Date',
             'FWHM', 'Ecc', 'SNR', 'Stars', 'Status', 'Telescope', 'Instrument'
         ])
-        # Set initial column widths
-        self.catalog_tree.setColumnWidth(0, 300)
-        self.catalog_tree.setColumnWidth(1, 120)
-        self.catalog_tree.setColumnWidth(2, 80)
-        self.catalog_tree.setColumnWidth(3, 80)
-        self.catalog_tree.setColumnWidth(4, 60)
-        self.catalog_tree.setColumnWidth(5, 70)
-        self.catalog_tree.setColumnWidth(6, 100)
-        self.catalog_tree.setColumnWidth(7, 70)   # FWHM
-        self.catalog_tree.setColumnWidth(8, 60)   # Ecc
-        self.catalog_tree.setColumnWidth(9, 60)   # SNR
-        self.catalog_tree.setColumnWidth(10, 60)  # Stars
-        self.catalog_tree.setColumnWidth(11, 80)  # Status
-        self.catalog_tree.setColumnWidth(12, 120) # Telescope
-        self.catalog_tree.setColumnWidth(13, 120) # Instrument
+
+        # Make columns resizable and movable
+        self.catalog_tree.header().setSectionsMovable(True)
+        self.catalog_tree.header().setStretchLastSection(True)
+
+        # Set initial column widths or restore from settings
+        default_widths = [300, 120, 80, 80, 60, 70, 100, 70, 60, 60, 60, 80, 120, 120]
+        for col in range(14):
+            saved_width = self.settings.value(f'catalog_tree_col_{col}')
+            if saved_width:
+                self.catalog_tree.setColumnWidth(col, int(saved_width))
+            else:
+                self.catalog_tree.setColumnWidth(col, default_widths[col])
+
+        # Restore column order
+        saved_order = self.settings.value('catalog_tree_col_order')
+        if saved_order:
+            for visual_index, logical_index in enumerate(saved_order):
+                self.catalog_tree.header().moveSection(
+                    self.catalog_tree.header().visualIndex(logical_index),
+                    visual_index
+                )
+
+        # Connect signals to save settings
+        self.catalog_tree.header().sectionResized.connect(self.save_catalog_tree_column_widths)
+        self.catalog_tree.header().sectionMoved.connect(self.save_catalog_tree_column_order)
 
         # Enable multi-selection
         self.catalog_tree.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
@@ -1473,3 +1484,15 @@ Imported: {result[11] or 'N/A'}
 
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to update approval status: {e}')
+
+    def save_catalog_tree_column_widths(self) -> None:
+        """Save the catalog tree column widths to settings."""
+        for col in range(self.catalog_tree.columnCount()):
+            width = self.catalog_tree.columnWidth(col)
+            self.settings.setValue(f'catalog_tree_col_{col}', width)
+
+    def save_catalog_tree_column_order(self) -> None:
+        """Save the catalog tree column order to settings."""
+        header = self.catalog_tree.header()
+        order = [header.logicalIndex(i) for i in range(header.count())]
+        self.settings.setValue('catalog_tree_col_order', order)

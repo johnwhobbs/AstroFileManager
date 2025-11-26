@@ -130,15 +130,32 @@ class SessionsTab(QWidget):
         self.sessions_tree.setHeaderLabels([
             'Session', 'Status', 'Light Frames', 'FWHM', 'SNR', 'Approved', 'Darks', 'Bias', 'Flats'
         ])
-        self.sessions_tree.setColumnWidth(0, 250)
-        self.sessions_tree.setColumnWidth(1, 100)
-        self.sessions_tree.setColumnWidth(2, 120)
-        self.sessions_tree.setColumnWidth(3, 80)   # FWHM
-        self.sessions_tree.setColumnWidth(4, 80)   # SNR
-        self.sessions_tree.setColumnWidth(5, 100)  # Approved
-        self.sessions_tree.setColumnWidth(6, 150)  # Darks
-        self.sessions_tree.setColumnWidth(7, 150)  # Bias
-        self.sessions_tree.setColumnWidth(8, 150)  # Flats
+
+        # Make columns resizable and movable
+        self.sessions_tree.header().setSectionsMovable(True)
+        self.sessions_tree.header().setStretchLastSection(True)
+
+        # Set initial column widths or restore from settings
+        default_widths = [250, 100, 120, 80, 80, 100, 150, 150, 150]
+        for col in range(9):
+            saved_width = self.settings.value(f'sessions_tree_col_{col}')
+            if saved_width:
+                self.sessions_tree.setColumnWidth(col, int(saved_width))
+            else:
+                self.sessions_tree.setColumnWidth(col, default_widths[col])
+
+        # Restore column order
+        saved_order = self.settings.value('sessions_tree_col_order')
+        if saved_order:
+            for visual_index, logical_index in enumerate(saved_order):
+                self.sessions_tree.header().moveSection(
+                    self.sessions_tree.header().visualIndex(logical_index),
+                    visual_index
+                )
+
+        # Connect signals to save settings
+        self.sessions_tree.header().sectionResized.connect(self.save_sessions_tree_column_widths)
+        self.sessions_tree.header().sectionMoved.connect(self.save_sessions_tree_column_order)
         self.sessions_tree.itemClicked.connect(self.on_session_clicked)
         layout.addWidget(self.sessions_tree)
 
@@ -548,3 +565,15 @@ class SessionsTab(QWidget):
             # Convert to integers (QSettings may return strings)
             sizes = [int(s) for s in saved_sizes]
             self.details_splitter.setSizes(sizes)
+
+    def save_sessions_tree_column_widths(self) -> None:
+        """Save the sessions tree column widths to settings."""
+        for col in range(self.sessions_tree.columnCount()):
+            width = self.sessions_tree.columnWidth(col)
+            self.settings.setValue(f'sessions_tree_col_{col}', width)
+
+    def save_sessions_tree_column_order(self) -> None:
+        """Save the sessions tree column order to settings."""
+        header = self.sessions_tree.header()
+        order = [header.logicalIndex(i) for i in range(header.count())]
+        self.settings.setValue('sessions_tree_col_order', order)
