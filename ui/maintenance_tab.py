@@ -257,11 +257,15 @@ class MaintenanceTab(QWidget):
         remove_orphans_group = QGroupBox("Remove Orphaned Calibration Frames")
         remove_orphans_layout = QVBoxLayout()
 
-        remove_orphans_info = QLabel("Identify calibration frames that have no matching light frames:")
+        remove_orphans_info = QLabel("Identify calibration frames that are not used by any other frames:")
         remove_orphans_layout.addWidget(remove_orphans_info)
 
-        remove_orphans_help = QLabel("Orphaned frames are calibration frames without corresponding light frames in your database.")
+        remove_orphans_help = QLabel(
+            "Orphaned frames are calibration frames that don't match any light frames or other calibration frames. "
+            "This includes darks for flats, and bias for darks/flats."
+        )
         remove_orphans_help.setStyleSheet("color: #888888; font-size: 10px;")
+        remove_orphans_help.setWordWrap(True)
         remove_orphans_layout.addWidget(remove_orphans_help)
 
         # Scan button
@@ -1216,7 +1220,7 @@ class MaintenanceTab(QWidget):
             total_count = 0
             total_size = 0
 
-            # Find orphaned dark frames (no matching light frames)
+            # Find orphaned dark frames (no matching light frames OR flat frames)
             cursor.execute('''
                 SELECT DISTINCT
                     i.id, i.filepath, i.filename, i.exposure, i.ccd_temp, i.xbinning, i.ybinning, i.imagetyp
@@ -1229,6 +1233,14 @@ class MaintenanceTab(QWidget):
                         AND ABS(COALESCE(light.ccd_temp, 0) - COALESCE(i.ccd_temp, 0)) <= 1.0
                         AND light.xbinning = i.xbinning
                         AND light.ybinning = i.ybinning
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM xisf_files flat
+                      WHERE flat.imagetyp LIKE '%Flat%'
+                        AND ABS(flat.exposure - i.exposure) < 0.1
+                        AND ABS(COALESCE(flat.ccd_temp, 0) - COALESCE(i.ccd_temp, 0)) <= 1.0
+                        AND flat.xbinning = i.xbinning
+                        AND flat.ybinning = i.ybinning
                   )
             ''')
             darks = cursor.fetchall()
@@ -1255,7 +1267,7 @@ class MaintenanceTab(QWidget):
             self.orphaned_data['flats'] = flats
             total_count += len(flats)
 
-            # Find orphaned bias frames (no matching light frames)
+            # Find orphaned bias frames (no matching light, dark, or flat frames)
             cursor.execute('''
                 SELECT DISTINCT
                     i.id, i.filepath, i.filename, i.ccd_temp, i.xbinning, i.ybinning, i.imagetyp
@@ -1267,6 +1279,20 @@ class MaintenanceTab(QWidget):
                         AND ABS(COALESCE(light.ccd_temp, 0) - COALESCE(i.ccd_temp, 0)) <= 1.0
                         AND light.xbinning = i.xbinning
                         AND light.ybinning = i.ybinning
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM xisf_files dark
+                      WHERE dark.imagetyp LIKE '%Dark%'
+                        AND ABS(COALESCE(dark.ccd_temp, 0) - COALESCE(i.ccd_temp, 0)) <= 1.0
+                        AND dark.xbinning = i.xbinning
+                        AND dark.ybinning = i.ybinning
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM xisf_files flat
+                      WHERE flat.imagetyp LIKE '%Flat%'
+                        AND ABS(COALESCE(flat.ccd_temp, 0) - COALESCE(i.ccd_temp, 0)) <= 1.0
+                        AND flat.xbinning = i.xbinning
+                        AND flat.ybinning = i.ybinning
                   )
             ''')
             bias = cursor.fetchall()
@@ -1289,7 +1315,7 @@ class MaintenanceTab(QWidget):
             if total_count == 0:
                 self.orphans_results_label.setText(
                     "No orphaned calibration frames found.\n"
-                    "All calibration frames have corresponding light frames."
+                    "All calibration frames are being used by light frames or other calibration frames."
                 )
                 self.preview_orphans_btn.setEnabled(False)
                 self.remove_orphans_btn.setEnabled(False)
