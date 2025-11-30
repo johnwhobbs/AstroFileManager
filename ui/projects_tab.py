@@ -128,6 +128,7 @@ class ProjectsTab(QWidget):
         self.projects_table.setSelectionMode(
             QTableWidget.SelectionMode.SingleSelection
         )
+        self.projects_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.projects_table.itemSelectionChanged.connect(self.on_project_selected)
 
         # Enable sorting by clicking column headers
