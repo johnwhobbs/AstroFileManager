@@ -129,6 +129,10 @@ class ProjectsTab(QWidget):
             QTableWidget.SelectionMode.SingleSelection
         )
         self.projects_table.itemSelectionChanged.connect(self.on_project_selected)
+
+        # Enable sorting by clicking column headers
+        self.projects_table.setSortingEnabled(True)
+
         self.projects_splitter.addWidget(self.projects_table)
 
         # Project details panel
@@ -221,6 +225,9 @@ class ProjectsTab(QWidget):
         # Block signals to prevent on_project_selected from firing during update
         self.projects_table.blockSignals(True)
 
+        # Disable sorting while populating to avoid performance issues
+        self.projects_table.setSortingEnabled(False)
+
         # Update table
         self.projects_table.setRowCount(len(projects))
 
@@ -252,6 +259,9 @@ class ProjectsTab(QWidget):
 
         # Re-enable signals
         self.projects_table.blockSignals(False)
+
+        # Re-enable sorting after data population
+        self.projects_table.setSortingEnabled(True)
 
         # Update unassigned sessions warning
         unassigned = self.project_manager.get_unassigned_sessions()
