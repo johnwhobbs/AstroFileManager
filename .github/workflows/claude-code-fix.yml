@@ -2,9 +2,7 @@ name: Claude Code Issue Fixer
 
 on:
   issues:
-    types: [opened, labeled]
-  issue_comment:
-    types: [created]
+    types: [labeled]
 
 permissions:
   contents: write
@@ -13,13 +11,8 @@ permissions:
 
 jobs:
   claude-fix:
+    if: github.event.label.name == 'claude-fix'
     runs-on: ubuntu-latest
-    
-    # Simpler condition - runs when labeled with 'claude-fix' OR when @claude is mentioned
-    if: |
-      (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'claude-fix') ||
-      (github.event_name == 'issues' && github.event.action == 'opened' && contains(github.event.issue.body, '@claude')) ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
     
     steps:
       - name: Checkout repository
@@ -32,3 +25,14 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Please analyze this GitHub issue for an astrophotography file management application.
+            
+            Implement the requested changes and create a pull request to the 'development' branch.
+            
+            Guidelines:
+            - Write clean, beginner-friendly Python code
+            - Add comments to explain what the code does
+            - Include basic error handling
+            - Follow PEP 8 style guidelines
+            - Test your code before creating the PR
