@@ -25,14 +25,38 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          show_full_output: true
+          allowed_tools: "View,GlobTool,GrepTool,CreateFile,StrReplace"
+          claude_args: |
+            --max-turns 20
           prompt: |
-            Please analyze this GitHub issue for an astrophotography file management application.
+            REPOSITORY: ${{ github.repository }}
+            ISSUE NUMBER: #${{ github.event.issue.number }}
+            ISSUE TITLE: "${{ github.event.issue.title }}"
+            ISSUE AUTHOR: @${{ github.event.issue.user.login }}
             
-            Implement the requested changes and create a pull request to the 'development' branch.
+            ISSUE DESCRIPTION:
+            ${{ github.event.issue.body }}
             
-            Guidelines:
-            - Write clean, beginner-friendly Python code
-            - Add comments to explain what the code does
-            - Include basic error handling
-            - Follow PEP 8 style guidelines
-            - Test your code before creating the PR
+            YOUR TASK:
+            Implement the changes described in the issue above.
+            
+            INSTRUCTIONS:
+            1. Use the View tool to explore the repository structure
+            2. Implement the requested changes in Python
+            3. Create new files or modify existing files as needed
+            4. Follow these coding standards:
+               - Write beginner-friendly Python code
+               - Add clear comments explaining the code
+               - Include docstrings for all functions
+               - Add basic error handling
+               - Follow PEP 8 style guidelines
+            
+            DO NOT:
+            - Try to use gh CLI commands
+            - Use command substitution $()
+            - Try to list issues or pull requests
+            
+            Just focus on implementing the code changes requested in the issue.
+            
+            After making changes, the GitHub Action will automatically create a PR for you.
