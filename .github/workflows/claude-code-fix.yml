@@ -13,12 +13,13 @@ permissions:
 
 jobs:
   claude-fix:
-    # Only run when the issue has 'claude-fix' label OR contains @claude
-    if: |
-      (github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'claude-fix')) ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
-    
     runs-on: ubuntu-latest
+    
+    # Simpler condition - runs when labeled with 'claude-fix' OR when @claude is mentioned
+    if: |
+      (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'claude-fix') ||
+      (github.event_name == 'issues' && github.event.action == 'opened' && contains(github.event.issue.body, '@claude')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
     
     steps:
       - name: Checkout repository
