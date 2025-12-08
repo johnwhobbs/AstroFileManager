@@ -23,15 +23,18 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          additional_permissions: |
-            - CreateFile:**
-            - StrReplace:**
-            - View:**
-            - GlobTool:**
-            - GrepTool:**
-            - BatchTool:**
-          claude_args: |
-            --max-turns 25
+          settings: |
+            {
+              "permissions": {
+                "allow": [
+                  "Read",
+                  "Edit",
+                  "CreateFile",
+                  "StrReplace"
+                ]
+              },
+              "defaultMode": "acceptEdits"
+            }
           prompt: |
             Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
             
