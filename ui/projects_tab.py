@@ -118,6 +118,16 @@ class ProjectsTab(QWidget):
                     visual_index
                 )
 
+        # Restore sort column and order
+        saved_sort_column = self.settings.value('projects_table_sort_column')
+        saved_sort_order = self.settings.value('projects_table_sort_order')
+        if saved_sort_column is not None and saved_sort_order is not None:
+            # Convert to appropriate types
+            sort_column = int(saved_sort_column)
+            sort_order = Qt.SortOrder(int(saved_sort_order))
+            # Sort the table by the saved column and order
+            self.projects_table.sortItems(sort_column, sort_order)
+
         # Connect column resize and move to save settings
         self.projects_table.horizontalHeader().sectionResized.connect(self.save_projects_table_column_widths)
         self.projects_table.horizontalHeader().sectionMoved.connect(self.save_projects_table_column_order)
@@ -133,6 +143,9 @@ class ProjectsTab(QWidget):
 
         # Enable sorting by clicking column headers
         self.projects_table.setSortingEnabled(True)
+
+        # Connect sorting signal to save sort state
+        self.projects_table.horizontalHeader().sortIndicatorChanged.connect(self.save_projects_table_sort_state)
 
         self.projects_splitter.addWidget(self.projects_table)
 
@@ -263,6 +276,16 @@ class ProjectsTab(QWidget):
 
         # Re-enable sorting after data population
         self.projects_table.setSortingEnabled(True)
+
+        # Restore sort state after refresh
+        saved_sort_column = self.settings.value('projects_table_sort_column')
+        saved_sort_order = self.settings.value('projects_table_sort_order')
+        if saved_sort_column is not None and saved_sort_order is not None:
+            # Convert to appropriate types
+            sort_column = int(saved_sort_column)
+            sort_order = Qt.SortOrder(int(saved_sort_order))
+            # Sort the table by the saved column and order
+            self.projects_table.sortItems(sort_column, sort_order)
 
         # Update unassigned sessions warning
         unassigned = self.project_manager.get_unassigned_sessions()
@@ -752,3 +775,11 @@ class ProjectsTab(QWidget):
         header = self.projects_table.horizontalHeader()
         order = [header.logicalIndex(i) for i in range(header.count())]
         self.settings.setValue('projects_table_col_order', order)
+
+    def save_projects_table_sort_state(self) -> None:
+        """Save the projects table sort column and order to settings."""
+        header = self.projects_table.horizontalHeader()
+        sort_column = header.sortIndicatorSection()
+        sort_order = header.sortIndicatorOrder()
+        self.settings.setValue('projects_table_sort_column', sort_column)
+        self.settings.setValue('projects_table_sort_order', int(sort_order))
