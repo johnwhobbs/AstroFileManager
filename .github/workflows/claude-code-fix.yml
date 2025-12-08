@@ -30,34 +30,45 @@ jobs:
                   "Read",
                   "Edit",
                   "CreateFile",
-                  "StrReplace"
+                  "StrReplace",
+                  "View",
+                  "GlobTool",
+                  "GrepTool"
                 ]
               },
               "defaultMode": "acceptEdits"
             }
+          claude_args: |
+            --max-turns 30
           prompt: |
-            Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
+            REPOSITORY: ${{ github.repository }}
+            WORKING DIRECTORY: /home/runner/work/AstroFileManager/AstroFileManager
             
+            ISSUE #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
+            
+            DESCRIPTION:
             ${{ github.event.issue.body }}
             
-            IMPORTANT - HOW TO EXPLORE THE REPOSITORY:
-            - To see directory contents, use View tool with just the directory path
-            - To read a file, use View tool with the full file path including extension
-            - Use GlobTool to find files matching patterns (e.g., "*.py")
-            - DO NOT try to read directories as files
+            ⚠️ CRITICAL INSTRUCTIONS - READ FIRST:
             
-            TASK:
-            Implement the changes described in the issue above for this Python astrophotography application.
+            1. EXPLORING FILES:
+               - To list directory contents: Use View tool on the directory path (e.g., View on ".")
+               - To read a file: Use View tool on the file path with extension (e.g., "README.md")
+               - NEVER use View/Read on a directory path expecting file contents
+               - Use GlobTool to find files (e.g., "**/*.py" finds all Python files)
             
-            CODING GUIDELINES:
-            - Write beginner-friendly Python code
-            - Add clear comments
-            - Include docstrings for functions
-            - Add basic error handling
-            - Follow PEP 8 style
+            2. YOUR TASK:
+               - Implement the changes described in the issue
+               - This is a Python astrophotography file management application
+               - Write beginner-friendly code with comments
+               - Add docstrings to all functions
+               - Include basic error handling
+               - Follow PEP 8 style guidelines
             
-            WORKFLOW:
-            1. First explore the repository structure
-            2. Understand existing code
-            3. Make your changes
-            4. The system will automatically create a PR
+            3. WORKFLOW:
+               - First: Use View on "." to see the repository structure
+               - Then: Use GlobTool or View on specific files to understand the code
+               - Next: Make your changes using CreateFile or StrReplace
+               - Finally: The GitHub Action will automatically commit and create a PR
+            
+            Start by viewing the current directory structure, then proceed with the task.
