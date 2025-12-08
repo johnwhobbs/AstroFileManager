@@ -23,7 +23,13 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          auto_approve_all_tools: true
+          additional_permissions: |
+            - CreateFile:**
+            - StrReplace:**
+            - View:**
+            - GlobTool:**
+            - GrepTool:**
+            - BatchTool:**
           claude_args: |
             --max-turns 25
           prompt: |
