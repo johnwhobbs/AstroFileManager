@@ -118,9 +118,23 @@ class ProjectsTab(QWidget):
                     visual_index
                 )
 
+        # Restore sort state
+        saved_sort_column = self.settings.value('projects_table_sort_column')
+        saved_sort_order = self.settings.value('projects_table_sort_order')
+        if saved_sort_column is not None and saved_sort_order is not None:
+            # Convert to integers (QSettings may return strings)
+            sort_column = int(saved_sort_column)
+            sort_order = int(saved_sort_order)
+            # Convert integer back to Qt.SortOrder enum
+            sort_order_enum = Qt.SortOrder.AscendingOrder if sort_order == 0 else Qt.SortOrder.DescendingOrder
+            self.projects_table.sortItems(sort_column, sort_order_enum)
+
         # Connect column resize and move to save settings
         self.projects_table.horizontalHeader().sectionResized.connect(self.save_projects_table_column_widths)
         self.projects_table.horizontalHeader().sectionMoved.connect(self.save_projects_table_column_order)
+
+        # Connect sort indicator changed signal to save sort state
+        self.projects_table.horizontalHeader().sortIndicatorChanged.connect(self.save_projects_table_sort_state)
 
         self.projects_table.setSelectionBehavior(
             QTableWidget.SelectionBehavior.SelectRows
@@ -752,3 +766,17 @@ class ProjectsTab(QWidget):
         header = self.projects_table.horizontalHeader()
         order = [header.logicalIndex(i) for i in range(header.count())]
         self.settings.setValue('projects_table_col_order', order)
+
+    def save_projects_table_sort_state(self, column: int, order: Qt.SortOrder) -> None:
+        """
+        Save the projects table sort state to settings.
+
+        Args:
+            column: The column index that is being sorted
+            order: The sort order (Qt.SortOrder enum)
+        """
+        # Save the sort column
+        self.settings.setValue('projects_table_sort_column', column)
+        # Convert Qt.SortOrder enum to integer: AscendingOrder=0, DescendingOrder=1
+        # We need to use .value property to get the integer value from the enum
+        self.settings.setValue('projects_table_sort_order', int(order.value))
