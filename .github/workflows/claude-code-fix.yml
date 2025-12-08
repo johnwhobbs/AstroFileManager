@@ -19,6 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN }}
       
       - name: Configure Git
         run: |
@@ -90,7 +91,7 @@ jobs:
       - name: Create Pull Request
         if: steps.changes.outputs.has_changes == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           gh pr create \
             --title "Fix: Resolve issue #${{ github.event.issue.number }}" \
@@ -114,7 +115,7 @@ jobs:
       - name: Add comment to issue
         if: steps.changes.outputs.has_changes == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           gh issue comment ${{ github.event.issue.number }} \
             --body "✅ I've created a pull request with the requested changes. Please review it before merging to the development branch."
@@ -122,7 +123,7 @@ jobs:
       - name: No changes made
         if: steps.changes.outputs.has_changes == 'false'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           gh issue comment ${{ github.event.issue.number }} \
             --body "ℹ️ I analyzed this issue but didn't make any changes. This might be because:
