@@ -41,7 +41,21 @@ jobs:
           settings: |
             {
               "permissions": {
-                "allow": ["Read", "Edit", "CreateFile", "StrReplace", "View", "GlobTool"]
+                "allow": [
+                  "Read",
+                  "Edit",
+                  "CreateFile",
+                  "StrReplace",
+                  "View",
+                  "GlobTool",
+                  "GrepTool",
+                  "Bash(python*)",
+                  "Bash(git*)",
+                  "Bash(ls*)",
+                  "Bash(cat*)",
+                  "Bash(grep*)",
+                  "Bash(find*)"
+                ]
               },
               "defaultMode": "acceptEdits"
             }
@@ -64,6 +78,7 @@ jobs:
             - Use View on specific files (e.g., "main.py") to read them
             - Use GlobTool to find files (e.g., "**/*.py")
             - DO NOT use View to read directories as files
+            - You have permission to run python, git, ls, cat, grep, and find commands
             
             Make the necessary code changes. Do NOT worry about git operations - 
             the workflow will handle committing and creating the PR automatically.
