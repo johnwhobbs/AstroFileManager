@@ -178,7 +178,7 @@ class ExportProjectWorker(QThread):
 
                 exposure, temp, xbin, ybin, filt, date_loc = result
 
-                # Find matching darks
+                # Find matching darks for light frames
                 darks = self._find_dark_files(cursor, exposure, temp, xbin, ybin)
                 darks_set.update(darks)
 
@@ -189,6 +189,26 @@ class ExportProjectWorker(QThread):
                 # Find matching bias
                 bias = self._find_bias_files(cursor, temp, xbin, ybin)
                 bias_set.update(bias)
+
+            # Find darks for the flat frames
+            # Flats need their own darks that match the flat exposure times
+            for flat_filepath in flats_set:
+                # Get flat frame metadata to find matching darks
+                cursor.execute('''
+                    SELECT exposure, ccd_temp, xbinning, ybinning
+                    FROM xisf_files
+                    WHERE filepath = ?
+                ''', (flat_filepath,))
+
+                result = cursor.fetchone()
+                if not result:
+                    continue
+
+                flat_exposure, flat_temp, flat_xbin, flat_ybin = result
+
+                # Find darks that match the flat frame parameters
+                flat_darks = self._find_dark_files(cursor, flat_exposure, flat_temp, flat_xbin, flat_ybin)
+                darks_set.update(flat_darks)
 
             return {
                 'darks': darks_set,
