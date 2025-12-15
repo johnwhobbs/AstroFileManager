@@ -58,7 +58,7 @@ class ExportProjectDialog(QDialog):
             <p><b>Project:</b> {self.project_name}</p>
             <p>This will copy all light frames from the project along with their matching
             calibration frames (darks, flats, bias) to a destination folder.</p>
-            <p>Files will be organized into subdirectories: Lights, Darks, Flats, Bias</p>
+            <p>Files will be organized into subdirectories: Lights, Darks, Flats, Biases</p>
         """)
         info_layout.addWidget(info_text)
         info_group.setLayout(info_layout)
