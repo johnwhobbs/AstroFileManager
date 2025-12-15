@@ -13,21 +13,21 @@ from PyQt6.QtWidgets import (
     QMessageBox, QProgressBar, QLabel, QTextEdit, QGroupBox,
     QRadioButton, QButtonGroup
 )
-from PyQt6.QtCore import QSettings
 
 from import_export.import_worker import ImportWorker
+from core.config_manager import ConfigManager
 
 
 class ImportTab(QWidget):
     """Import tab for XISF file import functionality."""
 
-    def __init__(self, db_path: str, settings: QSettings, clear_db_btn: Optional[QPushButton] = None) -> None:
+    def __init__(self, db_path: str, settings: ConfigManager, clear_db_btn: Optional[QPushButton] = None) -> None:
         """
         Initialize Import tab.
 
         Args:
             db_path: Path to SQLite database
-            settings: QSettings instance for app settings
+            settings: ConfigManager instance for app settings
             clear_db_btn: Reference to clear database button (optional)
         """
         super().__init__()
