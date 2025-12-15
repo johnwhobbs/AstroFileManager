@@ -49,7 +49,7 @@ class ExportProjectWorker(QThread):
             lights_dir = Path(self.destination_path) / "Lights"
             darks_dir = Path(self.destination_path) / "Darks"
             flats_dir = Path(self.destination_path) / "Flats"
-            bias_dir = Path(self.destination_path) / "Bias"
+            bias_dir = Path(self.destination_path) / "Biases"
 
             lights_dir.mkdir(parents=True, exist_ok=True)
             darks_dir.mkdir(parents=True, exist_ok=True)
