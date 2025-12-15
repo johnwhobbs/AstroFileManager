@@ -347,7 +347,7 @@ class ExportProjectWorker(QThread):
         - YYYYMMDD (e.g., 20241215)
         - YYYY-MM-DD (e.g., 2024-12-15)
         - YYYY_MM_DD (e.g., 2024_12_15)
-        - Surrounded by underscores or hyphens
+        - At the beginning of filename or surrounded by underscores/hyphens
 
         Args:
             filename: Original filename with potential date
@@ -360,25 +360,37 @@ class ExportProjectWorker(QThread):
             "Master_Bias_-10C_Bin1x1_001.xisf"
             >>> _remove_date_from_filename("Master_Dark_2024-12-15_-10C_Bin1x1_300s_001.xisf")
             "Master_Dark_-10C_Bin1x1_300s_001.xisf"
+            >>> _remove_date_from_filename("2025-11-10_Master_Dark_5s_-10C_Bin1x1_001.xisf")
+            "Master_Dark_5s_-10C_Bin1x1_001.xisf"
         """
         # Pattern to match common date formats with surrounding delimiters
         # Matches: _YYYYMMDD_, -YYYYMMDD-, _YYYY-MM-DD_, _YYYY_MM_DD_, etc.
-        # Use lookahead/lookbehind to preserve hyphens that are part of negative numbers
+        # Also matches dates at the beginning of the filename
         date_patterns = [
+            # Match date at the beginning of filename followed by underscore or hyphen
+            r'^\d{8}[_-]',                    # 20241215_ or 20241215- at start
+            r'^\d{4}-\d{2}-\d{2}[_-]',        # 2024-12-15_ or 2024-12-15- at start
+            r'^\d{4}_\d{2}_\d{2}[_-]',        # 2024_12_15_ or 2024_12_15- at start
             # Match date with delimiters on both sides
-            r'[_-]\d{8}[_-]',           # _20241215_ or -20241215-
-            r'[_-]\d{4}-\d{2}-\d{2}[_-]',  # _2024-12-15_ or -2024-12-15-
-            r'[_-]\d{4}_\d{2}_\d{2}[_-]',  # _2024_12_15_ or -2024_12_15-
+            r'[_-]\d{8}[_-]',                 # _20241215_ or -20241215-
+            r'[_-]\d{4}-\d{2}-\d{2}[_-]',     # _2024-12-15_ or -2024-12-15-
+            r'[_-]\d{4}_\d{2}_\d{2}[_-]',     # _2024_12_15_ or -2024_12_15-
             # Match date at end (before extension) or followed by non-digit
-            r'[_-]\d{8}(?=[_.])',       # _20241215 or -20241215 followed by _ or .
-            r'[_-]\d{4}-\d{2}-\d{2}(?=[_.])',   # _2024-12-15 followed by _ or .
-            r'[_-]\d{4}_\d{2}_\d{2}(?=[_.])',   # _2024_12_15 followed by _ or .
+            r'[_-]\d{8}(?=[_.])',             # _20241215 or -20241215 followed by _ or .
+            r'[_-]\d{4}-\d{2}-\d{2}(?=[_.])', # _2024-12-15 followed by _ or .
+            r'[_-]\d{4}_\d{2}_\d{2}(?=[_.])', # _2024_12_15 followed by _ or .
         ]
 
         result = filename
         for pattern in date_patterns:
-            # Replace the date pattern with a single underscore
-            result = re.sub(pattern, '_', result)
+            # Replace the date pattern with empty string for beginning patterns,
+            # or with a single underscore for middle/end patterns
+            if pattern.startswith('^'):
+                # For dates at the beginning, remove entirely (no replacement)
+                result = re.sub(pattern, '', result)
+            else:
+                # For dates in middle/end, replace with single underscore
+                result = re.sub(pattern, '_', result)
 
         # Clean up any double underscores or hyphens that might result
         result = re.sub(r'__+', '_', result)
