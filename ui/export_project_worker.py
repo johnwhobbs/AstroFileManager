@@ -6,6 +6,7 @@ folder for processing with PixInsight WBPP or other tools.
 """
 
 import os
+import re
 import shutil
 import sqlite3
 from pathlib import Path
@@ -302,9 +303,99 @@ class ExportProjectWorker(QThread):
 
         return {row[0] for row in cursor.fetchall()}
 
+    def _is_master_calibration_file(self, filepath: str) -> bool:
+        """
+        Check if a file is a master bias or master dark calibration file.
+
+        Args:
+            filepath: Path to the file
+
+        Returns:
+            True if the file is a master bias or master dark, False otherwise
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT imagetyp
+                FROM xisf_files
+                WHERE filepath = ?
+            ''', (filepath,))
+
+            result = cursor.fetchone()
+            if result and result[0]:
+                imagetyp = result[0].lower()
+                # Check if it's a master bias or master dark
+                is_master = 'master' in imagetyp
+                is_bias_or_dark = 'bias' in imagetyp or 'dark' in imagetyp
+                return is_master and is_bias_or_dark
+
+            return False
+
+        finally:
+            conn.close()
+
+    def _remove_date_from_filename(self, filename: str) -> str:
+        """
+        Remove date patterns from master calibration filenames.
+
+        This function removes common date formats from filenames to ensure
+        compatibility with PixInsight WBPP when processing lights from multiple nights.
+
+        Supported date formats:
+        - YYYYMMDD (e.g., 20241215)
+        - YYYY-MM-DD (e.g., 2024-12-15)
+        - YYYY_MM_DD (e.g., 2024_12_15)
+        - Surrounded by underscores or hyphens
+
+        Args:
+            filename: Original filename with potential date
+
+        Returns:
+            Filename with date removed
+
+        Examples:
+            >>> _remove_date_from_filename("Master_Bias_20241215_-10C_Bin1x1_001.xisf")
+            "Master_Bias_-10C_Bin1x1_001.xisf"
+            >>> _remove_date_from_filename("Master_Dark_2024-12-15_-10C_Bin1x1_300s_001.xisf")
+            "Master_Dark_-10C_Bin1x1_300s_001.xisf"
+        """
+        # Pattern to match common date formats with surrounding delimiters
+        # Matches: _YYYYMMDD_, -YYYYMMDD-, _YYYY-MM-DD_, _YYYY_MM_DD_, etc.
+        # Use lookahead/lookbehind to preserve hyphens that are part of negative numbers
+        date_patterns = [
+            # Match date with delimiters on both sides
+            r'[_-]\d{8}[_-]',           # _20241215_ or -20241215-
+            r'[_-]\d{4}-\d{2}-\d{2}[_-]',  # _2024-12-15_ or -2024-12-15-
+            r'[_-]\d{4}_\d{2}_\d{2}[_-]',  # _2024_12_15_ or -2024_12_15-
+            # Match date at end (before extension) or followed by non-digit
+            r'[_-]\d{8}(?=[_.])',       # _20241215 or -20241215 followed by _ or .
+            r'[_-]\d{4}-\d{2}-\d{2}(?=[_.])',   # _2024-12-15 followed by _ or .
+            r'[_-]\d{4}_\d{2}_\d{2}(?=[_.])',   # _2024_12_15 followed by _ or .
+        ]
+
+        result = filename
+        for pattern in date_patterns:
+            # Replace the date pattern with a single underscore
+            result = re.sub(pattern, '_', result)
+
+        # Clean up any double underscores or hyphens that might result
+        result = re.sub(r'__+', '_', result)
+        result = re.sub(r'--+', '-', result)
+
+        # Clean up underscore/hyphen at the start of extension
+        result = re.sub(r'[_-]+\.', '.', result)
+
+        return result
+
     def _copy_file(self, source_path: str, dest_dir: Path) -> bool:
         """
         Copy a file to the destination directory.
+
+        For master bias and master dark files, dates are removed from the filename
+        to ensure compatibility with PixInsight WBPP when processing lights from
+        multiple nights.
 
         Args:
             source_path: Source file path
@@ -318,7 +409,14 @@ class ExportProjectWorker(QThread):
             if not source.exists():
                 return False
 
-            dest = dest_dir / source.name
+            # Determine the destination filename
+            dest_filename = source.name
+
+            # For master bias and master dark files, remove dates from filename
+            if self._is_master_calibration_file(source_path):
+                dest_filename = self._remove_date_from_filename(source.name)
+
+            dest = dest_dir / dest_filename
 
             # If file already exists with same name, don't overwrite
             if dest.exists():
