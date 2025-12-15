@@ -41,27 +41,10 @@ jobs:
           settings: |
             {
               "permissions": {
-                "allow": [
-                  "Read",
-                  "Edit",
-                  "Write",
-                  "CreateFile",
-                  "StrReplace",
-                  "View",
-                  "GlobTool",
-                  "GrepTool",
-                  "Bash(python*)",
-                  "Bash(git*)",
-                  "Bash(ls*)",
-                  "Bash(cat*)",
-                  "Bash(grep*)",
-                  "Bash(find*)"
-                ],
-                "deny": []
-              },
-              "defaultMode": "acceptEdits"
+                "allow": ["**"]
+              }
             }
-          claude_args: --max-turns 25
+          claude_args: --max-turns 30
           prompt: |
             ISSUE #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
             
@@ -79,8 +62,7 @@ jobs:
             - Use View on "." to see directory structure
             - Use View on specific files (e.g., "main.py") to read them
             - Use GlobTool to find files (e.g., "**/*.py")
-            - You have full permission to read, create, and modify files
-            - You have permission to run python, git, ls, cat, grep, and find commands
+            - You have full permission to read, create, and modify any files
             
             Make the necessary code changes. Do NOT worry about git operations - 
             the workflow will handle committing and creating the PR automatically.
