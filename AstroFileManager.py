@@ -7,7 +7,7 @@ A PyQt6-based application for cataloging, organizing, and managing XISF astropho
 import sys
 from typing import Any
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QTabWidget
-from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtCore import Qt
 
 # Import constants
 from constants import (
@@ -19,6 +19,7 @@ from constants import (
 # Import core business logic modules
 from core.database import DatabaseManager
 from core.calibration import CalibrationMatcher
+from core.config_manager import ConfigManager
 
 # Import UI modules
 from ui.import_tab import ImportTab
@@ -34,7 +35,7 @@ class XISFCatalogGUI(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.db_path = 'xisf_catalog.db'
-        self.settings = QSettings('AstroFileManager', 'AstroFileManager')
+        self.settings = ConfigManager('AstroFileManager', 'AstroFileManager')
 
         # Initialize core business logic components
         self.db = DatabaseManager(self.db_path)
@@ -177,7 +178,7 @@ def main() -> None:
     app = QApplication(sys.argv)
 
     # Load theme setting
-    settings = QSettings('AstroFileManager', 'AstroFileManager')
+    settings = ConfigManager('AstroFileManager', 'AstroFileManager')
     theme = settings.value('theme', 'standard')
     
     # Apply theme
