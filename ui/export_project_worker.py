@@ -59,13 +59,13 @@ class ExportProjectWorker(QThread):
 
             self.progress_updated.emit(0, "Gathering light frames...")
 
-            # Get all light frames for the project
+            # Get approved light frames for the project
             light_frames = self._get_project_light_frames()
             if not light_frames:
-                self.error_occurred.emit("No light frames found for this project")
+                self.error_occurred.emit("No approved light frames found for this project. Please grade frames in PixInsight SubFrame Selector and import the CSV.")
                 return
 
-            self.progress_updated.emit(5, f"Found {len(light_frames)} light frames")
+            self.progress_updated.emit(5, f"Found {len(light_frames)} approved light frames")
 
             # Find all unique calibration requirements
             self.progress_updated.emit(10, "Analyzing calibration requirements...")
@@ -127,7 +127,15 @@ class ExportProjectWorker(QThread):
             self.error_occurred.emit(f"Checkout failed: {str(e)}")
 
     def _get_project_light_frames(self) -> List[str]:
-        """Get all light frame file paths for the project."""
+        """
+        Get approved light frame file paths for the project.
+
+        Only returns light frames with approval_status = 'approved' to ensure
+        that only quality-checked frames are exported for processing.
+
+        Returns:
+            List of file paths for approved light frames
+        """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
@@ -137,6 +145,7 @@ class ExportProjectWorker(QThread):
                 FROM xisf_files
                 WHERE project_id = ?
                 AND imagetyp LIKE '%Light%'
+                AND approval_status = 'approved'
                 AND filepath IS NOT NULL
                 ORDER BY date_loc, filter, filepath
             ''', (self.project_id,))
