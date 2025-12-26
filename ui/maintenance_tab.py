@@ -16,22 +16,23 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QTabWidget
 )
-from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 
 from utils.file_organizer import generate_organized_path
+from core.config_manager import ConfigManager
 
 
 class MaintenanceTab(QWidget):
     """Maintenance tab for database and file management operations."""
 
-    def __init__(self, db_path: str, settings: QSettings, import_log_widget: Optional[QTextEdit] = None) -> None:
+    def __init__(self, db_path: str, settings: ConfigManager, import_log_widget: Optional[QTextEdit] = None) -> None:
         """
         Initialize Maintenance tab.
 
         Args:
             db_path: Path to SQLite database
-            settings: QSettings instance for app settings
+            settings: ConfigManager instance for app settings
             import_log_widget: Optional reference to import tab's log widget
         """
         super().__init__()

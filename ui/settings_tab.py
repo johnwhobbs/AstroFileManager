@@ -12,18 +12,19 @@ from PyQt6.QtWidgets import (
     QMessageBox, QLabel, QLineEdit, QGroupBox, QComboBox,
     QRadioButton, QButtonGroup
 )
-from PyQt6.QtCore import QSettings
+
+from core.config_manager import ConfigManager
 
 
 class SettingsTab(QWidget):
     """Settings tab for application configuration."""
 
-    def __init__(self, settings: QSettings) -> None:
+    def __init__(self, settings: ConfigManager) -> None:
         """
         Initialize Settings tab.
 
         Args:
-            settings: QSettings instance for app settings
+            settings: ConfigManager instance for app settings
         """
         super().__init__()
         self.settings = settings

@@ -13,10 +13,11 @@ from PyQt6.QtWidgets import (
     QLabel, QTextEdit, QGroupBox, QComboBox, QRadioButton,
     QTreeWidget, QTreeWidgetItem, QFileDialog, QSplitter, QProgressBar
 )
-from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtCore import Qt
 
 from core.database import DatabaseManager
 from core.calibration import CalibrationMatcher
+from core.config_manager import ConfigManager
 from ui.background_workers import SessionsLoaderWorker
 
 
@@ -24,7 +25,7 @@ class SessionsTab(QWidget):
     """Sessions tab for session planning and calibration analysis."""
 
     def __init__(self, db_path: str, db_manager: DatabaseManager,
-                 calibration_matcher: CalibrationMatcher, settings: QSettings) -> None:
+                 calibration_matcher: CalibrationMatcher, settings: ConfigManager) -> None:
         """
         Initialize Sessions tab.
 
@@ -32,7 +33,7 @@ class SessionsTab(QWidget):
             db_path: Path to SQLite database
             db_manager: DatabaseManager instance
             calibration_matcher: CalibrationMatcher instance
-            settings: QSettings instance for saving/restoring UI state
+            settings: ConfigManager instance for saving/restoring UI state
         """
         super().__init__()
         self.db_path = db_path
