@@ -252,29 +252,53 @@ class ViewCatalogTab(QWidget):
 
         # Check if multiple items are selected
         if len(selected_items) > 1:
-            # Filter to only light frame files (no group nodes, only light frames)
-            light_frames = [
+            # Filter to only file items (no group nodes)
+            file_items = [
                 item for item in selected_items
-                if item.childCount() == 0 and '(' not in item.text(0) and 'light' in item.text(1).lower()
+                if item.childCount() == 0 and '(' not in item.text(0)
             ]
 
-            if light_frames:
-                # Show bulk approval actions
-                bulk_approve_action = menu.addAction(f"✓ Approve {len(light_frames)} Frame(s)")
-                bulk_reject_action = menu.addAction(f"✗ Reject {len(light_frames)} Frame(s)")
-                bulk_clear_action = menu.addAction(f"○ Clear Grading for {len(light_frames)} Frame(s)")
+            # Filter to only light frame files for approval actions
+            light_frames = [
+                item for item in file_items
+                if 'light' in item.text(1).lower()
+            ]
+
+            if file_items:
+                # Show bulk approval actions only if there are light frames
+                bulk_approve_action = None
+                bulk_reject_action = None
+                bulk_clear_action = None
+
+                if light_frames:
+                    bulk_approve_action = menu.addAction(f"✓ Approve {len(light_frames)} Frame(s)")
+                    bulk_reject_action = menu.addAction(f"✗ Reject {len(light_frames)} Frame(s)")
+                    bulk_clear_action = menu.addAction(f"○ Clear Grading for {len(light_frames)} Frame(s)")
+                    menu.addSeparator()
+
+                # Add bulk delete submenu for all file types
+                bulk_delete_menu = menu.addMenu(f"Delete {len(file_items)} File(s)...")
+                bulk_delete_db_only_action = bulk_delete_menu.addAction("From Database Only")
+                bulk_delete_disk_only_action = bulk_delete_menu.addAction("From Disk Only")
+                bulk_delete_both_action = bulk_delete_menu.addAction("From Database and Disk")
 
                 action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
 
                 if action is None:
                     return
 
-                if action == bulk_approve_action:
+                if light_frames and action == bulk_approve_action:
                     self.bulk_approve_frames(light_frames)
-                elif action == bulk_reject_action:
+                elif light_frames and action == bulk_reject_action:
                     self.bulk_reject_frames(light_frames)
-                elif action == bulk_clear_action:
+                elif light_frames and action == bulk_clear_action:
                     self.bulk_clear_grading(light_frames)
+                elif action == bulk_delete_db_only_action:
+                    self.delete_files_with_options(file_items, delete_from_db=True, delete_from_disk=False)
+                elif action == bulk_delete_disk_only_action:
+                    self.delete_files_with_options(file_items, delete_from_db=False, delete_from_disk=True)
+                elif action == bulk_delete_both_action:
+                    self.delete_files_with_options(file_items, delete_from_db=True, delete_from_disk=True)
                 return
 
         # Single item context menu
@@ -305,7 +329,14 @@ class ViewCatalogTab(QWidget):
             menu.addSeparator()
             show_details_action = menu.addAction("Show File Details")
             menu.addSeparator()
-            delete_action = menu.addAction("Delete from Database")
+
+            # Delete submenu with options
+            delete_menu = menu.addMenu("Delete File...")
+            delete_db_only_action = delete_menu.addAction("From Database Only")
+            delete_disk_only_action = delete_menu.addAction("From Disk Only")
+            delete_both_action = delete_menu.addAction("From Database and Disk")
+
+            menu.addSeparator()
             reimport_action = menu.addAction("Re-import File")
 
             action = menu.exec(self.catalog_tree.viewport().mapToGlobal(position))
@@ -334,8 +365,12 @@ class ViewCatalogTab(QWidget):
                 self.open_file_location(item)
             elif action == show_details_action:
                 self.show_file_details(item)
-            elif action == delete_action:
-                self.delete_file_from_database(item)
+            elif action == delete_db_only_action:
+                self.delete_files_with_options([item], delete_from_db=True, delete_from_disk=False)
+            elif action == delete_disk_only_action:
+                self.delete_files_with_options([item], delete_from_db=False, delete_from_disk=True)
+            elif action == delete_both_action:
+                self.delete_files_with_options([item], delete_from_db=True, delete_from_disk=True)
             elif action == reimport_action:
                 self.reimport_file(item)
         elif is_session:
@@ -501,8 +536,122 @@ Imported: {result[11] or 'N/A'}
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to retrieve file details: {e}')
 
+    def delete_files_with_options(self, items: list, delete_from_db: bool = True, delete_from_disk: bool = False) -> None:
+        """
+        Delete files from the database and/or disk.
+
+        Args:
+            items: List of QTreeWidgetItem objects representing files
+            delete_from_db: Whether to delete from database
+            delete_from_disk: Whether to delete from disk
+        """
+        if not items:
+            return
+
+        # Get filenames and file paths
+        file_info = []
+        for item in items:
+            filename = item.text(0)
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute('SELECT filepath FROM xisf_files WHERE filename = ?', (filename,))
+                result = cursor.fetchone()
+                conn.close()
+
+                if result:
+                    file_info.append({'filename': filename, 'filepath': result[0]})
+            except Exception as e:
+                QMessageBox.critical(self, 'Error', f'Failed to retrieve file info for {filename}: {e}')
+                return
+
+        if not file_info:
+            QMessageBox.warning(self, 'No Files', 'No files found in database.')
+            return
+
+        # Build confirmation message
+        count = len(file_info)
+        if count == 1:
+            message = f'Are you sure you want to delete "{file_info[0]["filename"]}"'
+        else:
+            message = f'Are you sure you want to delete {count} files'
+
+        actions = []
+        if delete_from_db and delete_from_disk:
+            actions.append('from the database AND from disk')
+        elif delete_from_db:
+            actions.append('from the database')
+        elif delete_from_disk:
+            actions.append('from disk')
+
+        message += ' ' + ', '.join(actions) + '?'
+
+        # Add warning based on deletion type
+        if delete_from_disk:
+            message += '\n\n⚠️ WARNING: Files deleted from disk cannot be recovered!'
+
+        reply = QMessageBox.question(
+            self, 'Confirm Delete',
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            success_count = 0
+            failed_files = []
+
+            for info in file_info:
+                filename = info['filename']
+                filepath = info['filepath']
+                file_success = True
+
+                # Delete from database
+                if delete_from_db:
+                    try:
+                        conn = sqlite3.connect(self.db_path)
+                        cursor = conn.cursor()
+                        cursor.execute('DELETE FROM xisf_files WHERE filename = ?', (filename,))
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        failed_files.append(f'{filename}: DB deletion failed - {e}')
+                        file_success = False
+
+                # Delete from disk
+                if delete_from_disk and file_success:
+                    try:
+                        if os.path.exists(filepath):
+                            os.remove(filepath)
+                        else:
+                            failed_files.append(f'{filename}: File not found on disk')
+                            file_success = False
+                    except Exception as e:
+                        failed_files.append(f'{filename}: Disk deletion failed - {e}')
+                        file_success = False
+
+                if file_success:
+                    success_count += 1
+
+            # Show results
+            if success_count > 0:
+                self.refresh_catalog_view()
+
+            if failed_files:
+                error_msg = f'Successfully deleted {success_count} of {count} file(s).\n\nFailed:\n' + '\n'.join(failed_files)
+                QMessageBox.warning(self, 'Partial Success', error_msg)
+            else:
+                if count == 1:
+                    QMessageBox.information(self, 'Success', f'File deleted successfully: {file_info[0]["filename"]}')
+                else:
+                    QMessageBox.information(self, 'Success', f'{count} files deleted successfully')
+
     def delete_file_from_database(self, item: QTreeWidgetItem) -> None:
-        """Delete a file from the database."""
+        """
+        Delete a file from the database (legacy method - kept for backwards compatibility).
+
+        This method is deprecated. Use delete_files_with_options instead.
+        """
         filename = item.text(0)
         reply = QMessageBox.question(
             self, 'Confirm Delete',
