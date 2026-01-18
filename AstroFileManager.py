@@ -6,14 +6,15 @@ A PyQt6-based application for cataloging, organizing, and managing XISF astropho
 
 import sys
 from typing import Any
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QTabWidget
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QTabWidget, QMessageBox
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction
 
 # Import constants
 from constants import (
     TEMP_TOLERANCE_DARKS, TEMP_TOLERANCE_FLATS, TEMP_TOLERANCE_BIAS,
     EXPOSURE_TOLERANCE, MIN_FRAMES_RECOMMENDED, MIN_FRAMES_ACCEPTABLE,
-    IMPORT_BATCH_SIZE, DATE_OFFSET_HOURS
+    IMPORT_BATCH_SIZE, DATE_OFFSET_HOURS, __VERSION__
 )
 
 # Import core business logic modules
@@ -29,6 +30,7 @@ from ui.sessions_tab import SessionsTab
 from ui.analytics_tab import AnalyticsTab
 from ui.view_catalog_tab import ViewCatalogTab
 from ui.projects_tab import ProjectsTab
+from ui.update_dialog import UpdateDialog
 
 
 class XISFCatalogGUI(QMainWindow):
@@ -60,7 +62,10 @@ class XISFCatalogGUI(QMainWindow):
         """Initialize the user interface"""
         self.setWindowTitle('AstroFileManager')
         self.setGeometry(100, 100, 1000, 600)
-        
+
+        # Create menu bar
+        self.create_menu_bar()
+
         # Create central widget and main layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -98,6 +103,47 @@ class XISFCatalogGUI(QMainWindow):
         
         # Connect tab change to refresh
         tabs.currentChanged.connect(self.on_tab_changed)
+
+    def create_menu_bar(self) -> None:
+        """Create the menu bar with Help menu."""
+        menubar = self.menuBar()
+
+        # Help menu
+        help_menu = menubar.addMenu('&Help')
+
+        # Check for Updates action
+        update_action = QAction('Check for &Updates...', self)
+        update_action.setStatusTip('Check for application updates from GitHub')
+        update_action.triggered.connect(self.show_update_dialog)
+        help_menu.addAction(update_action)
+
+        # Separator
+        help_menu.addSeparator()
+
+        # About action
+        about_action = QAction('&About', self)
+        about_action.setStatusTip('About AstroFileManager')
+        about_action.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(about_action)
+
+    def show_update_dialog(self) -> None:
+        """Show the update dialog."""
+        dialog = UpdateDialog(self)
+        dialog.exec()
+
+    def show_about_dialog(self) -> None:
+        """Show the about dialog."""
+        QMessageBox.about(
+            self,
+            'About AstroFileManager',
+            f'<h3>AstroFileManager</h3>'
+            f'<p>Version {__VERSION__}</p>'
+            f'<p>A PyQt6-based application for cataloging, organizing, and managing '
+            f'XISF astrophotography files.</p>'
+            f'<p>Copyright © 2024-2026</p>'
+            f'<p><a href="https://github.com/johnwhobbs/AstroFileManager">'
+            f'GitHub Repository</a></p>'
+        )
 
     def connect_signals(self) -> None:
         """Connect signals after all widgets are created"""

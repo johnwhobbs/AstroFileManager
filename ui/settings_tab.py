@@ -151,6 +151,44 @@ class SettingsTab(QWidget):
         theme_group.setLayout(theme_layout)
         layout.addWidget(theme_group)
 
+        # Update settings group
+        update_group = QGroupBox("Updates")
+        update_layout = QVBoxLayout()
+
+        update_info = QLabel("Configure automatic update preferences:")
+        update_layout.addWidget(update_info)
+
+        # Radio buttons for update branch selection
+        self.update_button_group = QButtonGroup()
+        self.main_branch_radio = QRadioButton("Main Branch (Stable)")
+        self.main_branch_radio.setToolTip("Production-ready stable releases")
+        self.dev_branch_radio = QRadioButton("Development Branch (Latest features)")
+        self.dev_branch_radio.setToolTip("Latest features, may be less stable")
+
+        self.update_button_group.addButton(self.main_branch_radio, 0)
+        self.update_button_group.addButton(self.dev_branch_radio, 1)
+
+        update_layout.addWidget(self.main_branch_radio)
+        update_layout.addWidget(self.dev_branch_radio)
+
+        # Set current update branch preference
+        current_branch = self.settings.value('update_branch', 'main')
+        if current_branch == 'main':
+            self.main_branch_radio.setChecked(True)
+        else:
+            self.dev_branch_radio.setChecked(True)
+
+        # Save button for update preferences
+        update_button_layout = QHBoxLayout()
+        update_button_layout.addStretch()
+        save_update_btn = QPushButton('Save Update Preferences')
+        save_update_btn.clicked.connect(self.save_update_preferences)
+        update_button_layout.addWidget(save_update_btn)
+        update_layout.addLayout(update_button_layout)
+
+        update_group.setLayout(update_layout)
+        layout.addWidget(update_group)
+
         # OK button
         button_layout = QHBoxLayout()
         button_layout.addStretch()
@@ -188,6 +226,24 @@ class SettingsTab(QWidget):
             self,
             'Timezone Saved',
             f'Timezone set to: {timezone}\n\nThis will be used for converting DATE-OBS timestamps.'
+        )
+
+    def save_update_preferences(self) -> None:
+        """Save the update branch preference."""
+        if self.main_branch_radio.isChecked():
+            branch = 'main'
+        else:
+            branch = 'development'
+
+        # Save update branch preference
+        self.settings.setValue('update_branch', branch)
+
+        # Show confirmation message
+        QMessageBox.information(
+            self,
+            'Update Preferences Saved',
+            f'Update branch preference set to: {branch}\n\n'
+            f'This will be used when checking for updates from the Help menu.'
         )
 
     def apply_theme_setting(self) -> None:
