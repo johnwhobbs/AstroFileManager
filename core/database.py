@@ -6,6 +6,9 @@ for CRUD operations and queries.
 """
 
 import sqlite3
+import shutil
+import os
+from datetime import datetime
 from contextlib import contextmanager
 from typing import Optional, List, Dict, Tuple, Any
 
@@ -453,3 +456,136 @@ class DatabaseManager:
                 'total_hours': total_hours,
                 'avg_hours': avg_hours
             }
+
+    def create_backup(self, backup_dir: str) -> str:
+        """
+        Create a backup of the database.
+
+        Creates a timestamped backup copy of the database file in the specified
+        backup directory. The backup filename includes the current date and time
+        to allow multiple backups to be stored.
+
+        Args:
+            backup_dir: Directory path where backup should be stored
+
+        Returns:
+            Full path to the created backup file
+
+        Raises:
+            FileNotFoundError: If the database file doesn't exist
+            OSError: If backup directory cannot be created or backup fails
+        """
+        # Ensure backup directory exists
+        os.makedirs(backup_dir, exist_ok=True)
+
+        # Generate timestamped backup filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        db_filename = os.path.basename(self.db_path)
+        backup_filename = f"{os.path.splitext(db_filename)[0]}_backup_{timestamp}.db"
+        backup_path = os.path.join(backup_dir, backup_filename)
+
+        # Check if source database exists
+        if not os.path.exists(self.db_path):
+            raise FileNotFoundError(f"Database file not found: {self.db_path}")
+
+        # Create backup using shutil.copy2 to preserve metadata
+        shutil.copy2(self.db_path, backup_path)
+
+        return backup_path
+
+    def restore_backup(self, backup_path: str) -> None:
+        """
+        Restore database from a backup file.
+
+        Replaces the current database with a backup copy. The current database
+        is first backed up as a safety measure before being replaced.
+
+        Args:
+            backup_path: Path to the backup file to restore from
+
+        Raises:
+            FileNotFoundError: If the backup file doesn't exist
+            OSError: If restore operation fails
+        """
+        # Verify backup file exists
+        if not os.path.exists(backup_path):
+            raise FileNotFoundError(f"Backup file not found: {backup_path}")
+
+        # Create a safety backup of current database before restoring
+        if os.path.exists(self.db_path):
+            safety_backup = f"{self.db_path}.pre_restore"
+            shutil.copy2(self.db_path, safety_backup)
+
+        try:
+            # Replace current database with backup
+            shutil.copy2(backup_path, self.db_path)
+        except Exception as e:
+            # If restore fails, attempt to restore the safety backup
+            if os.path.exists(f"{self.db_path}.pre_restore"):
+                shutil.copy2(f"{self.db_path}.pre_restore", self.db_path)
+            raise OSError(f"Failed to restore backup: {str(e)}")
+        finally:
+            # Clean up safety backup
+            safety_backup_path = f"{self.db_path}.pre_restore"
+            if os.path.exists(safety_backup_path):
+                os.remove(safety_backup_path)
+
+    def list_backups(self, backup_dir: str) -> List[Dict[str, Any]]:
+        """
+        List all available database backups in the backup directory.
+
+        Args:
+            backup_dir: Directory path where backups are stored
+
+        Returns:
+            List of dictionaries with backup information:
+            - filename: Name of the backup file
+            - path: Full path to the backup file
+            - size: File size in bytes
+            - created: Creation timestamp as string
+            - created_datetime: Creation datetime object
+
+        Returns empty list if backup directory doesn't exist.
+        """
+        if not os.path.exists(backup_dir):
+            return []
+
+        backups = []
+
+        # Find all .db files in backup directory
+        for filename in os.listdir(backup_dir):
+            if filename.endswith('.db') and 'backup' in filename:
+                filepath = os.path.join(backup_dir, filename)
+
+                # Get file metadata
+                stat = os.stat(filepath)
+                created = datetime.fromtimestamp(stat.st_mtime)
+
+                backups.append({
+                    'filename': filename,
+                    'path': filepath,
+                    'size': stat.st_size,
+                    'created': created.strftime("%Y-%m-%d %H:%M:%S"),
+                    'created_datetime': created
+                })
+
+        # Sort by creation time, newest first
+        backups.sort(key=lambda x: x['created_datetime'], reverse=True)
+
+        return backups
+
+    def delete_backup(self, backup_path: str) -> None:
+        """
+        Delete a backup file.
+
+        Args:
+            backup_path: Path to the backup file to delete
+
+        Raises:
+            FileNotFoundError: If the backup file doesn't exist
+            OSError: If deletion fails
+        """
+        if not os.path.exists(backup_path):
+            raise FileNotFoundError(f"Backup file not found: {backup_path}")
+
+        os.remove(backup_path)
