@@ -306,3 +306,26 @@ class ConfigManager:
                 migrated += 1
 
         return migrated
+
+    def get_backup_directory(self) -> str:
+        """
+        Get the database backup directory path.
+
+        Returns the configured backup directory, or creates a default one
+        in the application's config directory if not set.
+
+        Returns:
+            String path to the backup directory
+
+        Example:
+            backup_dir = config.get_backup_directory()
+        """
+        # Check if backup directory is configured
+        backup_dir = self.value('backup_directory', '')
+
+        # If not configured, use default location in config directory
+        if not backup_dir:
+            backup_dir = str(self.config_dir / 'database_backups')
+            self.setValue('backup_directory', backup_dir)
+
+        return backup_dir
