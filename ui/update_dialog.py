@@ -53,15 +53,17 @@ class UpdateDownloadWorker(QThread):
     percent = pyqtSignal(int)   # Download percentage (0-100)
     finished = pyqtSignal(bool)  # Success/failure
 
-    def __init__(self, branch: str):
+    def __init__(self, branch: str, commit_sha: str = None):
         """
         Initialize the update download worker.
 
         Args:
             branch: The branch to download from (main or development)
+            commit_sha: The commit SHA being downloaded (to save after update)
         """
         super().__init__()
         self.branch = branch
+        self.commit_sha = commit_sha
 
     def run(self):
         """Execute the download and update in background thread."""
@@ -77,9 +79,10 @@ class UpdateDownloadWorker(QThread):
             self.finished.emit(False)
             return
 
-        # Apply the update
+        # Apply the update and save the commit SHA
         success = update_manager.apply_update(
             zip_path,
+            commit_sha=self.commit_sha,
             progress_callback=self.progress.emit
         )
 
@@ -263,6 +266,7 @@ class UpdateDialog(QDialog):
 
         # Display update information
         self.status_text.append(f"\nBranch: {result['branch']}")
+        self.status_text.append(f"Your commit: {result.get('current_commit_sha', 'Unknown')}")
         self.status_text.append(f"Latest commit: {result['latest_version']}")
         self.status_text.append(f"Date: {result['commit_date']}")
         self.status_text.append(f"Message: {result['commit_message']}")
@@ -306,8 +310,10 @@ class UpdateDialog(QDialog):
         self.status_text.append("Starting download...\n")
 
         # Start background download
+        # Pass the commit SHA so we can save it after successful update
         branch = self.get_selected_branch()
-        self.download_worker = UpdateDownloadWorker(branch)
+        commit_sha = self.update_info.get('commit_sha') if self.update_info else None
+        self.download_worker = UpdateDownloadWorker(branch, commit_sha)
         self.download_worker.progress.connect(self.on_download_progress)
         self.download_worker.percent.connect(self.on_download_percent)
         self.download_worker.finished.connect(self.on_download_finished)
