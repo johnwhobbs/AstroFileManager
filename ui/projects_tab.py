@@ -202,6 +202,11 @@ class ProjectsTab(QWidget):
         self.mark_complete_btn.setVisible(False)
         action_buttons.addWidget(self.mark_complete_btn)
 
+        self.reactivate_btn = QPushButton("Reactivate Project")
+        self.reactivate_btn.clicked.connect(self.reactivate_project)
+        self.reactivate_btn.setVisible(False)
+        action_buttons.addWidget(self.reactivate_btn)
+
         self.archive_btn = QPushButton("Archive")
         self.archive_btn.clicked.connect(self.archive_project)
         self.archive_btn.setVisible(False)
@@ -359,6 +364,7 @@ class ProjectsTab(QWidget):
         # Show action buttons
         self.export_files_btn.setVisible(True)  # Always visible when project selected
         self.mark_complete_btn.setVisible(project.status == 'active')
+        self.reactivate_btn.setVisible(project.status == 'completed')
         self.archive_btn.setVisible(project.status in ['active', 'completed'])
         self.delete_btn.setVisible(True)
 
@@ -555,6 +561,7 @@ class ProjectsTab(QWidget):
         self.next_steps_group.setVisible(False)
         self.export_files_btn.setVisible(False)
         self.mark_complete_btn.setVisible(False)
+        self.reactivate_btn.setVisible(False)
         self.archive_btn.setVisible(False)
         self.delete_btn.setVisible(False)
 
@@ -599,6 +606,30 @@ class ProjectsTab(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             self.project_manager.update_project_status(
                 self.selected_project_id, "completed"
+            )
+            self.refresh_projects()
+
+    def reactivate_project(self):
+        """
+        Reactivate a completed project back to active status.
+
+        This allows users to add more exposures to a project that was
+        previously marked as complete.
+        """
+        if not self.selected_project_id:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Reactivate Project",
+            "Reactivate this project? This will change its status back to 'Active' "
+            "and allow you to add more exposures to it.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.project_manager.update_project_status(
+                self.selected_project_id, "active"
             )
             self.refresh_projects()
 
