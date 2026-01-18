@@ -38,6 +38,42 @@ class UpdateManager:
         self.preferred_branch = preferred_branch
         self.current_version = __VERSION__
         self.app_dir = Path(__file__).parent.parent.resolve()
+        # File to store the current commit SHA
+        self.commit_sha_file = self.app_dir / '.update_commit_sha'
+
+    def _get_current_commit_sha(self) -> Optional[str]:
+        """
+        Get the currently installed commit SHA.
+
+        Returns:
+            The commit SHA string, or None if not available
+        """
+        try:
+            if self.commit_sha_file.exists():
+                with open(self.commit_sha_file, 'r') as f:
+                    sha = f.read().strip()
+                    return sha if sha else None
+        except Exception:
+            pass
+        return None
+
+    def _save_commit_sha(self, commit_sha: str) -> bool:
+        """
+        Save the commit SHA of the currently installed version.
+
+        Args:
+            commit_sha: The commit SHA to save
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        try:
+            with open(self.commit_sha_file, 'w') as f:
+                f.write(commit_sha)
+            return True
+        except Exception as e:
+            print(f"Error saving commit SHA: {e}")
+            return False
 
     def check_for_updates(self, progress_callback: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
         """
@@ -78,15 +114,25 @@ class UpdateManager:
             commit_message = commit_info['commit']['message']
             commit_date = commit_info['commit']['author']['date']
 
-            # Check if we already have this commit
-            # For simplicity, we'll consider any new commit as an update
-            # In a production app, you'd compare version tags or commit hashes
-            update_available = True  # We'll always show what's available
+            # Get the currently installed commit SHA
+            current_commit_sha = self._get_current_commit_sha()
+
+            # Determine if an update is available by comparing commit SHAs
+            # Update is available if:
+            # 1. We don't have a stored commit SHA (first time checking), OR
+            # 2. The latest commit SHA is different from our stored SHA
+            if current_commit_sha is None:
+                # No stored SHA, assume update is available for the first check
+                update_available = True
+            else:
+                # Compare the full commit SHAs
+                update_available = (commit_sha != current_commit_sha)
 
             result = {
                 'update_available': update_available,
                 'latest_version': commit_sha[:7],  # Short SHA
                 'current_version': self.current_version,
+                'current_commit_sha': current_commit_sha[:7] if current_commit_sha else 'Unknown',
                 'branch': self.preferred_branch,
                 'commit_sha': commit_sha,
                 'commit_message': commit_message.split('\n')[0],  # First line only
@@ -162,12 +208,14 @@ class UpdateManager:
 
     def apply_update(self,
                     zip_path: Path,
+                    commit_sha: Optional[str] = None,
                     progress_callback: Optional[Callable[[str], None]] = None) -> bool:
         """
         Apply the downloaded update by extracting files.
 
         Args:
             zip_path: Path to the downloaded zip file
+            commit_sha: Optional commit SHA to save after successful update
             progress_callback: Optional callback for status messages
 
         Returns:
@@ -240,6 +288,12 @@ class UpdateManager:
 
             if progress_callback:
                 progress_callback("Update applied successfully")
+
+            # Save the commit SHA if provided so we can track what version we're on
+            if commit_sha:
+                self._save_commit_sha(commit_sha)
+                if progress_callback:
+                    progress_callback(f"Saved commit SHA: {commit_sha[:7]}")
 
             # Clean up
             shutil.rmtree(temp_extract_dir, ignore_errors=True)
