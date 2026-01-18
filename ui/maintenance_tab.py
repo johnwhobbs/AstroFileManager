@@ -21,6 +21,7 @@ from PyQt6.QtGui import QColor
 
 from utils.file_organizer import generate_organized_path
 from core.config_manager import ConfigManager
+from core.database import DatabaseManager
 
 
 class MaintenanceTab(QWidget):
@@ -40,6 +41,7 @@ class MaintenanceTab(QWidget):
         self.settings = settings
         self.import_log_widget = import_log_widget
         self.clear_db_btn = None  # Will be set as reference
+        self.db_manager = DatabaseManager(db_path)  # Create database manager instance
 
         self.init_ui()
 
@@ -89,6 +91,63 @@ class MaintenanceTab(QWidget):
 
         clear_group.setLayout(clear_layout)
         layout.addWidget(clear_group)
+
+        # Backup and Restore section
+        backup_group = QGroupBox("Database Backup and Restore")
+        backup_layout = QVBoxLayout()
+
+        backup_info = QLabel("Create and manage database backups:")
+        backup_layout.addWidget(backup_info)
+
+        # Backup button
+        backup_btn_layout = QHBoxLayout()
+        self.backup_btn = QPushButton('Create Backup')
+        self.backup_btn.clicked.connect(self.create_database_backup)
+        self.backup_btn.setStyleSheet("QPushButton { background-color: #2d7a2d; color: white; } QPushButton:hover { background-color: #3d8a3d; }")
+        backup_btn_layout.addWidget(self.backup_btn)
+        backup_btn_layout.addStretch()
+        backup_layout.addLayout(backup_btn_layout)
+
+        # Separator
+        backup_layout.addWidget(QLabel(""))
+
+        # Backup list section
+        backup_list_label = QLabel("Available Backups:")
+        backup_layout.addWidget(backup_list_label)
+
+        # Refresh backups button
+        refresh_backups_btn = QPushButton('Refresh Backup List')
+        refresh_backups_btn.clicked.connect(self.refresh_backup_list)
+        backup_layout.addWidget(refresh_backups_btn)
+
+        # Backup list widget
+        self.backup_list = QListWidget()
+        self.backup_list.setMaximumHeight(150)
+        self.backup_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        backup_layout.addWidget(self.backup_list)
+
+        # Backup action buttons
+        backup_action_layout = QHBoxLayout()
+
+        self.restore_backup_btn = QPushButton('Restore Selected Backup')
+        self.restore_backup_btn.clicked.connect(self.restore_database_backup)
+        self.restore_backup_btn.setEnabled(False)
+        self.restore_backup_btn.setStyleSheet("QPushButton { background-color: #1e5a8e; color: white; } QPushButton:hover { background-color: #2e6a9e; }")
+        backup_action_layout.addWidget(self.restore_backup_btn)
+
+        self.delete_backup_btn = QPushButton('Delete Selected Backup')
+        self.delete_backup_btn.clicked.connect(self.delete_selected_backup)
+        self.delete_backup_btn.setEnabled(False)
+        self.delete_backup_btn.setStyleSheet("QPushButton { background-color: #8b0000; color: white; } QPushButton:hover { background-color: #a00000; }")
+        backup_action_layout.addWidget(self.delete_backup_btn)
+
+        backup_layout.addLayout(backup_action_layout)
+
+        # Connect list selection change to enable/disable buttons
+        self.backup_list.itemSelectionChanged.connect(self.on_backup_selection_changed)
+
+        backup_group.setLayout(backup_layout)
+        layout.addWidget(backup_group)
 
         # Search and Replace section
         replace_group = QGroupBox("Search and Replace")
@@ -1512,3 +1571,207 @@ class MaintenanceTab(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to remove orphaned frames: {e}')
+
+    def create_database_backup(self) -> None:
+        """
+        Create a backup of the current database.
+
+        Creates a timestamped backup file in the configured backup directory.
+        """
+        try:
+            # Get backup directory from config
+            backup_dir = self.settings.get_backup_directory()
+
+            # Create the backup
+            backup_path = self.db_manager.create_backup(backup_dir)
+
+            # Get backup filename
+            backup_filename = os.path.basename(backup_path)
+
+            # Show success message
+            QMessageBox.information(
+                self, 'Backup Created',
+                f'Database backup created successfully!\n\n'
+                f'Backup file: {backup_filename}\n'
+                f'Location: {backup_dir}'
+            )
+
+            # Log to import tab if available
+            if self.import_log_widget:
+                self.import_log_widget.append(f'\nDatabase backup created: {backup_filename}')
+
+            # Refresh the backup list
+            self.refresh_backup_list()
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, 'Backup Failed',
+                f'Failed to create database backup:\n\n{str(e)}'
+            )
+
+    def refresh_backup_list(self) -> None:
+        """
+        Refresh the list of available database backups.
+
+        Loads all backup files from the backup directory and displays them
+        in the backup list widget with their creation dates and file sizes.
+        """
+        try:
+            # Get backup directory from config
+            backup_dir = self.settings.get_backup_directory()
+
+            # Get list of backups
+            backups = self.db_manager.list_backups(backup_dir)
+
+            # Clear the list
+            self.backup_list.clear()
+
+            if not backups:
+                item = QListWidgetItem("No backups found")
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                self.backup_list.addItem(item)
+                return
+
+            # Populate the list with backup information
+            for backup in backups:
+                # Format file size
+                size_str = self._format_file_size(backup['size'])
+
+                # Create display text
+                display_text = f"{backup['filename']} - {backup['created']} ({size_str})"
+
+                # Create list item
+                item = QListWidgetItem(display_text)
+                item.setData(Qt.ItemDataRole.UserRole, backup['path'])  # Store full path
+
+                self.backup_list.addItem(item)
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, 'Error',
+                f'Failed to refresh backup list:\n\n{str(e)}'
+            )
+
+    def on_backup_selection_changed(self) -> None:
+        """
+        Handle backup list selection change.
+
+        Enables or disables the restore and delete buttons based on
+        whether a backup is selected.
+        """
+        has_selection = len(self.backup_list.selectedItems()) > 0
+
+        # Enable/disable buttons based on selection
+        self.restore_backup_btn.setEnabled(has_selection)
+        self.delete_backup_btn.setEnabled(has_selection)
+
+    def restore_database_backup(self) -> None:
+        """
+        Restore the database from the selected backup.
+
+        Replaces the current database with the selected backup file.
+        A safety backup is created before restoration.
+        """
+        selected_items = self.backup_list.selectedItems()
+
+        if not selected_items:
+            QMessageBox.warning(
+                self, 'No Selection',
+                'Please select a backup to restore.'
+            )
+            return
+
+        # Get the backup path from the selected item
+        backup_path = selected_items[0].data(Qt.ItemDataRole.UserRole)
+        backup_filename = os.path.basename(backup_path)
+
+        # Confirm the restoration
+        reply = QMessageBox.question(
+            self, 'Confirm Restore',
+            f'Are you sure you want to restore from this backup?\n\n'
+            f'Backup: {backup_filename}\n\n'
+            f'WARNING: This will replace your current database!\n'
+            f'A safety backup of the current database will be created first.\n\n'
+            f'This action cannot be undone!',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            # Restore the backup
+            self.db_manager.restore_backup(backup_path)
+
+            # Show success message
+            QMessageBox.information(
+                self, 'Restore Complete',
+                f'Database restored successfully from:\n\n{backup_filename}\n\n'
+                f'Please restart the application for changes to take full effect.'
+            )
+
+            # Log to import tab if available
+            if self.import_log_widget:
+                self.import_log_widget.append(f'\nDatabase restored from backup: {backup_filename}')
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, 'Restore Failed',
+                f'Failed to restore database backup:\n\n{str(e)}'
+            )
+
+    def delete_selected_backup(self) -> None:
+        """
+        Delete the selected backup file.
+
+        Permanently removes the selected backup file from disk.
+        """
+        selected_items = self.backup_list.selectedItems()
+
+        if not selected_items:
+            QMessageBox.warning(
+                self, 'No Selection',
+                'Please select a backup to delete.'
+            )
+            return
+
+        # Get the backup path from the selected item
+        backup_path = selected_items[0].data(Qt.ItemDataRole.UserRole)
+        backup_filename = os.path.basename(backup_path)
+
+        # Confirm the deletion
+        reply = QMessageBox.question(
+            self, 'Confirm Delete',
+            f'Are you sure you want to delete this backup?\n\n'
+            f'Backup: {backup_filename}\n\n'
+            f'This action cannot be undone!',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            # Delete the backup
+            self.db_manager.delete_backup(backup_path)
+
+            # Show success message
+            QMessageBox.information(
+                self, 'Backup Deleted',
+                f'Backup deleted successfully:\n\n{backup_filename}'
+            )
+
+            # Log to import tab if available
+            if self.import_log_widget:
+                self.import_log_widget.append(f'\nBackup deleted: {backup_filename}')
+
+            # Refresh the backup list
+            self.refresh_backup_list()
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, 'Delete Failed',
+                f'Failed to delete backup:\n\n{str(e)}'
+            )
