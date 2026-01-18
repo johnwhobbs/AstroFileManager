@@ -26,6 +26,41 @@ python create_db.py
 python AstroFileManager.py
 ```
 
+## What's New in v2.4.0
+
+**Major new features added:**
+
+1. **Self-Update System** (Help menu → Check for Updates)
+   - Update application directly from GitHub with one click
+   - Choose Main (Stable) or Development (Latest) branch
+   - Automatic backups before updates, database preservation
+
+2. **Database Backup and Restore** (Maintenance tab → Database tab)
+   - Create timestamped backups with one click
+   - Restore from any previous backup
+   - Automatic safety backup before restore
+
+3. **Checkout Files for Processing** (Projects tab)
+   - Export approved frames with matching calibration for PixInsight
+   - One-click export to organized folder structure (Lights/, Darks/, Flats/, Biases/)
+   - Automatic master calibration filename cleanup for WBPP compatibility
+   - Only exports approved frames (quality-first approach)
+
+4. **Reactivate Completed Projects** (Projects tab)
+   - Resume work on completed projects to add more data
+   - Useful when integration reveals need for more frames
+
+5. **Calibration Frame Maintenance** (Maintenance tab → Calibration Frames tab)
+   - Master Frame Temperature Tagging: Fix missing temps on PixInsight masters
+   - Remove Duplicate Calibration: Clean up individual frames when masters exist
+   - Remove Orphaned Calibration: Delete calibration with no matching lights
+
+6. **Cross-Platform Configuration** (Settings tab)
+   - Settings now stored in JSON file instead of Windows registry
+   - Platform-independent, easy to backup
+
+**See "Self-Update System" and "Application Tabs Overview" sections below for complete details.**
+
 ## Typical Workflows
 
 ### Workflow 1: Starting a New Imaging Project
@@ -112,7 +147,67 @@ python AstroFileManager.py
    - Use as shooting list for next session
    - Track calibration library completeness
 
-### Workflow 4: Organizing Existing Data
+### Workflow 4: Complete Project from Capture to Processing
+
+**Goal:** Complete end-to-end workflow from first capture to PixInsight processing
+
+1. **Create Project** (Projects tab → New Project)
+   - Set up project with target frame counts
+   - Example: "NGC 7000 Narrowband 2024" with 90 Ha, 90 OIII, 90 SII
+
+2. **First Night's Capture and Import** (Import Files tab)
+   - Capture light frames and calibration frames
+   - Import using "Import and organize" mode
+   - Files automatically organized into repository structure
+
+3. **Assign Session to Project** (View Catalog tab)
+   - Navigate to date node under Object → Filter
+   - Right-click → "Assign to Project"
+   - Select your project
+
+4. **Continue Capturing Over Multiple Nights**
+   - Repeat capture, import, and assignment process
+   - Monitor progress in Projects tab
+   - Follow "Next Steps" recommendations
+
+5. **Grade Frames in PixInsight**
+   - Once you have sufficient data, grade all frames
+   - Open SubFrame Selector in PixInsight
+   - Load all light frames for the project
+   - Review FWHM, eccentricity, SNR metrics
+   - Approve good frames, reject poor frames
+   - Export CSV with results
+
+6. **Import Quality Data** (Projects tab)
+   - Click "Import Quality Data" button
+   - Select the exported CSV file
+   - System updates approval status and recalculates progress
+   - Review approved frame counts vs targets
+
+7. **Checkout Files for Processing** (Projects tab)
+   - Click "Checkout Files for Processing" button
+   - Choose destination folder
+   - Application exports:
+     - All approved light frames
+     - Matching dark frames for lights
+     - Matching flat frames
+     - Matching bias frames
+     - Dark frames for the flats
+   - Files organized into Lights/, Darks/, Flats/, Biases/ folders
+   - Master calibration filenames cleaned (dates removed)
+
+8. **Process in PixInsight**
+   - Open WeightedBatchPreProcessing (WBPP)
+   - Point to exported folder structure
+   - WBPP automatically finds all files
+   - Process with confidence - complete calibration verified
+   - Integrate approved frames only
+
+9. **Mark Project Complete** (Projects tab)
+   - After successful integration, mark project as complete
+   - Or use "Reactivate Project" if you need more data later
+
+### Workflow 5: Organizing Existing Data
 
 **Goal:** Import and organize historical astrophotography data
 
@@ -139,6 +234,53 @@ python AstroFileManager.py
    - Use Search & Replace to fix inconsistent values
    - Example: Standardize telescope name across all sessions
    - Ensure consistent filter names
+
+## Self-Update System
+
+**Purpose:** Keep AstroFileManager up-to-date with the latest features and bug fixes directly from GitHub
+
+**Features:**
+- **Automatic update checking** from GitHub repository
+- **Two update branches:**
+  - **Main Branch (Stable):** Production-ready releases
+  - **Development Branch (Latest features):** Cutting-edge features and improvements
+- **Version tracking** using commit SHA
+- **Automatic backups** before applying updates
+- **Database preservation** during updates
+- **One-click installation** with automatic restart
+- **Progress tracking** during download
+
+**How to Update:**
+
+1. **Check for Updates** (Help menu → Check for Updates)
+   - Application checks GitHub for newer commits
+   - Shows current version and latest available version
+   - Displays commit message and author information
+
+2. **Choose Update Branch** (Settings tab → Updates section)
+   - Select Main Branch for stable releases
+   - Select Development Branch for latest features
+   - Preference saved for future update checks
+
+3. **Install Update**
+   - Click "Install Update" button in update dialog
+   - Application creates automatic backup of current version
+   - Downloads update as ZIP file with progress bar
+   - Extracts files (preserves database files)
+   - Restarts application automatically
+
+**Important Notes:**
+- Database files (*.db, *.db-journal) are never overwritten during updates
+- Backup of previous version created before update (timestamped folder)
+- Recommendation to create manual database backup before major updates
+- Update requires internet connection to access GitHub
+- Version tracking uses `.update_commit_sha` file in application directory
+
+**When to Use:**
+- Monthly or when notified of important bug fixes
+- Before starting a new imaging season
+- When new features are announced
+- If experiencing issues that may be fixed in newer versions
 
 ## Application Tabs Overview
 
@@ -213,12 +355,47 @@ python AstroFileManager.py
 - Adjustable splitter between goals and recommendations
 - All preferences saved across sessions
 
+**Export Files for Processing:**
+- **Checkout Files for Processing** button exports approved frames with matching calibration
+- Only exports frames with `approval_status = 'approved'` (must grade in PixInsight first)
+- Automatically includes matching calibration frames:
+  - Dark frames (matching exposure, temperature, binning)
+  - Flat frames (matching filter, date, temperature, binning)
+  - Bias frames (matching temperature, binning)
+  - Dark frames for the flat frames
+- Organizes files into subdirectories:
+  - `Lights/` - Approved light frames only
+  - `Darks/` - Dark frames for lights and flats
+  - `Flats/` - Flat frames
+  - `Biases/` - Bias frames
+- **Master frame handling:** Automatically removes dates from master calibration filenames for PixInsight WBPP compatibility when processing lights from multiple nights
+  - Example: `Master_Bias_20241215_-10C_Bin1x1.xisf` → `Master_Bias_-10C_Bin1x1.xisf`
+- Progress tracking during export
+- Ready for immediate processing in PixInsight WeightedBatchPreProcessing
+
+**Project Management:**
+- **Edit Project:** Modify project details, filter goals, and target counts after creation
+- **Reactivate Project:** Change completed projects back to active status to add more data
+- **Delete Project:** Remove projects from database (does not delete image files)
+
+**UI Customization:**
+- **Resizable columns:** Project Name, Object, Year, Status, Created
+- **Movable columns:** Drag column headers to reorder
+- **Sortable columns:** Click headers to sort (ascending/descending)
+- **Column preferences:** All resize, order, and sort settings saved across sessions
+- **Adjustable splitters:**
+  - Main splitter between projects list and details panel
+  - Secondary splitter between Filter Goals and Next Steps sections
+  - Positions saved and restored
+
 **When to Use:**
 - Plan new imaging campaigns
 - Track progress across multiple nights
 - Import quality grades from PixInsight
 - Know when you have enough data
 - Edit project goals as conditions change
+- Export approved frames for final processing
+- Resume work on previously completed projects
 
 ### Sessions Tab
 
@@ -313,11 +490,60 @@ Light Frames: 25 | Exposure: 300.0s | Temp: -10.2°C | Binning: 1x1
 
 ### Maintenance Tab
 
-**Purpose:** Database management and bulk metadata corrections
+**Purpose:** Database management, bulk metadata corrections, and calibration frame maintenance
 
-**Database Management:**
-- Clear database safely with confirmation
+**Database Tab:**
+
+**Database Backup and Restore:**
+- **Create Backup:** Generate timestamped backup of entire database
+  - Default location: `~/.config/AstroFileManager/database_backups/` (Linux) or `%LOCALAPPDATA%\AstroFileManager\database_backups\` (Windows)
+  - Uses SQLite backup API for safe, consistent backups
+  - Shows human-readable file sizes (KB, MB, GB)
+- **Restore Backup:** Replace current database with selected backup
+  - Automatically creates safety backup before restore
+  - Lists all available backups with creation date and size
+  - Confirmation required for safety
+  - Recommendation to restart after restore
+- **Delete Backup:** Remove old backup files
+- **Refresh Backup List:** Update list of available backups
+- Backup directory configurable via config file
+
+**Clear Database:**
+- Safely clear all data with confirmation
 - Start fresh when needed
+- Does not affect backup files
+
+**Calibration Frames Tab:**
+
+**Master Frame Temperature Tagging:**
+- Assign CCD-TEMP values to master calibration frames lacking temperature metadata
+- Lists all master frames with current temperature status
+- Highlights frames missing temperature (common with PixInsight masters)
+- Bulk temperature assignment to multiple selected frames
+- Updates database, renames files, and moves to correct folders
+- Enables proper session matching for master frames
+
+**Remove Duplicate Calibration Frames:**
+- Identify individual calibration frames when master frames exist
+- Shows count of duplicates and total disk space to reclaim
+- Preview list of files to be removed
+- Options:
+  - Remove from database only
+  - Remove from database and delete files
+- Safety confirmation dialogs
+- Helps clean up redundant calibration data
+
+**Remove Orphaned Calibration Frames:**
+- Find calibration frames with no matching light frames
+- Identifies darks, flats, and bias frames that are no longer needed
+- Shows count and total disk space
+- Preview list with frame parameters (exposure, temperature, binning)
+- Options:
+  - Remove from database only
+  - Remove from database and delete files
+- Useful for cleaning up after completing projects
+
+**Metadata Tab:**
 
 **Search and Replace:**
 - Fix inconsistent FITS keyword values
@@ -333,6 +559,8 @@ Filter name: "Hydrogen Alpha" → "Ha"
 Object name: "M 31" → "M31"
 ```
 
+**File Organization Tab:**
+
 **File Organization:**
 - Preview organization before execution
 - Copy files to standardized structure
@@ -340,10 +568,15 @@ Object name: "M 31" → "M31"
 - Preserve original files
 
 **When to Use:**
-- Fix metadata inconsistencies
-- Standardize naming conventions
-- Reorganize existing catalog
-- Database maintenance
+- **Before imaging season:** Create database backup
+- **After major changes:** Create backup before bulk operations
+- **Regular maintenance:** Monthly or after completing projects
+- **Before updates:** Backup before applying application updates
+- **Cleanup:** Remove duplicate or orphaned calibration frames
+- **Master frames:** Tag temperature on PixInsight master calibration frames
+- **Metadata fixes:** Standardize naming conventions
+- **Reorganization:** Reorganize existing catalog
+- **Recovery:** Restore from backup if issues occur
 
 ### Settings Tab
 
@@ -366,11 +599,26 @@ Object name: "M 31" → "M31"
 - Standard (light theme)
 - Dark (optimized for nighttime use)
 
+**Updates:**
+- **Update Branch Selection:**
+  - **Main Branch (Stable):** Production-ready releases with thoroughly tested features
+  - **Development Branch (Latest features):** Cutting-edge features and improvements
+- Preference saved and used by "Check for Updates" feature
+- Choose based on your preference for stability vs. latest features
+
+**Configuration File Location:**
+Application settings are stored in a JSON file for easy backup and cross-platform compatibility:
+- **Windows:** `C:\Users\<username>\AppData\Local\AstroFileManager\config.json`
+- **Linux:** `~/.config/AstroFileManager/config.json`
+- **macOS:** `~/Library/Application Support/AstroFileManager/config.json`
+
 **When to Use:**
 - Initial setup
 - When changing storage locations
 - When timezone changes
 - Theme preference adjustment
+- Selecting update branch preference
+- Backing up settings (copy config.json file)
 
 ## Detailed Technical Information
 
@@ -585,6 +833,7 @@ python AstroFileManager.py
 **"Database not found" error:**
 - Run `create_db.py` first
 - Database file must be in same directory as application
+- If issue persists, restore from backup in Maintenance tab
 
 **Date fields showing NULL:**
 - Files need DATE-LOC or DATE-OBS keyword
@@ -601,6 +850,7 @@ python AstroFileManager.py
 - Check binning matches exactly
 - For Darks: exposure must match within ±0.1s
 - For Flats: date must match exactly
+- For master frames: use "Master Frame Temperature Tagging" in Maintenance tab if missing temperature
 
 **Slow performance:**
 - Normal for initial load of large catalogs
@@ -614,6 +864,29 @@ python AstroFileManager.py
 - Review import log for specific errors
 - Ensure astropy library installed for FITS
 
+**Update check fails:**
+- Verify internet connection
+- Check GitHub is accessible (not blocked by firewall)
+- Try switching update branch in Settings tab
+- Check `.update_commit_sha` file exists in application directory
+
+**"Checkout Files for Processing" exports no files:**
+- Ensure frames are graded in PixInsight SubFrame Selector first
+- Import CSV quality data in Projects tab
+- Only approved frames are exported
+- Verify project has sessions assigned and approved frames
+
+**Backup/Restore issues:**
+- Ensure backup directory exists and is writable
+- Check sufficient disk space for backups
+- Restart application after restore as recommended
+- Backup directory configurable in config.json
+
+**Master calibration frames not matching in Sessions tab:**
+- Use "Master Frame Temperature Tagging" in Maintenance tab → Calibration Frames
+- Assign CCD-TEMP value that matches your light frames
+- Tool will rename files and update database automatically
+
 ## Project Structure
 
 ```
@@ -621,11 +894,14 @@ AstroFileManager/
 ├── create_db.py                    # Database creation with schema
 ├── AstroFileManager.py             # Main application entry point
 ├── constants.py                    # Configuration constants
+├── .update_commit_sha              # Current version commit tracking (auto-generated)
 ├── core/
-│   ├── database.py                 # Database manager
+│   ├── database.py                 # Database manager with backup/restore
 │   ├── calibration.py              # Calibration matching logic
 │   ├── project_manager.py          # Project CRUD operations
-│   └── project_templates.py        # Project templates
+│   ├── project_templates.py        # Project templates
+│   ├── config_manager.py           # Cross-platform configuration manager
+│   └── update_manager.py           # Self-update system
 ├── ui/
 │   ├── background_workers.py       # Async data loading
 │   ├── view_catalog_tab.py         # Catalog browser
@@ -633,10 +909,13 @@ AstroFileManager/
 │   ├── sessions_tab.py             # Calibration tracking
 │   ├── analytics_tab.py            # Activity heatmap
 │   ├── import_tab.py               # File import
-│   ├── maintenance_tab.py          # Database tools
+│   ├── maintenance_tab.py          # Database tools and calibration maintenance
 │   ├── settings_tab.py             # Application settings
 │   ├── new_project_dialog.py       # Create project dialog
-│   └── edit_project_dialog.py      # Edit project dialog
+│   ├── edit_project_dialog.py      # Edit project dialog
+│   ├── export_project_dialog.py    # Export files for processing dialog
+│   ├── export_project_worker.py    # Background export worker
+│   └── update_dialog.py            # Update check and install dialog
 ├── import_export/
 │   ├── import_worker.py            # Multi-format import
 │   ├── csv_exporter.py             # CSV export
@@ -648,6 +927,57 @@ AstroFileManager/
 ```
 
 ## Version History
+
+**v2.4.0** - Self-Update System, Database Backup/Restore, and Export Enhancements
+- **Self-Update System**: Update application directly from GitHub
+  - Check for updates from Main (Stable) or Development (Latest) branch
+  - Automatic backup before updates
+  - One-click installation with automatic restart
+  - Version tracking using commit SHA
+  - Database preservation during updates
+- **Database Backup and Restore**: Complete database protection
+  - Create timestamped backups with one click
+  - Restore from any previous backup
+  - View backup size and creation date
+  - Safety backup created automatically before restore
+  - Configurable backup directory location
+- **Checkout Files for Processing**: Export approved frames for PixInsight
+  - Export approved light frames with matching calibration
+  - Automatically finds and includes darks, flats, bias, and flat darks
+  - Organizes files into Lights/, Darks/, Flats/, Biases/ subdirectories
+  - Special handling for master calibration: removes dates from filenames for WBPP compatibility
+  - Progress tracking during export
+  - Ready for immediate processing in WeightedBatchPreProcessing
+- **Reactivate Completed Projects**: Resume work on finished projects
+  - Change project status from Completed back to Active
+  - Add more exposures to previously completed projects
+  - Useful when initial integration reveals need for more data
+- **Configuration File Storage**: Cross-platform settings management
+  - Settings stored in JSON file instead of Windows registry
+  - Platform-independent configuration locations
+  - Human-readable format for easy debugging
+  - Easy to backup and restore
+- **Calibration Frame Maintenance**: Advanced cleanup tools
+  - Master Frame Temperature Tagging: Assign CCD-TEMP to PixInsight master calibration frames
+  - Remove Duplicate Calibration Frames: Clean up individual frames when masters exist
+  - Remove Orphaned Calibration Frames: Delete calibration with no matching light frames
+  - Preview before deletion with disk space recovery information
+- **Projects Tab UI Enhancements**:
+  - Resizable and movable columns with persistent preferences
+  - Sortable columns by clicking headers
+  - Column order and sort state saved across sessions
+  - Improved column width management
+- **Settings Tab Updates**:
+  - Update branch preference (Main/Development)
+  - Configuration file location documentation
+  - Enhanced tooltip descriptions
+- **Bug Fixes**:
+  - Fixed True/False approval values in CSV import
+  - Resolved update commit tracking after restart
+  - Improved checkout files to only export approved frames
+  - Fixed date removal for master bias and dark frames
+  - Corrected bias folder naming in export structure
+  - Added dark frames for flat frames in export
 
 **v2.3.1** - Projects Tab: UI Improvements & CSV Import Enhancements
 - **Projects Tab UI Overhaul**: Space-efficient design improvements
