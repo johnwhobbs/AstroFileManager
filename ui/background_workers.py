@@ -212,13 +212,14 @@ class SessionsLoaderWorker(QThread):
                     AVG(fwhm) as avg_fwhm,
                     AVG(snr) as avg_snr,
                     SUM(CASE WHEN approval_status = 'approved' THEN 1 ELSE 0 END) as approved_count,
-                    SUM(CASE WHEN approval_status = 'rejected' THEN 1 ELSE 0 END) as rejected_count
+                    SUM(CASE WHEN approval_status = 'rejected' THEN 1 ELSE 0 END) as rejected_count,
+                    instrume
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Light%'
                     AND date_loc IS NOT NULL
                     AND object IS NOT NULL
-                GROUP BY date_loc, object, filter
-                ORDER BY date_loc DESC, object, filter
+                GROUP BY date_loc, object, filter, instrume
+                ORDER BY date_loc DESC, object, filter, instrume
             ''')
 
             sessions = cursor.fetchall()
