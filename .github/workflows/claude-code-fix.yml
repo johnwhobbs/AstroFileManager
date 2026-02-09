@@ -40,7 +40,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           claude_args: |
             --dangerously-skip-permissions
-            --max-turns 30
+            --max-turns 40
           prompt: |
             ISSUE #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
             
