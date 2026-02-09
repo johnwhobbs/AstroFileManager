@@ -52,7 +52,7 @@ class CalibrationMatcher:
         self.min_frames_acceptable = min_frames_acceptable
 
     def find_matching_darks(self, exposure: float, temp: Optional[float],
-                           xbin: int, ybin: int) -> Dict[str, Any]:
+                           xbin: int, ybin: int, instrument: Optional[str] = None) -> Dict[str, Any]:
         """
         Find matching dark frames with temperature tolerance.
 
@@ -61,6 +61,7 @@ class CalibrationMatcher:
             temp: CCD temperature in °C
             xbin: X binning
             ybin: Y binning
+            instrument: Instrument/camera name (optional, must match if provided)
 
         Returns:
             Dictionary with count, master_count, avg_temp, quality, display, has_frames, exposure
@@ -73,7 +74,8 @@ class CalibrationMatcher:
             cursor = conn.cursor()
 
             # Find regular darks
-            cursor.execute(f'''
+            # Build query with optional instrument matching
+            query = f'''
                 SELECT COUNT(*), AVG(ccd_temp)
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Dark%'
@@ -82,7 +84,15 @@ class CalibrationMatcher:
                     AND ccd_temp BETWEEN ? AND ?
                     AND xbinning = ?
                     AND ybinning = ?
-            ''', (exposure, temp_min, temp_max, xbin, ybin))
+            '''
+            params = [exposure, temp_min, temp_max, xbin, ybin]
+
+            # Add instrument matching if provided
+            if instrument is not None:
+                query += ' AND (instrume = ? OR (instrume IS NULL AND ? IS NULL))'
+                params.extend([instrument, instrument])
+
+            cursor.execute(query, params)
 
             dark_count, dark_temp = cursor.fetchone()
             dark_count = dark_count or 0
@@ -90,7 +100,7 @@ class CalibrationMatcher:
             # Find master darks
             master_count = 0
             if self.include_masters:
-                cursor.execute(f'''
+                query = f'''
                     SELECT COUNT(*)
                     FROM xisf_files
                     WHERE imagetyp LIKE '%Master%'
@@ -99,7 +109,15 @@ class CalibrationMatcher:
                         AND ccd_temp BETWEEN ? AND ?
                         AND xbinning = ?
                         AND ybinning = ?
-                ''', (exposure, temp_min, temp_max, xbin, ybin))
+                '''
+                params = [exposure, temp_min, temp_max, xbin, ybin]
+
+                # Add instrument matching if provided
+                if instrument is not None:
+                    query += ' AND (instrume = ? OR (instrume IS NULL AND ? IS NULL))'
+                    params.extend([instrument, instrument])
+
+                cursor.execute(query, params)
 
                 master_count = cursor.fetchone()[0] or 0
 
@@ -134,7 +152,8 @@ class CalibrationMatcher:
                 'exposure': exposure
             }
 
-    def find_matching_bias(self, temp: Optional[float], xbin: int, ybin: int) -> Dict[str, Any]:
+    def find_matching_bias(self, temp: Optional[float], xbin: int, ybin: int,
+                          instrument: Optional[str] = None) -> Dict[str, Any]:
         """
         Find matching bias frames with temperature tolerance.
 
@@ -142,6 +161,7 @@ class CalibrationMatcher:
             temp: CCD temperature in °C
             xbin: X binning
             ybin: Y binning
+            instrument: Instrument/camera name (optional, must match if provided)
 
         Returns:
             Dictionary with count, master_count, avg_temp, quality, display, has_frames
@@ -154,7 +174,8 @@ class CalibrationMatcher:
             cursor = conn.cursor()
 
             # Find regular bias
-            cursor.execute('''
+            # Build query with optional instrument matching
+            query = '''
                 SELECT COUNT(*), AVG(ccd_temp)
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Bias%'
@@ -162,7 +183,15 @@ class CalibrationMatcher:
                     AND ccd_temp BETWEEN ? AND ?
                     AND xbinning = ?
                     AND ybinning = ?
-            ''', (temp_min, temp_max, xbin, ybin))
+            '''
+            params = [temp_min, temp_max, xbin, ybin]
+
+            # Add instrument matching if provided
+            if instrument is not None:
+                query += ' AND (instrume = ? OR (instrume IS NULL AND ? IS NULL))'
+                params.extend([instrument, instrument])
+
+            cursor.execute(query, params)
 
             bias_count, bias_temp = cursor.fetchone()
             bias_count = bias_count or 0
@@ -170,7 +199,7 @@ class CalibrationMatcher:
             # Find master bias
             master_count = 0
             if self.include_masters:
-                cursor.execute('''
+                query = '''
                     SELECT COUNT(*)
                     FROM xisf_files
                     WHERE imagetyp LIKE '%Master%'
@@ -178,7 +207,15 @@ class CalibrationMatcher:
                         AND ccd_temp BETWEEN ? AND ?
                         AND xbinning = ?
                         AND ybinning = ?
-                ''', (temp_min, temp_max, xbin, ybin))
+                '''
+                params = [temp_min, temp_max, xbin, ybin]
+
+                # Add instrument matching if provided
+                if instrument is not None:
+                    query += ' AND (instrume = ? OR (instrume IS NULL AND ? IS NULL))'
+                    params.extend([instrument, instrument])
+
+                cursor.execute(query, params)
 
                 master_count = cursor.fetchone()[0] or 0
 
@@ -213,7 +250,8 @@ class CalibrationMatcher:
             }
 
     def find_matching_flats(self, filter_name: Optional[str], temp: Optional[float],
-                           xbin: int, ybin: int, session_date: str) -> Dict[str, Any]:
+                           xbin: int, ybin: int, session_date: str,
+                           instrument: Optional[str] = None) -> Dict[str, Any]:
         """
         Find matching flat frames with temperature tolerance and exact date match.
 
@@ -223,6 +261,7 @@ class CalibrationMatcher:
             xbin: X binning
             ybin: Y binning
             session_date: Session date (YYYY-MM-DD)
+            instrument: Instrument/camera name (optional, must match if provided)
 
         Returns:
             Dictionary with count, master_count, avg_temp, quality, display, has_frames, filter
@@ -235,7 +274,8 @@ class CalibrationMatcher:
             cursor = conn.cursor()
 
             # Find regular flats (exact date match)
-            cursor.execute('''
+            # Build query with optional instrument matching
+            query = '''
                 SELECT COUNT(*), AVG(ccd_temp)
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Flat%'
@@ -245,7 +285,15 @@ class CalibrationMatcher:
                     AND xbinning = ?
                     AND ybinning = ?
                     AND date_loc = ?
-            ''', (filter_name, filter_name, temp_min, temp_max, xbin, ybin, session_date))
+            '''
+            params = [filter_name, filter_name, temp_min, temp_max, xbin, ybin, session_date]
+
+            # Add instrument matching if provided
+            if instrument is not None:
+                query += ' AND (instrume = ? OR (instrume IS NULL AND ? IS NULL))'
+                params.extend([instrument, instrument])
+
+            cursor.execute(query, params)
 
             flat_count, flat_temp = cursor.fetchone()
             flat_count = flat_count or 0
@@ -253,7 +301,7 @@ class CalibrationMatcher:
             # Find master flats (exact date match)
             master_count = 0
             if self.include_masters:
-                cursor.execute('''
+                query = '''
                     SELECT COUNT(*)
                     FROM xisf_files
                     WHERE imagetyp LIKE '%Master%'
@@ -263,7 +311,15 @@ class CalibrationMatcher:
                         AND xbinning = ?
                         AND ybinning = ?
                         AND date_loc = ?
-                ''', (filter_name, filter_name, temp_min, temp_max, xbin, ybin, session_date))
+                '''
+                params = [filter_name, filter_name, temp_min, temp_max, xbin, ybin, session_date]
+
+                # Add instrument matching if provided
+                if instrument is not None:
+                    query += ' AND (instrume = ? OR (instrume IS NULL AND ? IS NULL))'
+                    params.extend([instrument, instrument])
+
+                cursor.execute(query, params)
 
                 master_count = cursor.fetchone()[0] or 0
 
@@ -379,54 +435,56 @@ class CalibrationMatcher:
         with self.db.get_connection() as conn:
             cursor = conn.cursor()
 
-            # Pre-load dark frames grouped by exposure/temp/binning
+            # Pre-load dark frames grouped by exposure/temp/binning/instrument
             cursor.execute('''
                 SELECT
                     ROUND(exposure, 1) as exp,
                     ROUND(ccd_temp, 0) as temp,
                     xbinning,
                     ybinning,
+                    instrume,
                     COUNT(*) as count,
                     SUM(CASE WHEN imagetyp LIKE '%Master%' THEN 1 ELSE 0 END) as master_count,
                     AVG(ccd_temp) as avg_temp
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Dark%'
-                GROUP BY ROUND(exposure, 1), ROUND(ccd_temp, 0), xbinning, ybinning
+                GROUP BY ROUND(exposure, 1), ROUND(ccd_temp, 0), xbinning, ybinning, instrume
             ''')
 
             darks_cache = {}
-            for exp, temp, xbin, ybin, count, master_count, avg_temp in cursor.fetchall():
-                key = (exp, temp, xbin, ybin)
+            for exp, temp, xbin, ybin, instrume, count, master_count, avg_temp in cursor.fetchall():
+                key = (exp, temp, xbin, ybin, instrume)
                 darks_cache[key] = {
                     'count': count - master_count,  # Regular darks
                     'master_count': master_count,
                     'avg_temp': avg_temp
                 }
 
-            # Pre-load bias frames grouped by temp/binning
+            # Pre-load bias frames grouped by temp/binning/instrument
             cursor.execute('''
                 SELECT
                     ROUND(ccd_temp, 0) as temp,
                     xbinning,
                     ybinning,
+                    instrume,
                     COUNT(*) as count,
                     SUM(CASE WHEN imagetyp LIKE '%Master%' THEN 1 ELSE 0 END) as master_count,
                     AVG(ccd_temp) as avg_temp
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Bias%'
-                GROUP BY ROUND(ccd_temp, 0), xbinning, ybinning
+                GROUP BY ROUND(ccd_temp, 0), xbinning, ybinning, instrume
             ''')
 
             bias_cache = {}
-            for temp, xbin, ybin, count, master_count, avg_temp in cursor.fetchall():
-                key = (temp, xbin, ybin)
+            for temp, xbin, ybin, instrume, count, master_count, avg_temp in cursor.fetchall():
+                key = (temp, xbin, ybin, instrume)
                 bias_cache[key] = {
                     'count': count - master_count,  # Regular bias
                     'master_count': master_count,
                     'avg_temp': avg_temp
                 }
 
-            # Pre-load flat frames grouped by filter/temp/binning/date
+            # Pre-load flat frames grouped by filter/temp/binning/date/instrument
             cursor.execute('''
                 SELECT
                     filter,
@@ -434,17 +492,18 @@ class CalibrationMatcher:
                     ROUND(ccd_temp, 0) as temp,
                     xbinning,
                     ybinning,
+                    instrume,
                     COUNT(*) as count,
                     SUM(CASE WHEN imagetyp LIKE '%Master%' THEN 1 ELSE 0 END) as master_count,
                     AVG(ccd_temp) as avg_temp
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Flat%'
-                GROUP BY filter, date_loc, ROUND(ccd_temp, 0), xbinning, ybinning
+                GROUP BY filter, date_loc, ROUND(ccd_temp, 0), xbinning, ybinning, instrume
             ''')
 
             flats_cache = {}
-            for filt, date, temp, xbin, ybin, count, master_count, avg_temp in cursor.fetchall():
-                key = (filt, date, temp, xbin, ybin)
+            for filt, date, temp, xbin, ybin, instrume, count, master_count, avg_temp in cursor.fetchall():
+                key = (filt, date, temp, xbin, ybin, instrume)
                 flats_cache[key] = {
                     'count': count - master_count,  # Regular flats
                     'master_count': master_count,
@@ -458,7 +517,8 @@ class CalibrationMatcher:
             }
 
     def find_matching_darks_from_cache(self, exposure: float, temp: Optional[float],
-                                       xbin: int, ybin: int, cache: dict) -> Dict[str, Any]:
+                                       xbin: int, ybin: int, cache: dict,
+                                       instrument: Optional[str] = None) -> Dict[str, Any]:
         """
         Find matching dark frames from pre-loaded cache (OPTIMIZED).
 
@@ -468,6 +528,7 @@ class CalibrationMatcher:
             xbin: X binning
             ybin: Y binning
             cache: Pre-loaded darks cache from preload_calibration_data()
+            instrument: Instrument/camera name (optional, must match if provided)
 
         Returns:
             Dictionary with count, master_count, avg_temp, quality, display, has_frames, exposure
@@ -480,10 +541,14 @@ class CalibrationMatcher:
         dark_temp = None
 
         # Search cache with tolerance
-        for (cached_exp, cached_temp, cached_xbin, cached_ybin), data in cache.items():
+        for (cached_exp, cached_temp, cached_xbin, cached_ybin, cached_instrume), data in cache.items():
+            # Check if instrument matches (handle NULL instrument)
+            instrument_matches = (cached_instrume == instrument) or (cached_instrume is None and instrument is None)
+
             if (abs(cached_exp - exp_rounded) < self.exposure_tolerance and
                 abs(cached_temp - temp_rounded) <= self.temp_tolerance_darks and
-                cached_xbin == xbin and cached_ybin == ybin):
+                cached_xbin == xbin and cached_ybin == ybin and
+                instrument_matches):
 
                 dark_count += data['count']
                 if self.include_masters:
@@ -521,7 +586,7 @@ class CalibrationMatcher:
         }
 
     def find_matching_bias_from_cache(self, temp: Optional[float], xbin: int, ybin: int,
-                                      cache: dict) -> Dict[str, Any]:
+                                      cache: dict, instrument: Optional[str] = None) -> Dict[str, Any]:
         """
         Find matching bias frames from pre-loaded cache (OPTIMIZED).
 
@@ -530,6 +595,7 @@ class CalibrationMatcher:
             xbin: X binning
             ybin: Y binning
             cache: Pre-loaded bias cache from preload_calibration_data()
+            instrument: Instrument/camera name (optional, must match if provided)
 
         Returns:
             Dictionary with count, master_count, avg_temp, quality, display, has_frames
@@ -541,9 +607,13 @@ class CalibrationMatcher:
         bias_temp = None
 
         # Search cache with tolerance
-        for (cached_temp, cached_xbin, cached_ybin), data in cache.items():
+        for (cached_temp, cached_xbin, cached_ybin, cached_instrume), data in cache.items():
+            # Check if instrument matches (handle NULL instrument)
+            instrument_matches = (cached_instrume == instrument) or (cached_instrume is None and instrument is None)
+
             if (abs(cached_temp - temp_rounded) <= self.temp_tolerance_bias and
-                cached_xbin == xbin and cached_ybin == ybin):
+                cached_xbin == xbin and cached_ybin == ybin and
+                instrument_matches):
 
                 bias_count += data['count']
                 if self.include_masters:
@@ -580,7 +650,8 @@ class CalibrationMatcher:
         }
 
     def find_matching_flats_from_cache(self, filt: Optional[str], temp: Optional[float],
-                                       xbin: int, ybin: int, date: str, cache: dict) -> Dict[str, Any]:
+                                       xbin: int, ybin: int, date: str, cache: dict,
+                                       instrument: Optional[str] = None) -> Dict[str, Any]:
         """
         Find matching flat frames from pre-loaded cache (OPTIMIZED).
 
@@ -591,6 +662,7 @@ class CalibrationMatcher:
             ybin: Y binning
             date: Observation date (must match exactly)
             cache: Pre-loaded flats cache from preload_calibration_data()
+            instrument: Instrument/camera name (optional, must match if provided)
 
         Returns:
             Dictionary with count, master_count, avg_temp, quality, display, has_frames, filter
@@ -602,14 +674,18 @@ class CalibrationMatcher:
         flat_temp = None
 
         # Search cache with tolerance (filter and date must match exactly)
-        for (cached_filt, cached_date, cached_temp, cached_xbin, cached_ybin), data in cache.items():
+        for (cached_filt, cached_date, cached_temp, cached_xbin, cached_ybin, cached_instrume), data in cache.items():
             # Handle NULL filter matching
             filters_match = (cached_filt == filt) or (cached_filt is None and filt is None)
+
+            # Check if instrument matches (handle NULL instrument)
+            instrument_matches = (cached_instrume == instrument) or (cached_instrume is None and instrument is None)
 
             if (filters_match and
                 cached_date == date and
                 abs(cached_temp - temp_rounded) <= self.temp_tolerance_flats and
-                cached_xbin == xbin and cached_ybin == ybin):
+                cached_xbin == xbin and cached_ybin == ybin and
+                instrument_matches):
 
                 flat_count += data['count']
                 if self.include_masters:
