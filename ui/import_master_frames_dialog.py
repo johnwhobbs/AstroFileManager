@@ -50,8 +50,8 @@ class ImportMasterFramesDialog(QDialog):
         info_layout = QVBoxLayout()
 
         info_label = QLabel(
-            f"Select master calibration frames to import to project: <b>{self.project_name}</b><br>"
-            "Master frames are created after stacking darks, flats, and bias frames.<br>"
+            f"Select master light frames to import to project: <b>{self.project_name}</b><br>"
+            "Master light frames are stacked light frames (the actual deep-sky object images).<br>"
             "These will be displayed in the project details section."
         )
         info_label.setWordWrap(True)
@@ -59,31 +59,11 @@ class ImportMasterFramesDialog(QDialog):
         info_group.setLayout(info_layout)
         layout.addWidget(info_group)
 
-        # Filter section
-        filter_group = QGroupBox("Filter Options")
-        filter_layout = QHBoxLayout()
-
-        self.show_dark_cb = QCheckBox("Master Darks")
-        self.show_dark_cb.setChecked(True)
-        self.show_dark_cb.stateChanged.connect(self.load_master_frames)
-        filter_layout.addWidget(self.show_dark_cb)
-
-        self.show_flat_cb = QCheckBox("Master Flats")
-        self.show_flat_cb.setChecked(True)
-        self.show_flat_cb.stateChanged.connect(self.load_master_frames)
-        filter_layout.addWidget(self.show_flat_cb)
-
-        self.show_bias_cb = QCheckBox("Master Bias")
-        self.show_bias_cb.setChecked(True)
-        self.show_bias_cb.stateChanged.connect(self.load_master_frames)
-        filter_layout.addWidget(self.show_bias_cb)
-
-        filter_layout.addStretch()
-        filter_group.setLayout(filter_layout)
-        layout.addWidget(filter_group)
+        # Note: Filter section removed - only Master Light frames are allowed
+        # as per issue #207
 
         # Master frames table
-        frames_group = QGroupBox("Available Master Frames")
+        frames_group = QGroupBox("Available Master Light Frames")
         frames_layout = QVBoxLayout()
 
         self.frames_table = QTableWidget()
@@ -145,29 +125,19 @@ class ImportMasterFramesDialog(QDialog):
         layout.addLayout(button_layout)
 
     def load_master_frames(self):
-        """Load available master frames from the database."""
+        """
+        Load available master light frames from the database.
+
+        Only Master Light frames are loaded, as per issue #207.
+        Master Light frames are identified by having 'Master' and 'Light' in the imagetyp field.
+        """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
         try:
-            # Build WHERE clause based on filters
-            where_clauses = []
-            if self.show_dark_cb.isChecked():
-                where_clauses.append("imagetyp LIKE '%Master%Dark%'")
-            if self.show_flat_cb.isChecked():
-                where_clauses.append("imagetyp LIKE '%Master%Flat%'")
-            if self.show_bias_cb.isChecked():
-                where_clauses.append("imagetyp LIKE '%Master%Bias%'")
-
-            if not where_clauses:
-                self.frames_table.setRowCount(0)
-                self.update_selected_count()
-                return
-
-            where_clause = " OR ".join(where_clauses)
-
-            # Query master frames with import status
-            query = f'''
+            # Query only Master Light frames with import status
+            # Filter for frames with 'Master_Light' in imagetyp
+            query = '''
                 SELECT
                     xf.id,
                     xf.imagetyp,
@@ -181,8 +151,8 @@ class ImportMasterFramesDialog(QDialog):
                 FROM xisf_files xf
                 LEFT JOIN project_master_frames pmf
                     ON xf.id = pmf.file_id AND pmf.project_id = ?
-                WHERE ({where_clause})
-                    AND xf.object IS NULL
+                WHERE (xf.imagetyp LIKE '%Master_Light%' OR xf.imagetyp LIKE '%Master%Light%')
+                    AND xf.object IS NOT NULL
                 ORDER BY xf.imagetyp, xf.filter, xf.exposure, xf.ccd_temp
             '''
 
@@ -215,13 +185,10 @@ class ImportMasterFramesDialog(QDialog):
                 checkbox.setProperty("file_id", file_id)
 
                 # Determine frame type
-                frame_type = "Unknown"
-                if "Dark" in imagetyp:
-                    frame_type = "Master Dark"
-                elif "Flat" in imagetyp:
-                    frame_type = "Master Flat"
-                elif "Bias" in imagetyp:
-                    frame_type = "Master Bias"
+                # Only Master Light frames are allowed (issue #207)
+                frame_type = "Master Light"
+                if "Light" not in imagetyp:
+                    frame_type = "Unknown"
 
                 # Type
                 self.frames_table.setItem(row_idx, 1, QTableWidgetItem(frame_type))
