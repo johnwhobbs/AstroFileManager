@@ -64,7 +64,7 @@ class ProjectsTab(QWidget):
         self.import_quality_btn.clicked.connect(self.import_quality_data)
         toolbar.addWidget(self.import_quality_btn)
 
-        self.import_masters_btn = QPushButton("Import Master Frames")
+        self.import_masters_btn = QPushButton("Import Master Light Frames")
         self.import_masters_btn.clicked.connect(self.import_master_frames)
         self.import_masters_btn.setEnabled(False)  # Disabled until project is selected
         toolbar.addWidget(self.import_masters_btn)
@@ -178,7 +178,7 @@ class ProjectsTab(QWidget):
         self.details_content_splitter.addWidget(self.goals_group)
 
         # Master frames section
-        self.master_frames_group = QGroupBox("Master Calibration Frames")
+        self.master_frames_group = QGroupBox("Master Light Frames")
         self.master_frames_layout = QVBoxLayout()
         self.master_frames_group.setLayout(self.master_frames_layout)
         self.master_frames_group.setVisible(False)
@@ -846,7 +846,7 @@ class ProjectsTab(QWidget):
 
     def display_master_frames(self, master_frames: list):
         """
-        Display master calibration frames in the project details section.
+        Display master light frames in the project details section.
 
         Args:
             master_frames: List of MasterFrame objects
@@ -921,7 +921,7 @@ class ProjectsTab(QWidget):
         self.master_frames_layout.addWidget(masters_table)
 
     def import_master_frames(self):
-        """Open dialog to import master calibration frames to the project."""
+        """Open dialog to import master light frames to the project."""
         if not self.selected_project_id:
             QMessageBox.warning(self, "No Project Selected", "Please select a project first")
             return
