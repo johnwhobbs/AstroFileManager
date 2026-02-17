@@ -1,7 +1,7 @@
 """
-Dialog for importing master calibration frames to a project.
+Dialog for importing master frames to a project.
 
-Allows user to select master frames from the catalog and import them to a project.
+Allows user to select master frames (light or calibration) from the catalog and import them to a project.
 """
 
 from PyQt6.QtWidgets import (

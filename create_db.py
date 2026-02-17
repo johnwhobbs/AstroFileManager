@@ -140,7 +140,7 @@ def create_database(db_path='xisf_catalog.db'):
         )
     ''')
 
-    # Create project_master_frames table to track master calibration frames for projects
+    # Create project_master_frames table to track master frames for projects
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS project_master_frames (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -224,7 +224,7 @@ def create_database(db_path='xisf_catalog.db'):
     print("\nproject_sessions table:")
     print("  Links imaging sessions to projects")
     print("\nproject_master_frames table:")
-    print("  Tracks master calibration frames (Master Dark/Flat/Bias) imported to projects")
+    print("  Tracks master frames (Master Light/Dark/Flat/Bias) imported to projects")
     
     return conn
 
