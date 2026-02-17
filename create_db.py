@@ -62,6 +62,7 @@ def create_database(db_path='xisf_catalog.db'):
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_session_assignment_id ON xisf_files(session_assignment_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_approval_status ON xisf_files(approval_status)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_fwhm ON xisf_files(fwhm)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_instrume ON xisf_files(instrume)')
 
     # Create composite indexes for optimized queries
     cursor.execute('''
@@ -72,19 +73,19 @@ def create_database(db_path='xisf_catalog.db'):
 
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_calibration_darks
-        ON xisf_files(exposure, ccd_temp, xbinning, ybinning)
+        ON xisf_files(exposure, ccd_temp, xbinning, ybinning, instrume)
         WHERE imagetyp LIKE '%Dark%'
     ''')
 
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_calibration_flats
-        ON xisf_files(filter, date_loc, ccd_temp, xbinning, ybinning)
+        ON xisf_files(filter, date_loc, ccd_temp, xbinning, ybinning, instrume)
         WHERE imagetyp LIKE '%Flat%'
     ''')
 
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_calibration_bias
-        ON xisf_files(ccd_temp, xbinning, ybinning)
+        ON xisf_files(ccd_temp, xbinning, ybinning, instrume)
         WHERE imagetyp LIKE '%Bias%'
     ''')
 

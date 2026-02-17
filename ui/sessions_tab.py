@@ -273,15 +273,15 @@ class SessionsTab(QWidget):
             missing_count = 0
 
             for session_data in sessions:
-                date, obj, filt, frame_count, avg_exp, avg_temp, xbin, ybin, avg_fwhm, avg_snr, approved_count, rejected_count = session_data
+                date, obj, filt, frame_count, avg_exp, avg_temp, xbin, ybin, avg_fwhm, avg_snr, approved_count, rejected_count, instrume = session_data
 
                 # Find matching calibration frames from cache (no database queries)
                 darks_info = self.calibration.find_matching_darks_from_cache(
-                    avg_exp, avg_temp, xbin, ybin, calib_cache['darks'])
+                    avg_exp, avg_temp, xbin, ybin, calib_cache['darks'], instrume)
                 bias_info = self.calibration.find_matching_bias_from_cache(
-                    avg_temp, xbin, ybin, calib_cache['bias'])
+                    avg_temp, xbin, ybin, calib_cache['bias'], instrume)
                 flats_info = self.calibration.find_matching_flats_from_cache(
-                    filt, avg_temp, xbin, ybin, date, calib_cache['flats'])
+                    filt, avg_temp, xbin, ybin, date, calib_cache['flats'], instrume)
 
                 # Calculate session status
                 status, status_color = self.calibration.calculate_session_status(darks_info, bias_info, flats_info)
@@ -456,13 +456,14 @@ class SessionsTab(QWidget):
                     AVG(exposure) as avg_exposure,
                     AVG(ccd_temp) as avg_temp,
                     xbinning,
-                    ybinning
+                    ybinning,
+                    instrume
                 FROM xisf_files
                 WHERE imagetyp LIKE '%Light%'
                     AND date_loc IS NOT NULL
                     AND object IS NOT NULL
-                GROUP BY date_loc, object, filter
-                ORDER BY date_loc DESC, object, filter
+                GROUP BY date_loc, object, filter, instrume
+                ORDER BY date_loc DESC, object, filter, instrume
             ''')
 
             sessions = cursor.fetchall()
@@ -479,12 +480,12 @@ class SessionsTab(QWidget):
                 missing_count = 0
 
                 for session_data in sessions:
-                    date, obj, filt, frame_count, avg_exp, avg_temp, xbin, ybin = session_data
+                    date, obj, filt, frame_count, avg_exp, avg_temp, xbin, ybin, instrume = session_data
 
                     # Find matching calibration frames
-                    darks_info = self.calibration.find_matching_darks(avg_exp, avg_temp, xbin, ybin)
-                    bias_info = self.calibration.find_matching_bias(avg_temp, xbin, ybin)
-                    flats_info = self.calibration.find_matching_flats(filt, avg_temp, xbin, ybin, date)
+                    darks_info = self.calibration.find_matching_darks(avg_exp, avg_temp, xbin, ybin, instrume)
+                    bias_info = self.calibration.find_matching_bias(avg_temp, xbin, ybin, instrume)
+                    flats_info = self.calibration.find_matching_flats(filt, avg_temp, xbin, ybin, date, instrume)
 
                     status, _ = self.calibration.calculate_session_status(darks_info, bias_info, flats_info)
 
