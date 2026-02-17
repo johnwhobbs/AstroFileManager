@@ -204,7 +204,7 @@ class ProjectsTab(QWidget):
         # Action buttons
         action_buttons = QHBoxLayout()
 
-        self.export_files_btn = QPushButton("Checkout Files for Processing")
+        self.export_files_btn = QPushButton("Checkout Files for Pre-Processing")
         self.export_files_btn.clicked.connect(self.export_project_files)
         self.export_files_btn.setVisible(False)
         action_buttons.addWidget(self.export_files_btn)
@@ -565,7 +565,7 @@ class ProjectsTab(QWidget):
             goal.approved_count >= goal.target_count for goal in goals
         )
         if all_complete:
-            steps_html += "<li><b>✓ All goals met!</b> Ready to generate WBPP file lists</li>"
+            steps_html += "<li><b>✓ All goals met!</b> Ready to checkout files for pre-processing</li>"
 
         steps_html += "</ul>"
 
