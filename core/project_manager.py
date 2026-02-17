@@ -37,6 +37,23 @@ class FilterGoalProgress:
     avg_snr: Optional[float] = None
 
 
+@dataclass
+class MasterFrame:
+    """Represents a master calibration frame linked to a project."""
+    id: Optional[int]
+    project_id: int
+    file_id: int
+    frame_type: str
+    filter: Optional[str]
+    exposure: Optional[float]
+    ccd_temp: Optional[float]
+    binning: Optional[str]
+    imported_date: Optional[str]
+    notes: Optional[str]
+    filename: Optional[str] = None
+    filepath: Optional[str] = None
+
+
 class ProjectManager:
     """Manages project-related database operations."""
 
@@ -589,6 +606,7 @@ class ProjectManager:
             CASCADE deletion will automatically remove:
             - project_filter_goals entries
             - project_sessions entries
+            - project_master_frames entries
             xisf_files project_id will be set to NULL
         """
         conn = sqlite3.connect(self.db_path)
@@ -606,6 +624,166 @@ class ProjectManager:
             cursor.execute('DELETE FROM projects WHERE id = ?', (project_id,))
 
             conn.commit()
+
+        finally:
+            conn.close()
+
+    def import_master_frames(self, project_id: int, file_ids: List[int]) -> int:
+        """
+        Import master calibration frames to a project.
+
+        Args:
+            project_id: Project ID
+            file_ids: List of file IDs from xisf_files table
+
+        Returns:
+            Number of master frames successfully imported
+
+        Note:
+            This method extracts frame metadata from the xisf_files table
+            and links the master frames to the project. Duplicate entries
+            are ignored due to the UNIQUE constraint.
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            imported_count = 0
+
+            for file_id in file_ids:
+                # Get file metadata
+                cursor.execute('''
+                    SELECT imagetyp, filter, exposure, ccd_temp, xbinning, ybinning
+                    FROM xisf_files
+                    WHERE id = ?
+                ''', (file_id,))
+
+                row = cursor.fetchone()
+                if not row:
+                    continue
+
+                imagetyp, filter_name, exposure, ccd_temp, xbinning, ybinning = row
+
+                # Determine frame type from imagetyp
+                frame_type = None
+                if 'Dark' in imagetyp:
+                    frame_type = 'Master Dark'
+                elif 'Flat' in imagetyp:
+                    frame_type = 'Master Flat'
+                elif 'Bias' in imagetyp:
+                    frame_type = 'Master Bias'
+                else:
+                    # Skip non-master calibration frames
+                    continue
+
+                # Create binning string
+                binning = f"{xbinning}x{ybinning}" if xbinning and ybinning else None
+
+                # Insert master frame link (ignore if duplicate)
+                try:
+                    cursor.execute('''
+                        INSERT INTO project_master_frames
+                        (project_id, file_id, frame_type, filter, exposure, ccd_temp, binning)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ''', (project_id, file_id, frame_type, filter_name, exposure, ccd_temp, binning))
+                    imported_count += 1
+                except sqlite3.IntegrityError:
+                    # Frame already imported to this project, skip
+                    pass
+
+            conn.commit()
+            return imported_count
+
+        finally:
+            conn.close()
+
+    def get_master_frames(self, project_id: int) -> List[MasterFrame]:
+        """
+        Get all master frames for a project.
+
+        Args:
+            project_id: Project ID
+
+        Returns:
+            List of MasterFrame objects with file details
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT
+                    pmf.id, pmf.project_id, pmf.file_id, pmf.frame_type,
+                    pmf.filter, pmf.exposure, pmf.ccd_temp, pmf.binning,
+                    pmf.imported_date, pmf.notes,
+                    xf.filename, xf.filepath
+                FROM project_master_frames pmf
+                JOIN xisf_files xf ON pmf.file_id = xf.id
+                WHERE pmf.project_id = ?
+                ORDER BY pmf.frame_type, pmf.filter, pmf.exposure
+            ''', (project_id,))
+
+            master_frames = []
+            for row in cursor.fetchall():
+                master_frames.append(MasterFrame(*row))
+
+            return master_frames
+
+        finally:
+            conn.close()
+
+    def remove_master_frame(self, master_frame_id: int):
+        """
+        Remove a master frame from a project.
+
+        Args:
+            master_frame_id: ID from project_master_frames table
+
+        Note:
+            This only removes the link to the project, not the actual file
+            from the xisf_files table.
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                DELETE FROM project_master_frames
+                WHERE id = ?
+            ''', (master_frame_id,))
+
+            conn.commit()
+
+        finally:
+            conn.close()
+
+    def get_master_frames_summary(self, project_id: int) -> Dict[str, int]:
+        """
+        Get summary counts of master frames by type for a project.
+
+        Args:
+            project_id: Project ID
+
+        Returns:
+            Dictionary with frame type as key and count as value
+            Example: {'Master Dark': 3, 'Master Flat': 5, 'Master Bias': 1}
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT frame_type, COUNT(*) as count
+                FROM project_master_frames
+                WHERE project_id = ?
+                GROUP BY frame_type
+            ''', (project_id,))
+
+            summary = {}
+            for frame_type, count in cursor.fetchall():
+                summary[frame_type] = count
+
+            return summary
 
         finally:
             conn.close()

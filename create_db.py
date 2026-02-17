@@ -140,6 +140,41 @@ def create_database(db_path='xisf_catalog.db'):
         )
     ''')
 
+    # Create project_master_frames table to track master calibration frames for projects
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS project_master_frames (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            file_id INTEGER NOT NULL,
+            frame_type TEXT NOT NULL,
+            filter TEXT,
+            exposure REAL,
+            ccd_temp REAL,
+            binning TEXT,
+            imported_date TEXT DEFAULT CURRENT_TIMESTAMP,
+            notes TEXT,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY(file_id) REFERENCES xisf_files(id) ON DELETE CASCADE,
+            UNIQUE(project_id, file_id)
+        )
+    ''')
+
+    # Create indexes for project_master_frames
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_project_master_frames_project_id
+        ON project_master_frames(project_id)
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_project_master_frames_file_id
+        ON project_master_frames(file_id)
+    ''')
+
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_project_master_frames_type_filter
+        ON project_master_frames(project_id, frame_type, filter)
+    ''')
+
     # Performance optimizations
     # Enable WAL mode for better concurrency (allows reads during writes)
     cursor.execute('PRAGMA journal_mode=WAL')
@@ -188,6 +223,8 @@ def create_database(db_path='xisf_catalog.db'):
     print("  Tracks target frame counts per filter for each project")
     print("\nproject_sessions table:")
     print("  Links imaging sessions to projects")
+    print("\nproject_master_frames table:")
+    print("  Tracks master calibration frames (Master Dark/Flat/Bias) imported to projects")
     
     return conn
 

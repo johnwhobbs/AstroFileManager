@@ -64,6 +64,11 @@ class ProjectsTab(QWidget):
         self.import_quality_btn.clicked.connect(self.import_quality_data)
         toolbar.addWidget(self.import_quality_btn)
 
+        self.import_masters_btn = QPushButton("Import Master Frames")
+        self.import_masters_btn.clicked.connect(self.import_master_frames)
+        self.import_masters_btn.setEnabled(False)  # Disabled until project is selected
+        toolbar.addWidget(self.import_masters_btn)
+
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh_projects)
         toolbar.addWidget(self.refresh_btn)
@@ -162,7 +167,7 @@ class ProjectsTab(QWidget):
         self.info_label.setWordWrap(True)
         details_layout.addWidget(self.info_label)
 
-        # Create a splitter for goals and next steps sections
+        # Create a splitter for goals, master frames, and next steps sections
         self.details_content_splitter = QSplitter(Qt.Orientation.Vertical)
 
         # Filter goals progress
@@ -171,6 +176,13 @@ class ProjectsTab(QWidget):
         self.goals_group.setLayout(self.goals_layout)
         self.goals_group.setVisible(False)
         self.details_content_splitter.addWidget(self.goals_group)
+
+        # Master frames section
+        self.master_frames_group = QGroupBox("Master Calibration Frames")
+        self.master_frames_layout = QVBoxLayout()
+        self.master_frames_group.setLayout(self.master_frames_layout)
+        self.master_frames_group.setVisible(False)
+        self.details_content_splitter.addWidget(self.master_frames_group)
 
         # Next steps / recommendations
         self.next_steps_group = QGroupBox("Next Steps")
@@ -181,8 +193,8 @@ class ProjectsTab(QWidget):
         self.next_steps_group.setVisible(False)
         self.details_content_splitter.addWidget(self.next_steps_group)
 
-        # Set initial proportions for goals and next steps (200:150 ratio)
-        self.details_content_splitter.setSizes([200, 150])
+        # Set initial proportions for goals, master frames, and next steps
+        self.details_content_splitter.setSizes([200, 150, 150])
 
         # Connect splitter movement to save settings
         self.details_content_splitter.splitterMoved.connect(self.save_details_content_splitter_state)
@@ -319,6 +331,7 @@ class ProjectsTab(QWidget):
         if not selected_rows:
             self.clear_project_details()
             self.edit_project_btn.setEnabled(False)
+            self.import_masters_btn.setEnabled(False)
             return
 
         # Get project ID from first column
@@ -327,6 +340,7 @@ class ProjectsTab(QWidget):
         ).data(Qt.ItemDataRole.UserRole)
 
         self.edit_project_btn.setEnabled(True)
+        self.import_masters_btn.setEnabled(True)
         self.show_project_details(project_id)
 
     def show_project_details(self, project_id: int):
@@ -357,6 +371,10 @@ class ProjectsTab(QWidget):
         # Load and display filter goals
         goals = self.project_manager.get_filter_goals(project_id)
         self.display_filter_goals(goals)
+
+        # Load and display master frames
+        master_frames = self.project_manager.get_master_frames(project_id)
+        self.display_master_frames(master_frames)
 
         # Generate next steps
         self.display_next_steps(project, goals)
@@ -558,6 +576,7 @@ class ProjectsTab(QWidget):
         self.selected_project_id = None
         self.info_label.setText("Select a project to view details")
         self.goals_group.setVisible(False)
+        self.master_frames_group.setVisible(False)
         self.next_steps_group.setVisible(False)
         self.export_files_btn.setVisible(False)
         self.mark_complete_btn.setVisible(False)
@@ -824,3 +843,104 @@ class ProjectsTab(QWidget):
         # Convert Qt.SortOrder enum to integer: AscendingOrder=0, DescendingOrder=1
         # We need to use .value property to get the integer value from the enum
         self.settings.setValue('projects_table_sort_order', int(order.value))
+
+    def display_master_frames(self, master_frames: list):
+        """
+        Display master calibration frames in the project details section.
+
+        Args:
+            master_frames: List of MasterFrame objects
+        """
+        # Clear existing widgets
+        for i in reversed(range(self.master_frames_layout.count())):
+            widget = self.master_frames_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+
+        if not master_frames:
+            self.master_frames_group.setVisible(False)
+            return
+
+        self.master_frames_group.setVisible(True)
+
+        # Create table
+        masters_table = QTableWidget()
+        masters_table.setRowCount(len(master_frames))
+        masters_table.setColumnCount(6)
+        masters_table.setHorizontalHeaderLabels([
+            "Type", "Filter", "Exposure", "Temp (°C)", "Binning", "Filename"
+        ])
+
+        # Configure table appearance
+        masters_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        masters_table.horizontalHeader().setStretchLastSection(True)
+        masters_table.verticalHeader().setVisible(False)
+        masters_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        masters_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        masters_table.setShowGrid(True)
+
+        # Set column widths
+        masters_table.setColumnWidth(0, 100)  # Type
+        masters_table.setColumnWidth(1, 80)   # Filter
+        masters_table.setColumnWidth(2, 80)   # Exposure
+        masters_table.setColumnWidth(3, 80)   # Temp
+        masters_table.setColumnWidth(4, 70)   # Binning
+
+        # Set compact row height
+        masters_table.verticalHeader().setDefaultSectionSize(30)
+
+        # Populate table
+        for row, master_frame in enumerate(master_frames):
+            # Type
+            masters_table.setItem(row, 0, QTableWidgetItem(master_frame.frame_type))
+
+            # Filter
+            filter_text = master_frame.filter if master_frame.filter else "N/A"
+            masters_table.setItem(row, 1, QTableWidgetItem(filter_text))
+
+            # Exposure
+            exp_text = f"{master_frame.exposure:.1f}s" if master_frame.exposure is not None else "N/A"
+            masters_table.setItem(row, 2, QTableWidgetItem(exp_text))
+
+            # Temperature
+            temp_text = f"{master_frame.ccd_temp:.1f}" if master_frame.ccd_temp is not None else "N/A"
+            masters_table.setItem(row, 3, QTableWidgetItem(temp_text))
+
+            # Binning
+            binning_text = master_frame.binning if master_frame.binning else "N/A"
+            masters_table.setItem(row, 4, QTableWidgetItem(binning_text))
+
+            # Filename
+            masters_table.setItem(row, 5, QTableWidgetItem(master_frame.filename))
+
+        # Set reasonable height based on content
+        table_height = masters_table.horizontalHeader().height() + (len(master_frames) * 30) + 10
+        masters_table.setMaximumHeight(min(table_height, 200))  # Cap at 200px
+        masters_table.setMinimumHeight(min(table_height, 100))
+
+        self.master_frames_layout.addWidget(masters_table)
+
+    def import_master_frames(self):
+        """Open dialog to import master calibration frames to the project."""
+        if not self.selected_project_id:
+            QMessageBox.warning(self, "No Project Selected", "Please select a project first")
+            return
+
+        # Get project info
+        project = self.project_manager.get_project(self.selected_project_id)
+        if not project:
+            QMessageBox.warning(self, "Error", "Could not load project information")
+            return
+
+        # Open import master frames dialog
+        from ui.import_master_frames_dialog import ImportMasterFramesDialog
+        dialog = ImportMasterFramesDialog(
+            db_path=self.db_path,
+            project_id=self.selected_project_id,
+            project_name=project.name,
+            parent=self
+        )
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Refresh project details to show newly imported master frames
+            self.show_project_details(self.selected_project_id)
