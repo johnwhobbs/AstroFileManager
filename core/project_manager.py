@@ -39,7 +39,7 @@ class FilterGoalProgress:
 
 @dataclass
 class MasterFrame:
-    """Represents a master calibration frame linked to a project."""
+    """Represents a master frame (calibration or light) linked to a project."""
     id: Optional[int]
     project_id: int
     file_id: int
@@ -630,7 +630,7 @@ class ProjectManager:
 
     def import_master_frames(self, project_id: int, file_ids: List[int]) -> int:
         """
-        Import master calibration frames to a project.
+        Import master frames (calibration or light frames) to a project.
 
         Args:
             project_id: Project ID
@@ -641,7 +641,8 @@ class ProjectManager:
 
         Note:
             This method extracts frame metadata from the xisf_files table
-            and links the master frames to the project. Duplicate entries
+            and links the master frames to the project. Supports Master Light,
+            Master Dark, Master Flat, and Master Bias frames. Duplicate entries
             are ignored due to the UNIQUE constraint.
         """
         conn = sqlite3.connect(self.db_path)
@@ -665,15 +666,19 @@ class ProjectManager:
                 imagetyp, filter_name, exposure, ccd_temp, xbinning, ybinning = row
 
                 # Determine frame type from imagetyp
+                # Support both calibration frames and master light frames
                 frame_type = None
-                if 'Dark' in imagetyp:
+                if 'Light' in imagetyp:
+                    # Master Light frames (stacked deep-sky object images)
+                    frame_type = 'Master Light'
+                elif 'Dark' in imagetyp:
                     frame_type = 'Master Dark'
                 elif 'Flat' in imagetyp:
                     frame_type = 'Master Flat'
                 elif 'Bias' in imagetyp:
                     frame_type = 'Master Bias'
                 else:
-                    # Skip non-master calibration frames
+                    # Skip frames that don't match any known type
                     continue
 
                 # Create binning string
@@ -766,7 +771,7 @@ class ProjectManager:
 
         Returns:
             Dictionary with frame type as key and count as value
-            Example: {'Master Dark': 3, 'Master Flat': 5, 'Master Bias': 1}
+            Example: {'Master Light': 2, 'Master Dark': 3, 'Master Flat': 5, 'Master Bias': 1}
         """
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
