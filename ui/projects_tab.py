@@ -48,7 +48,7 @@ class ProjectsTab(QWidget):
         """Initialize the user interface."""
         layout = QVBoxLayout(self)
 
-        # Top toolbar
+        # Top toolbar - Project management buttons
         toolbar = QHBoxLayout()
 
         self.new_project_btn = QPushButton("New Project")
@@ -60,14 +60,21 @@ class ProjectsTab(QWidget):
         self.edit_project_btn.setEnabled(False)  # Disabled until project is selected
         toolbar.addWidget(self.edit_project_btn)
 
-        self.import_quality_btn = QPushButton("Import Quality Data")
-        self.import_quality_btn.clicked.connect(self.import_quality_data)
-        toolbar.addWidget(self.import_quality_btn)
+        self.reactivate_btn = QPushButton("Reactivate Project")
+        self.reactivate_btn.clicked.connect(self.reactivate_project)
+        self.reactivate_btn.setVisible(False)
+        toolbar.addWidget(self.reactivate_btn)
 
-        self.import_masters_btn = QPushButton("Import Master Light Frames")
-        self.import_masters_btn.clicked.connect(self.import_master_frames)
-        self.import_masters_btn.setEnabled(False)  # Disabled until project is selected
-        toolbar.addWidget(self.import_masters_btn)
+        self.archive_btn = QPushButton("Archive")
+        self.archive_btn.clicked.connect(self.archive_project)
+        self.archive_btn.setVisible(False)
+        toolbar.addWidget(self.archive_btn)
+
+        self.delete_btn = QPushButton("Delete Project")
+        self.delete_btn.clicked.connect(self.delete_project)
+        self.delete_btn.setVisible(False)
+        self.delete_btn.setStyleSheet("color: #d9534f;")
+        toolbar.addWidget(self.delete_btn)
 
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh_projects)
@@ -201,8 +208,18 @@ class ProjectsTab(QWidget):
 
         details_layout.addWidget(self.details_content_splitter)
 
-        # Action buttons
+        # Action buttons - Data import and pre-processing workflow
         action_buttons = QHBoxLayout()
+
+        self.import_quality_btn = QPushButton("Import Quality Data")
+        self.import_quality_btn.clicked.connect(self.import_quality_data)
+        self.import_quality_btn.setVisible(False)
+        action_buttons.addWidget(self.import_quality_btn)
+
+        self.import_masters_btn = QPushButton("Import Master Light Frames")
+        self.import_masters_btn.clicked.connect(self.import_master_frames)
+        self.import_masters_btn.setVisible(False)
+        action_buttons.addWidget(self.import_masters_btn)
 
         self.export_files_btn = QPushButton("Checkout Files for Pre-Processing")
         self.export_files_btn.clicked.connect(self.export_project_files)
@@ -213,22 +230,6 @@ class ProjectsTab(QWidget):
         self.mark_complete_btn.clicked.connect(self.mark_project_complete)
         self.mark_complete_btn.setVisible(False)
         action_buttons.addWidget(self.mark_complete_btn)
-
-        self.reactivate_btn = QPushButton("Reactivate Project")
-        self.reactivate_btn.clicked.connect(self.reactivate_project)
-        self.reactivate_btn.setVisible(False)
-        action_buttons.addWidget(self.reactivate_btn)
-
-        self.archive_btn = QPushButton("Archive")
-        self.archive_btn.clicked.connect(self.archive_project)
-        self.archive_btn.setVisible(False)
-        action_buttons.addWidget(self.archive_btn)
-
-        self.delete_btn = QPushButton("Delete Project")
-        self.delete_btn.clicked.connect(self.delete_project)
-        self.delete_btn.setVisible(False)
-        self.delete_btn.setStyleSheet("color: #d9534f;")
-        action_buttons.addWidget(self.delete_btn)
 
         action_buttons.addStretch()
         details_layout.addLayout(action_buttons)
@@ -331,7 +332,6 @@ class ProjectsTab(QWidget):
         if not selected_rows:
             self.clear_project_details()
             self.edit_project_btn.setEnabled(False)
-            self.import_masters_btn.setEnabled(False)
             return
 
         # Get project ID from first column
@@ -340,7 +340,6 @@ class ProjectsTab(QWidget):
         ).data(Qt.ItemDataRole.UserRole)
 
         self.edit_project_btn.setEnabled(True)
-        self.import_masters_btn.setEnabled(True)
         self.show_project_details(project_id)
 
     def show_project_details(self, project_id: int):
@@ -379,12 +378,17 @@ class ProjectsTab(QWidget):
         # Generate next steps
         self.display_next_steps(project, goals)
 
-        # Show action buttons
-        self.export_files_btn.setVisible(True)  # Always visible when project selected
-        self.mark_complete_btn.setVisible(project.status == 'active')
+        # Show/hide buttons based on project status
+        # Toolbar buttons (project management)
         self.reactivate_btn.setVisible(project.status == 'completed')
         self.archive_btn.setVisible(project.status in ['active', 'completed'])
         self.delete_btn.setVisible(True)
+
+        # Action buttons (data import and pre-processing workflow)
+        self.import_quality_btn.setVisible(True)  # Always visible when project selected
+        self.import_masters_btn.setVisible(True)  # Always visible when project selected
+        self.export_files_btn.setVisible(True)  # Always visible when project selected
+        self.mark_complete_btn.setVisible(project.status == 'active')
 
     def display_filter_goals(self, goals: list[FilterGoalProgress]):
         """
@@ -578,11 +582,17 @@ class ProjectsTab(QWidget):
         self.goals_group.setVisible(False)
         self.master_frames_group.setVisible(False)
         self.next_steps_group.setVisible(False)
-        self.export_files_btn.setVisible(False)
-        self.mark_complete_btn.setVisible(False)
+
+        # Hide toolbar buttons (project management)
         self.reactivate_btn.setVisible(False)
         self.archive_btn.setVisible(False)
         self.delete_btn.setVisible(False)
+
+        # Hide action buttons (data import and pre-processing workflow)
+        self.import_quality_btn.setVisible(False)
+        self.import_masters_btn.setVisible(False)
+        self.export_files_btn.setVisible(False)
+        self.mark_complete_btn.setVisible(False)
 
     def create_new_project(self):
         """Open dialog to create a new project."""
