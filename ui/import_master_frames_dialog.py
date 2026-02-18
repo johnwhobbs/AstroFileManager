@@ -9,17 +9,18 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
     QGroupBox, QCheckBox, QWidget
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QColor, QBrush
 
 import sqlite3
-from typing import List
+from typing import List, Optional
 
 
 class ImportMasterFramesDialog(QDialog):
     """Dialog for importing master frames to a project."""
 
-    def __init__(self, db_path: str, project_id: int, project_name: str, parent=None):
+    def __init__(self, db_path: str, project_id: int, project_name: str,
+                 settings: Optional[QSettings] = None, parent=None):
         """
         Initialize import master frames dialog.
 
@@ -27,12 +28,14 @@ class ImportMasterFramesDialog(QDialog):
             db_path: Path to database
             project_id: Project ID to import master frames to
             project_name: Project name (for display)
+            settings: QSettings object for storing user preferences (optional)
             parent: Parent widget
         """
         super().__init__(parent)
         self.db_path = db_path
         self.project_id = project_id
         self.project_name = project_name
+        self.settings = settings
 
         self.setWindowTitle(f"Import Master Frames: {project_name}")
         self.setMinimumWidth(800)
@@ -75,17 +78,45 @@ class ImportMasterFramesDialog(QDialog):
         # Configure table
         self.frames_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.frames_table.horizontalHeader().setStretchLastSection(True)
+        self.frames_table.horizontalHeader().setSectionsMovable(True)
         self.frames_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         self.frames_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
 
-        # Set column widths
-        self.frames_table.setColumnWidth(0, 60)   # Select
-        self.frames_table.setColumnWidth(1, 100)  # Type
-        self.frames_table.setColumnWidth(2, 80)   # Filter
-        self.frames_table.setColumnWidth(3, 80)   # Exposure
-        self.frames_table.setColumnWidth(4, 80)   # Temp
-        self.frames_table.setColumnWidth(5, 70)   # Binning
-        self.frames_table.setColumnWidth(6, 200)  # Filename
+        # Set default column widths or restore from settings
+        default_widths = [60, 100, 80, 80, 80, 70, 200, 120]  # Select, Type, Filter, Exposure, Temp, Binning, Filename, Already Imported
+        for col in range(8):
+            if self.settings:
+                saved_width = self.settings.value(f'import_master_frames_dialog_col_{col}')
+                if saved_width:
+                    self.frames_table.setColumnWidth(col, int(saved_width))
+                else:
+                    self.frames_table.setColumnWidth(col, default_widths[col])
+            else:
+                self.frames_table.setColumnWidth(col, default_widths[col])
+
+        # Restore column order from settings
+        if self.settings:
+            saved_order = self.settings.value('import_master_frames_dialog_col_order')
+            if saved_order:
+                # Convert to integers (QSettings may return strings)
+                saved_order = [int(idx) for idx in saved_order]
+                for visual_index, logical_index in enumerate(saved_order):
+                    self.frames_table.horizontalHeader().moveSection(
+                        self.frames_table.horizontalHeader().visualIndex(logical_index),
+                        visual_index
+                    )
+
+        # Connect column resize and move to save settings
+        if self.settings:
+            self.frames_table.horizontalHeader().sectionResized.connect(self.save_column_widths)
+            self.frames_table.horizontalHeader().sectionMoved.connect(self.save_column_order)
+
+        # Enable sorting by clicking column headers (will be toggled during data loading)
+        self.frames_table.setSortingEnabled(True)
+
+        # Connect sort indicator changed signal to save sort state
+        if self.settings:
+            self.frames_table.horizontalHeader().sortIndicatorChanged.connect(self.save_sort_state)
 
         frames_layout.addWidget(self.frames_table)
         frames_group.setLayout(frames_layout)
@@ -159,6 +190,9 @@ class ImportMasterFramesDialog(QDialog):
             cursor.execute(query, (self.project_id,))
             rows = cursor.fetchall()
 
+            # Disable sorting while populating to avoid performance issues
+            self.frames_table.setSortingEnabled(False)
+
             # Populate table
             self.frames_table.setRowCount(len(rows))
 
@@ -225,6 +259,20 @@ class ImportMasterFramesDialog(QDialog):
                         if item:
                             item.setForeground(QBrush(QColor("#999999")))
 
+            # Re-enable sorting after data population
+            self.frames_table.setSortingEnabled(True)
+
+            # Restore sort state after loading data
+            if self.settings:
+                saved_sort_column = self.settings.value('import_master_frames_dialog_sort_column')
+                saved_sort_order = self.settings.value('import_master_frames_dialog_sort_order')
+                if saved_sort_column is not None and saved_sort_order is not None:
+                    # Convert to appropriate types
+                    sort_column = int(saved_sort_column)
+                    sort_order = Qt.SortOrder(int(saved_sort_order))
+                    # Sort the table by the saved column and order
+                    self.frames_table.sortItems(sort_column, sort_order)
+
             self.update_selected_count()
 
         finally:
@@ -260,6 +308,40 @@ class ImportMasterFramesDialog(QDialog):
 
         self.selected_count_label.setText(f"Selected: {count}")
         self.import_btn.setEnabled(count > 0)
+
+    def save_column_widths(self) -> None:
+        """Save the table column widths to settings."""
+        if not self.settings:
+            return
+
+        for col in range(self.frames_table.columnCount()):
+            width = self.frames_table.columnWidth(col)
+            self.settings.setValue(f'import_master_frames_dialog_col_{col}', width)
+
+    def save_column_order(self) -> None:
+        """Save the table column order to settings."""
+        if not self.settings:
+            return
+
+        header = self.frames_table.horizontalHeader()
+        order = [header.logicalIndex(i) for i in range(header.count())]
+        self.settings.setValue('import_master_frames_dialog_col_order', order)
+
+    def save_sort_state(self, column: int, order: Qt.SortOrder) -> None:
+        """
+        Save the table sort state to settings.
+
+        Args:
+            column: The column index that is being sorted
+            order: The sort order (Qt.SortOrder enum)
+        """
+        if not self.settings:
+            return
+
+        # Save the sort column
+        self.settings.setValue('import_master_frames_dialog_sort_column', column)
+        # Convert Qt.SortOrder enum to integer: AscendingOrder=0, DescendingOrder=1
+        self.settings.setValue('import_master_frames_dialog_sort_order', int(order.value))
 
     def import_selected(self):
         """Import the selected master frames."""

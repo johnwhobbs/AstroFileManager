@@ -938,6 +938,7 @@ class ProjectsTab(QWidget):
             db_path=self.db_path,
             project_id=self.selected_project_id,
             project_name=project.name,
+            settings=self.settings,
             parent=self
         )
 
