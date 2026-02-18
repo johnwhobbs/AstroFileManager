@@ -35,6 +35,7 @@ class ImportMasterFramesDialog(QDialog):
         self.db_path = db_path
         self.project_id = project_id
         self.project_name = project_name
+        self.settings = settings  # Store settings for saving/restoring UI preferences
         self.all_frames_data = []  # Store all frames data for filtering
 
         self.setWindowTitle(f"Import Master Frames: {project_name}")
