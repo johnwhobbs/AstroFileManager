@@ -119,14 +119,17 @@ class AssignSessionDialog(QDialog):
             self.on_project_changed(0)
 
     def load_projects(self):
-        """Load active projects into combo box."""
+        """Load active projects into combo box in alphabetic order."""
         projects = self.project_manager.list_projects(status='active')
 
         if not projects:
             self.project_combo.addItem("(No active projects)", None)
             return
 
-        for project in projects:
+        # Sort projects alphabetically by name (case-insensitive)
+        sorted_projects = sorted(projects, key=lambda p: p.name.lower())
+
+        for project in sorted_projects:
             display_text = f"{project.name} - {project.object_name}"
             self.project_combo.addItem(display_text, project.id)
 
