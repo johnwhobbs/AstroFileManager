@@ -267,7 +267,6 @@ class ProjectsTab(QWidget):
         # Update table
         self.projects_table.setRowCount(len(projects))
 
-        row_to_select = None
         for row, project in enumerate(projects):
             # Project name
             name_item = QTableWidgetItem(project.name)
@@ -288,10 +287,6 @@ class ProjectsTab(QWidget):
             # Created date
             created = project.created_at[:10] if project.created_at else ""
             self.projects_table.setItem(row, 4, QTableWidgetItem(created))
-
-            # Check if this is the previously selected project
-            if previously_selected_id is not None and project.id == previously_selected_id:
-                row_to_select = row
 
         # Re-enable signals
         self.projects_table.blockSignals(False)
@@ -319,11 +314,25 @@ class ProjectsTab(QWidget):
             self.unassigned_label.setText("")
 
         # Restore selection if the previously selected project is still in the list
-        if row_to_select is not None:
-            self.projects_table.selectRow(row_to_select)
-            self.show_project_details(previously_selected_id)
+        # Note: We need to find the row AFTER sorting has been applied
+        if previously_selected_id is not None:
+            row_to_select = None
+            # Search through all rows to find the one with the matching project ID
+            for row in range(self.projects_table.rowCount()):
+                item = self.projects_table.item(row, 0)
+                if item and item.data(Qt.ItemDataRole.UserRole) == previously_selected_id:
+                    row_to_select = row
+                    break
+
+            # If found, select the row and show details
+            if row_to_select is not None:
+                self.projects_table.selectRow(row_to_select)
+                self.show_project_details(previously_selected_id)
+            else:
+                # Clear selection if previously selected project is no longer visible
+                self.clear_project_details()
         else:
-            # Clear selection if previously selected project is no longer visible
+            # Clear selection if no project was previously selected
             self.clear_project_details()
 
     def on_project_selected(self):
