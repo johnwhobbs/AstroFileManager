@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
     QGroupBox, QCheckBox, QWidget
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QColor, QBrush
 
 import sqlite3
@@ -40,6 +40,9 @@ class ImportMasterFramesDialog(QDialog):
 
         self.init_ui()
         self.load_master_frames()
+
+        # Restore window geometry from settings
+        self.restore_window_geometry()
 
     def init_ui(self):
         """Initialize user interface."""
@@ -298,3 +301,31 @@ class ImportMasterFramesDialog(QDialog):
                 "Import Failed",
                 f"Failed to import master frames:\n{str(e)}"
             )
+
+    def restore_window_geometry(self):
+        """
+        Restore the window size and position from saved settings.
+
+        If no saved geometry exists, the window will use its default minimum size.
+        """
+        settings = QSettings('AstroFileManager', 'AstroFileManager')
+        geometry = settings.value('import_master_frames_dialog/geometry')
+        if geometry:
+            self.restoreGeometry(geometry)
+
+    def save_window_geometry(self):
+        """Save the current window size and position to settings."""
+        settings = QSettings('AstroFileManager', 'AstroFileManager')
+        settings.setValue('import_master_frames_dialog/geometry', self.saveGeometry())
+
+    def closeEvent(self, event):
+        """
+        Handle window close event.
+
+        Saves the window geometry before closing.
+
+        Args:
+            event: QCloseEvent object
+        """
+        self.save_window_geometry()
+        super().closeEvent(event)
