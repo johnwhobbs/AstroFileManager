@@ -7,7 +7,7 @@ Allows user to select master frames (light or calibration) from the catalog and 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QGroupBox, QCheckBox, QWidget
+    QGroupBox, QCheckBox, QWidget, QLineEdit
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QBrush
@@ -33,6 +33,7 @@ class ImportMasterFramesDialog(QDialog):
         self.db_path = db_path
         self.project_id = project_id
         self.project_name = project_name
+        self.all_frames_data = []  # Store all frames data for filtering
 
         self.setWindowTitle(f"Import Master Frames: {project_name}")
         self.setMinimumWidth(800)
@@ -61,6 +62,28 @@ class ImportMasterFramesDialog(QDialog):
 
         # Note: Filter section removed - only Master Light frames are allowed
         # as per issue #207
+
+        # Filename filter section (issue #217)
+        filter_group = QGroupBox("Filter by Filename")
+        filter_layout = QHBoxLayout()
+
+        filter_label = QLabel("Filename contains:")
+        filter_layout.addWidget(filter_label)
+
+        self.filename_filter_input = QLineEdit()
+        self.filename_filter_input.setPlaceholderText("Enter text to filter by filename (case-insensitive)")
+        self.filename_filter_input.textChanged.connect(self.apply_filename_filter)
+        filter_layout.addWidget(self.filename_filter_input)
+
+        clear_filter_btn = QPushButton("Clear Filter")
+        clear_filter_btn.clicked.connect(self.clear_filename_filter)
+        filter_layout.addWidget(clear_filter_btn)
+
+        self.filter_status_label = QLabel("")
+        filter_layout.addWidget(self.filter_status_label)
+
+        filter_group.setLayout(filter_layout)
+        layout.addWidget(filter_group)
 
         # Master frames table
         frames_group = QGroupBox("Available Master Light Frames")
@@ -159,79 +182,139 @@ class ImportMasterFramesDialog(QDialog):
             cursor.execute(query, (self.project_id,))
             rows = cursor.fetchall()
 
-            # Populate table
-            self.frames_table.setRowCount(len(rows))
-
-            for row_idx, row in enumerate(rows):
+            # Store all frames data for filtering
+            self.all_frames_data = []
+            for row in rows:
                 (file_id, imagetyp, filter_name, exposure, ccd_temp,
                  xbinning, ybinning, filename, is_imported) = row
 
-                # Select checkbox
-                checkbox = QCheckBox()
-                checkbox.setChecked(False)
-                if is_imported:
-                    checkbox.setEnabled(False)
-                checkbox.stateChanged.connect(self.update_selected_count)
-
-                checkbox_widget = QWidget()
-                checkbox_layout = QHBoxLayout(checkbox_widget)
-                checkbox_layout.addWidget(checkbox)
-                checkbox_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                checkbox_layout.setContentsMargins(0, 0, 0, 0)
-
-                self.frames_table.setCellWidget(row_idx, 0, checkbox_widget)
-
-                # Store file_id in checkbox
-                checkbox.setProperty("file_id", file_id)
-
                 # Determine frame type
-                # Only Master Light frames are allowed (issue #207)
                 frame_type = "Master Light"
                 if "Light" not in imagetyp:
                     frame_type = "Unknown"
 
-                # Type
-                self.frames_table.setItem(row_idx, 1, QTableWidgetItem(frame_type))
+                self.all_frames_data.append({
+                    'file_id': file_id,
+                    'imagetyp': imagetyp,
+                    'filter': filter_name,
+                    'exposure': exposure,
+                    'ccd_temp': ccd_temp,
+                    'xbinning': xbinning,
+                    'ybinning': ybinning,
+                    'filename': filename,
+                    'is_imported': is_imported,
+                    'frame_type': frame_type
+                })
 
-                # Filter
-                filter_text = filter_name if filter_name else "N/A"
-                self.frames_table.setItem(row_idx, 2, QTableWidgetItem(filter_text))
-
-                # Exposure
-                exp_text = f"{exposure:.1f}s" if exposure is not None else "N/A"
-                self.frames_table.setItem(row_idx, 3, QTableWidgetItem(exp_text))
-
-                # Temperature
-                temp_text = f"{ccd_temp:.1f}" if ccd_temp is not None else "N/A"
-                self.frames_table.setItem(row_idx, 4, QTableWidgetItem(temp_text))
-
-                # Binning
-                binning_text = f"{xbinning}x{ybinning}" if xbinning and ybinning else "N/A"
-                self.frames_table.setItem(row_idx, 5, QTableWidgetItem(binning_text))
-
-                # Filename
-                self.frames_table.setItem(row_idx, 6, QTableWidgetItem(filename))
-
-                # Already imported status
-                status_item = QTableWidgetItem("Yes" if is_imported else "No")
-                if is_imported:
-                    status_item.setForeground(QBrush(QColor("#5cb85c")))  # Green
-                self.frames_table.setItem(row_idx, 7, status_item)
-
-                # Gray out already imported rows
-                if is_imported:
-                    for col in range(1, 8):
-                        item = self.frames_table.item(row_idx, col)
-                        if item:
-                            item.setForeground(QBrush(QColor("#999999")))
-
-            self.update_selected_count()
+            # Display all frames initially
+            self.populate_table(self.all_frames_data)
 
         finally:
             conn.close()
 
+    def populate_table(self, frames_data: List[dict]):
+        """
+        Populate the table with the given frames data.
+
+        Args:
+            frames_data: List of frame dictionaries to display
+        """
+        # Populate table
+        self.frames_table.setRowCount(len(frames_data))
+
+        for row_idx, frame in enumerate(frames_data):
+            # Select checkbox
+            checkbox = QCheckBox()
+            checkbox.setChecked(False)
+            if frame['is_imported']:
+                checkbox.setEnabled(False)
+            checkbox.stateChanged.connect(self.update_selected_count)
+
+            checkbox_widget = QWidget()
+            checkbox_layout = QHBoxLayout(checkbox_widget)
+            checkbox_layout.addWidget(checkbox)
+            checkbox_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            checkbox_layout.setContentsMargins(0, 0, 0, 0)
+
+            self.frames_table.setCellWidget(row_idx, 0, checkbox_widget)
+
+            # Store file_id in checkbox
+            checkbox.setProperty("file_id", frame['file_id'])
+
+            # Type
+            self.frames_table.setItem(row_idx, 1, QTableWidgetItem(frame['frame_type']))
+
+            # Filter
+            filter_text = frame['filter'] if frame['filter'] else "N/A"
+            self.frames_table.setItem(row_idx, 2, QTableWidgetItem(filter_text))
+
+            # Exposure
+            exp_text = f"{frame['exposure']:.1f}s" if frame['exposure'] is not None else "N/A"
+            self.frames_table.setItem(row_idx, 3, QTableWidgetItem(exp_text))
+
+            # Temperature
+            temp_text = f"{frame['ccd_temp']:.1f}" if frame['ccd_temp'] is not None else "N/A"
+            self.frames_table.setItem(row_idx, 4, QTableWidgetItem(temp_text))
+
+            # Binning
+            binning_text = f"{frame['xbinning']}x{frame['ybinning']}" if frame['xbinning'] and frame['ybinning'] else "N/A"
+            self.frames_table.setItem(row_idx, 5, QTableWidgetItem(binning_text))
+
+            # Filename
+            self.frames_table.setItem(row_idx, 6, QTableWidgetItem(frame['filename']))
+
+            # Already imported status
+            status_item = QTableWidgetItem("Yes" if frame['is_imported'] else "No")
+            if frame['is_imported']:
+                status_item.setForeground(QBrush(QColor("#5cb85c")))  # Green
+            self.frames_table.setItem(row_idx, 7, status_item)
+
+            # Gray out already imported rows
+            if frame['is_imported']:
+                for col in range(1, 8):
+                    item = self.frames_table.item(row_idx, col)
+                    if item:
+                        item.setForeground(QBrush(QColor("#999999")))
+
+        self.update_selected_count()
+
+    def apply_filename_filter(self):
+        """
+        Apply filename filter to the table.
+
+        Filters the displayed frames based on the text in the filename filter input.
+        Performs case-insensitive substring matching.
+        """
+        filter_text = self.filename_filter_input.text().strip().lower()
+
+        if not filter_text:
+            # No filter - show all frames
+            filtered_frames = self.all_frames_data
+        else:
+            # Filter frames by filename (case-insensitive)
+            filtered_frames = [
+                frame for frame in self.all_frames_data
+                if filter_text in frame['filename'].lower()
+            ]
+
+        # Update the table with filtered data
+        self.populate_table(filtered_frames)
+
+        # Update filter status label
+        if filter_text:
+            total_frames = len(self.all_frames_data)
+            shown_frames = len(filtered_frames)
+            self.filter_status_label.setText(f"Showing {shown_frames} of {total_frames} frames")
+        else:
+            self.filter_status_label.setText("")
+
+    def clear_filename_filter(self):
+        """Clear the filename filter and show all frames."""
+        self.filename_filter_input.clear()
+        # The textChanged signal will trigger apply_filename_filter()
+
     def select_all(self):
-        """Select all available frames."""
+        """Select all available frames (in the current filtered view)."""
         for row in range(self.frames_table.rowCount()):
             checkbox_widget = self.frames_table.cellWidget(row, 0)
             if checkbox_widget:
