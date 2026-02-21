@@ -40,6 +40,7 @@ class ProjectsTab(QWidget):
         self.project_manager = ProjectManager(db_path)
         self.selected_project_id: Optional[int] = None
         self.current_goals_table: Optional[QTableWidget] = None  # Keep reference for signal connection
+        self.current_masters_table: Optional[QTableWidget] = None  # Keep reference for signal connection
 
         self.init_ui()
         self.refresh_projects()
@@ -837,6 +838,20 @@ class ProjectsTab(QWidget):
             order = [header.logicalIndex(i) for i in range(header.count())]
             self.settings.setValue('projects_goals_table_col_order', order)
 
+    def save_masters_table_column_widths(self) -> None:
+        """Save the master frames table column widths to settings."""
+        if self.current_masters_table:
+            for col in range(self.current_masters_table.columnCount()):
+                width = self.current_masters_table.columnWidth(col)
+                self.settings.setValue(f'projects_masters_table_col_{col}', width)
+
+    def save_masters_table_column_order(self) -> None:
+        """Save the master frames table column order to settings."""
+        if self.current_masters_table:
+            header = self.current_masters_table.horizontalHeader()
+            order = [header.logicalIndex(i) for i in range(header.count())]
+            self.settings.setValue('projects_masters_table_col_order', order)
+
     def save_projects_table_column_widths(self) -> None:
         """Save the projects table column widths to settings."""
         for col in range(self.projects_table.columnCount()):
@@ -893,17 +908,36 @@ class ProjectsTab(QWidget):
         # Configure table appearance
         masters_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         masters_table.horizontalHeader().setStretchLastSection(True)
+        masters_table.horizontalHeader().setSectionsMovable(True)
         masters_table.verticalHeader().setVisible(False)
         masters_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
         masters_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         masters_table.setShowGrid(True)
 
-        # Set column widths
-        masters_table.setColumnWidth(0, 100)  # Type
-        masters_table.setColumnWidth(1, 80)   # Filter
-        masters_table.setColumnWidth(2, 80)   # Exposure
-        masters_table.setColumnWidth(3, 80)   # Temp
-        masters_table.setColumnWidth(4, 70)   # Binning
+        # Restore saved column widths or use defaults
+        # Columns: Type, Filter, Exposure, Temp (°C), Binning, Filename
+        default_widths = [100, 80, 80, 80, 70, 200]
+        for col in range(6):
+            saved_width = self.settings.value(f'projects_masters_table_col_{col}')
+            if saved_width:
+                masters_table.setColumnWidth(col, int(saved_width))
+            else:
+                masters_table.setColumnWidth(col, default_widths[col])
+
+        # Restore column order
+        saved_order = self.settings.value('projects_masters_table_col_order')
+        if saved_order:
+            # Convert to integers (settings may return strings)
+            saved_order = [int(idx) for idx in saved_order]
+            for visual_index, logical_index in enumerate(saved_order):
+                masters_table.horizontalHeader().moveSection(
+                    masters_table.horizontalHeader().visualIndex(logical_index),
+                    visual_index
+                )
+
+        # Connect column resize and move signals to save settings
+        masters_table.horizontalHeader().sectionResized.connect(self.save_masters_table_column_widths)
+        masters_table.horizontalHeader().sectionMoved.connect(self.save_masters_table_column_order)
 
         # Set compact row height
         masters_table.verticalHeader().setDefaultSectionSize(30)
@@ -937,6 +971,8 @@ class ProjectsTab(QWidget):
         masters_table.setMaximumHeight(min(table_height, 200))  # Cap at 200px
         masters_table.setMinimumHeight(min(table_height, 100))
 
+        # Store reference to keep signal connection alive
+        self.current_masters_table = masters_table
         self.master_frames_layout.addWidget(masters_table)
 
     def import_master_frames(self):
