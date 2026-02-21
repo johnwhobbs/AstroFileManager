@@ -359,22 +359,34 @@ class SubFrameSelectorImporter:
         """
         Update project filter goal counts.
 
+        Master Light Frames (imagetyp containing 'Master') are excluded from
+        both the total_count and approved_count, as they are tracked separately
+        in the Master Light Frames section and should not inflate the counts in
+        the Filter Goals Progress table.
+
         Args:
             cursor: SQLite cursor
             project_id: Project ID
         """
+        # Use COALESCE for NULL-safe filter comparison.
+        # Exclude Master Light Frames so they do not inflate the Total or
+        # Approved column counts in the Filter Goals Progress table.
         cursor.execute('''
             UPDATE project_filter_goals
             SET
                 total_count = (
                     SELECT COUNT(*)
                     FROM xisf_files
-                    WHERE project_id = ? AND filter = project_filter_goals.filter
+                    WHERE project_id = ?
+                    AND COALESCE(filter, '') = COALESCE(project_filter_goals.filter, '')
+                    AND imagetyp NOT LIKE '%Master%'
                 ),
                 approved_count = (
                     SELECT COUNT(*)
                     FROM xisf_files
-                    WHERE project_id = ? AND filter = project_filter_goals.filter
+                    WHERE project_id = ?
+                    AND COALESCE(filter, '') = COALESCE(project_filter_goals.filter, '')
+                    AND imagetyp NOT LIKE '%Master%'
                     AND approval_status = 'approved'
                 ),
                 last_updated = CURRENT_TIMESTAMP
