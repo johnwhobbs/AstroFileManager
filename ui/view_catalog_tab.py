@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 # Import CSV exporter and background workers
+from ui.status_pill_delegate import StatusPillDelegate
 from import_export.csv_exporter import CSVExporter
 from ui.background_workers import CatalogLoaderWorker
 from ui.assign_session_dialog import AssignSessionDialog
@@ -175,12 +176,20 @@ class ViewCatalogTab(QWidget):
         for col in self.fits_header_columns:
             self.catalog_tree.setColumnHidden(col, True)
 
+        # Render the Status column (index 11) as a rounded "pill" badge that
+        # hugs the status text instead of coloring the whole cell.
+        self.status_column_index = 11
+        self.catalog_tree.setItemDelegateForColumn(
+            self.status_column_index, StatusPillDelegate(self.catalog_tree)
+        )
+
         # Make columns resizable and movable
         self.catalog_tree.header().setSectionsMovable(True)
         self.catalog_tree.header().setStretchLastSection(True)
 
-        # Set initial column widths or restore from settings
-        default_widths = [300, 120, 80, 80, 60, 70, 100, 70, 60, 60, 60, 80, 120, 120]
+        # Set initial column widths or restore from settings. The Status column
+        # (index 11) is a little wider so the pill has room to hug its text.
+        default_widths = [300, 120, 80, 80, 60, 70, 100, 70, 60, 60, 60, 120, 120, 120]
         for col in range(14):
             saved_width = self.settings.value(f'catalog_tree_col_{col}')
             if saved_width:
@@ -1506,14 +1515,22 @@ Imported: {result[11] or 'N/A'}
                 elif approval_status == 'rejected':
                     approval_color = QColor(255, 200, 200)  # Light red
 
+                # Note: the Status column (index 11) is skipped here because it
+                # is painted separately as a rounded pill by StatusPillDelegate,
+                # which supplies its own background. Coloring the whole cell
+                # would hide the pill's shape.
                 if approval_color:
                     for col in range(14):
+                        if col == self.status_column_index:
+                            continue
                         file_item.setBackground(col, QBrush(approval_color))
                 else:
                     # Apply imagetyp color coding for non-graded frames
                     color = self.get_item_color(imagetyp)
                     if color:
                         for col in range(14):
+                            if col == self.status_column_index:
+                                continue
                             file_item.setBackground(col, QBrush(color))
 
         # Mark as loaded by removing lazy_load flag
@@ -1850,14 +1867,20 @@ Imported: {result[11] or 'N/A'}
                 status_text = '○ Not Graded'
                 color = None
 
+            # The Status column (index 11) is skipped when (re)coloring the row
+            # because it is drawn as a rounded pill by StatusPillDelegate.
             for item in items:
                 item.setText(11, status_text)
                 if color:
                     for col in range(14):
+                        if col == self.status_column_index:
+                            continue
                         item.setBackground(col, QBrush(color))
                 else:
                     # Clear background
                     for col in range(14):
+                        if col == self.status_column_index:
+                            continue
                         item.setBackground(col, QBrush())
 
             self.status_callback(f"{len(items)} frame(s) marked as {status}")
@@ -1917,13 +1940,18 @@ Imported: {result[11] or 'N/A'}
                 item.setText(11, '○ Not Graded')
                 color = None
 
-            # Update item color
+            # Update item color. The Status column (index 11) is skipped because
+            # it is drawn as a rounded pill by StatusPillDelegate.
             if color:
                 for col in range(14):
+                    if col == self.status_column_index:
+                        continue
                     item.setBackground(col, QBrush(color))
             else:
                 # Clear background to show default
                 for col in range(14):
+                    if col == self.status_column_index:
+                        continue
                     item.setBackground(col, QBrush())
 
             self.status_callback(f"Frame {filename} marked as {status}")
