@@ -9,11 +9,12 @@ import platform
 from typing import Callable, List, Optional
 
 from PyQt6.QtCore import Qt, QSettings
-from PyQt6.QtGui import QColor, QBrush
+from PyQt6.QtGui import QColor, QBrush, QImage, QPixmap
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
     QGroupBox, QLineEdit, QComboBox, QPushButton, QMenu, QMessageBox,
-    QFileDialog, QApplication, QProgressBar
+    QFileDialog, QApplication, QProgressBar, QSplitter, QTableWidget,
+    QTableWidgetItem, QHeaderView, QScrollArea, QAbstractItemView, QSizePolicy
 )
 
 # Import CSV exporter and background workers
@@ -21,6 +22,7 @@ from import_export.csv_exporter import CSVExporter
 from ui.background_workers import CatalogLoaderWorker
 from ui.assign_session_dialog import AssignSessionDialog
 from core.project_manager import ProjectManager
+from utils.fits_reader import read_header_keywords, get_image_data
 
 
 class ViewCatalogTab(QWidget):
@@ -83,6 +85,18 @@ class ViewCatalogTab(QWidget):
         stats_layout.addWidget(self.catalog_date_range_card)
 
         stats_group.setLayout(stats_layout)
+
+        # Keep the Database Summary tiles at their natural (compact) height.
+        #
+        # Previously the frame listing tree sat directly in this vertical layout
+        # and, because a tree expands vertically, it absorbed all the spare
+        # vertical space, leaving the summary group at its preferred height.
+        # Now that the tree lives inside the multi-window splitter below, the
+        # summary group would otherwise stretch to fill space and enlarge the
+        # tiles. Setting a Maximum vertical size policy caps the group at its
+        # preferred height, restoring the tiles to their previous size.
+        stats_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+
         layout.addWidget(stats_group)
 
         # Search and filter controls
@@ -150,6 +164,17 @@ class ViewCatalogTab(QWidget):
             'FWHM', 'Ecc', 'SNR', 'Stars', 'Status', 'Telescope', 'Instrument'
         ])
 
+        # Columns whose data comes from the FITS header. These are hidden from the
+        # frame listing because that information is now shown in the dedicated FITS
+        # Header pane on the right. The underlying data is still stored on each item
+        # (so features like session assignment and image-type detection keep working),
+        # it is simply not displayed as a column in the listing.
+        # Columns: 1=Image Type, 2=Filter, 3=Exposure, 4=Temp, 5=Binning, 6=Date,
+        #          12=Telescope, 13=Instrument
+        self.fits_header_columns = [1, 2, 3, 4, 5, 6, 12, 13]
+        for col in self.fits_header_columns:
+            self.catalog_tree.setColumnHidden(col, True)
+
         # Make columns resizable and movable
         self.catalog_tree.header().setSectionsMovable(True)
         self.catalog_tree.header().setStretchLastSection(True)
@@ -188,7 +213,67 @@ class ViewCatalogTab(QWidget):
         # Connect itemExpanded for lazy loading
         self.catalog_tree.itemExpanded.connect(self._on_tree_item_expanded)
 
-        layout.addWidget(self.catalog_tree)
+        # Update the FITS header and image panes when the selection changes
+        self.catalog_tree.itemSelectionChanged.connect(self._on_catalog_selection_changed)
+
+        # Build the multi-window layout for the View Catalog tab.
+        #
+        # The tab is split into three windows:
+        #   - Left: the listing of frames (the tree widget above).
+        #   - Upper right: the FITS header of the selected frame.
+        #   - Lower right: the image of the selected frame.
+        #
+        # A horizontal splitter separates the frame listing (left) from the
+        # details area (right). The details area is itself a vertical splitter
+        # holding the FITS header pane on top and the image pane on the bottom.
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_splitter.addWidget(self.catalog_tree)
+
+        # Right-hand side: FITS header (top) and image preview (bottom)
+        details_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # --- FITS header pane (upper right) ---
+        header_group = QGroupBox("FITS Header")
+        header_layout = QVBoxLayout(header_group)
+
+        self.fits_header_table = QTableWidget()
+        self.fits_header_table.setColumnCount(3)
+        self.fits_header_table.setHorizontalHeaderLabels(['Keyword', 'Value', 'Comment'])
+        self.fits_header_table.verticalHeader().setVisible(False)
+        # Make the table read-only
+        self.fits_header_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        # Stretch the value column to fill available space
+        header_hdr = self.fits_header_table.horizontalHeader()
+        header_hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header_hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header_hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header_layout.addWidget(self.fits_header_table)
+        details_splitter.addWidget(header_group)
+
+        # --- Image pane (lower right) ---
+        image_group = QGroupBox("Image Preview")
+        image_layout = QVBoxLayout(image_group)
+
+        self.image_scroll_area = QScrollArea()
+        self.image_scroll_area.setWidgetResizable(True)
+        self.image_label = QLabel("Select a frame to preview its image.")
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setStyleSheet("color: #888888;")
+        self.image_scroll_area.setWidget(self.image_label)
+        image_layout.addWidget(self.image_scroll_area)
+        details_splitter.addWidget(image_group)
+
+        # Give the two right-hand panes an equal starting size
+        details_splitter.setSizes([400, 400])
+
+        main_splitter.addWidget(details_splitter)
+        # Give the frame listing more room than the details area by default
+        main_splitter.setSizes([700, 500])
+
+        layout.addWidget(main_splitter)
+
+        # Holds the currently loaded image so it can be re-scaled on resize
+        self._current_pixmap = None
 
     def create_stat_card(self, title: str, value_label: QLabel) -> QWidget:
         """Create a statistics card widget."""
@@ -535,6 +620,220 @@ Imported: {result[11] or 'N/A'}
                 QMessageBox.warning(self, 'Not Found', f'File not found in database: {filename}')
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to retrieve file details: {e}')
+
+    def _is_file_item(self, item: QTreeWidgetItem) -> bool:
+        """
+        Determine whether a tree item represents a single file.
+
+        Group nodes (objects, filters, dates, etc.) either have children or
+        include a count in parentheses in their label. File items have neither.
+
+        Args:
+            item: The tree item to check
+
+        Returns:
+            True if the item represents a single file, False otherwise
+        """
+        return item.childCount() == 0 and '(' not in item.text(0)
+
+    def _get_filepath_for_item(self, item: QTreeWidgetItem) -> Optional[str]:
+        """
+        Look up the full file path for a file tree item using its filename.
+
+        Args:
+            item: A file tree item
+
+        Returns:
+            The full file path, or None if the file is not in the database.
+        """
+        filename = item.text(0)
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT filepath FROM xisf_files WHERE filename = ?', (filename,))
+        result = cursor.fetchone()
+        conn.close()
+        return result[0] if result else None
+
+    def _on_catalog_selection_changed(self) -> None:
+        """
+        Update the FITS header and image panes when the selection changes.
+
+        Only single file selections trigger a preview. Selecting a group node
+        or multiple items clears the preview panes.
+        """
+        selected = self.catalog_tree.selectedItems()
+
+        # Only preview when exactly one file item is selected
+        if len(selected) != 1 or not self._is_file_item(selected[0]):
+            self._clear_preview_panes()
+            return
+
+        item = selected[0]
+
+        try:
+            filepath = self._get_filepath_for_item(item)
+        except Exception as e:
+            self._clear_preview_panes()
+            self.image_label.setText(f"Could not look up file:\n{e}")
+            return
+
+        if not filepath:
+            self._clear_preview_panes()
+            self.image_label.setText("File not found in database.")
+            return
+
+        if not os.path.exists(filepath):
+            self._clear_preview_panes()
+            self.image_label.setText(f"File not found on disk:\n{filepath}")
+            return
+
+        # Populate both panes for the selected frame
+        self._display_fits_header(filepath)
+        self._display_image(filepath)
+
+    def _clear_preview_panes(self) -> None:
+        """Clear the FITS header table and the image preview."""
+        self.fits_header_table.setRowCount(0)
+        self._current_pixmap = None
+        self.image_label.clear()
+        self.image_label.setText("Select a frame to preview its image.")
+
+    def _display_fits_header(self, filepath: str) -> None:
+        """
+        Read and display the FITS header of the given file.
+
+        Args:
+            filepath: Full path to the file to read
+        """
+        self.fits_header_table.setRowCount(0)
+
+        try:
+            entries = read_header_keywords(filepath)
+        except Exception as e:
+            # Show the error inside the table so the user gets feedback
+            self.fits_header_table.setRowCount(1)
+            self.fits_header_table.setItem(0, 0, QTableWidgetItem("Error"))
+            self.fits_header_table.setItem(0, 1, QTableWidgetItem(str(e)))
+            return
+
+        self.fits_header_table.setRowCount(len(entries))
+        for row, (keyword, value, comment) in enumerate(entries):
+            self.fits_header_table.setItem(row, 0, QTableWidgetItem(keyword))
+            self.fits_header_table.setItem(row, 1, QTableWidgetItem(value))
+            self.fits_header_table.setItem(row, 2, QTableWidgetItem(comment))
+
+    def _display_image(self, filepath: str) -> None:
+        """
+        Read and display the image data of the given file.
+
+        Args:
+            filepath: Full path to the file to read
+        """
+        self._current_pixmap = None
+        self.image_label.clear()
+
+        try:
+            data = get_image_data(filepath)
+            if data is None:
+                self.image_label.setText("No image data available.")
+                return
+
+            pixmap = self._array_to_pixmap(data)
+            if pixmap is None:
+                self.image_label.setText("Unsupported image format.")
+                return
+
+            self._current_pixmap = pixmap
+            self._update_image_display()
+        except Exception as e:
+            self.image_label.setText(f"Could not load image:\n{e}")
+
+    def _array_to_pixmap(self, data) -> Optional[QPixmap]:
+        """
+        Convert a numpy image array into a QPixmap for display.
+
+        Astronomy images are often faint, so a simple percentile stretch is
+        applied to make features visible. Multi-channel images are reduced to
+        grayscale or RGB as appropriate.
+
+        Args:
+            data: A numpy array holding the image pixels
+
+        Returns:
+            A QPixmap ready for display, or None if the format is unsupported.
+        """
+        import numpy as np
+
+        arr = np.asarray(data)
+
+        # Handle multi-channel images
+        if arr.ndim == 3:
+            # FITS colour data is often channel-first (channels, height, width);
+            # convert it to the height, width, channels layout used for display.
+            if arr.shape[0] in (3, 4) and arr.shape[2] not in (3, 4):
+                arr = np.transpose(arr, (1, 2, 0))
+
+            if arr.shape[2] == 1:
+                arr = arr[:, :, 0]  # Single channel -> grayscale
+            elif arr.shape[2] >= 3:
+                arr = arr[:, :, :3]  # Keep the first three channels as RGB
+
+        if arr.ndim not in (2, 3):
+            return None
+
+        # Apply a percentile stretch so faint detail is visible
+        arr = arr.astype(np.float64)
+        finite = arr[np.isfinite(arr)]
+        if finite.size == 0:
+            return None
+
+        lo = float(np.percentile(finite, 0.5))
+        hi = float(np.percentile(finite, 99.5))
+        if hi <= lo:
+            # Fall back to the full data range if the percentiles are equal
+            lo, hi = float(finite.min()), float(finite.max())
+        if hi <= lo:
+            hi = lo + 1.0  # Avoid divide-by-zero on a flat image
+
+        arr = np.clip((arr - lo) / (hi - lo), 0.0, 1.0)
+        arr = (arr * 255).astype(np.uint8)
+        arr = np.ascontiguousarray(arr)
+
+        height = arr.shape[0]
+        width = arr.shape[1]
+
+        if arr.ndim == 2:
+            qimage = QImage(arr.data, width, height, width,
+                            QImage.Format.Format_Grayscale8)
+        else:
+            bytes_per_line = 3 * width
+            qimage = QImage(arr.data, width, height, bytes_per_line,
+                            QImage.Format.Format_RGB888)
+
+        # QPixmap.fromImage copies the pixel data, so it is safe to let the
+        # numpy array be garbage collected after this call.
+        return QPixmap.fromImage(qimage)
+
+    def _update_image_display(self) -> None:
+        """Scale the current image to fit the preview pane, keeping aspect ratio."""
+        if getattr(self, '_current_pixmap', None) is None:
+            return
+
+        viewport = self.image_scroll_area.viewport().size()
+        target_w = max(1, viewport.width() - 2)
+        target_h = max(1, viewport.height() - 2)
+
+        scaled = self._current_pixmap.scaled(
+            target_w, target_h,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.image_label.setPixmap(scaled)
+
+    def resizeEvent(self, event) -> None:
+        """Re-scale the preview image when the tab is resized."""
+        super().resizeEvent(event)
+        self._update_image_display()
 
     def delete_files_with_options(self, items: list, delete_from_db: bool = True, delete_from_disk: bool = False) -> None:
         """
