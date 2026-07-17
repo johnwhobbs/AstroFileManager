@@ -1215,6 +1215,60 @@ Imported: {result[11] or 'N/A'}
 
         return None
 
+    def _create_status_pill(self, approval_status: Optional[str]) -> QWidget:
+        """
+        Build a small "pill" widget for the approval status column.
+
+        The colored label is wrapped inside a container widget that uses a
+        centered horizontal layout. This keeps the pill only as wide/tall as
+        the text it holds (plus a little padding) instead of stretching across
+        the entire column, while still centering it inside the cell.
+
+        Args:
+            approval_status: The frame's approval status
+                ('approved', 'rejected', or anything else for not graded).
+
+        Returns:
+            QWidget: A container widget holding the centered status pill.
+        """
+        # Pick the label text and pill colors based on the status.
+        if approval_status == 'approved':
+            text = '✓ Approved'
+            background = '#4caf50'  # Green
+        elif approval_status == 'rejected':
+            text = '✗ Rejected'
+            background = '#f44336'  # Red
+        else:
+            text = '○ Not Graded'
+            background = '#9e9e9e'  # Gray
+
+        # The pill itself is a QLabel styled with rounded corners and padding.
+        # The padding is what gives the pill just enough size to cover the text.
+        pill = QLabel(text)
+        pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pill.setStyleSheet(
+            "QLabel {"
+            f"    background-color: {background};"
+            "    color: white;"
+            "    border-radius: 8px;"
+            "    padding: 2px 8px;"
+            "    font-size: 11px;"
+            "    font-weight: bold;"
+            "}"
+        )
+
+        # Wrap the pill in a container so we can center it within the cell.
+        # A stretch on each side of the pill keeps it from filling the column.
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(0)
+        layout.addStretch()
+        layout.addWidget(pill)
+        layout.addStretch()
+
+        return container
+
     def refresh_catalog_view(self) -> None:
         """Refresh the catalog view using background thread (non-blocking)."""
         try:
@@ -1488,13 +1542,11 @@ Imported: {result[11] or 'N/A'}
                 file_item.setText(9, f"{snr:.1f}" if snr is not None else '')
                 file_item.setText(10, f"{star_count}" if star_count is not None else '')
 
-                # Approval status with icon
-                if approval_status == 'approved':
-                    file_item.setText(11, '✓ Approved')
-                elif approval_status == 'rejected':
-                    file_item.setText(11, '✗ Rejected')
-                else:
-                    file_item.setText(11, '○ Not Graded')
+                # Approval status shown as a centered "pill" widget instead of
+                # plain text so the colored label only covers its text.
+                self.catalog_tree.setItemWidget(
+                    file_item, 11, self._create_status_pill(approval_status)
+                )
 
                 file_item.setText(12, telescop or 'N/A')
                 file_item.setText(13, instrume or 'N/A')
@@ -1841,17 +1893,17 @@ Imported: {result[11] or 'N/A'}
 
             # Update visual display for all items
             if status == 'approved':
-                status_text = '✓ Approved'
                 color = QColor(200, 255, 200)  # Light green
             elif status == 'rejected':
-                status_text = '✗ Rejected'
                 color = QColor(255, 200, 200)  # Light red
             else:
-                status_text = '○ Not Graded'
                 color = None
 
             for item in items:
-                item.setText(11, status_text)
+                # Refresh the centered status pill widget for this row.
+                self.catalog_tree.setItemWidget(
+                    item, 11, self._create_status_pill(status)
+                )
                 if color:
                     for col in range(14):
                         item.setBackground(col, QBrush(color))
@@ -1906,15 +1958,15 @@ Imported: {result[11] or 'N/A'}
             if project_id:
                 self.project_manager.recalculate_project_counts(project_id)
 
-            # Update the item display
+            # Update the item display with a refreshed, centered status pill.
+            self.catalog_tree.setItemWidget(
+                item, 11, self._create_status_pill(status)
+            )
             if status == 'approved':
-                item.setText(11, '✓ Approved')
                 color = QColor(200, 255, 200)  # Light green
             elif status == 'rejected':
-                item.setText(11, '✗ Rejected')
                 color = QColor(255, 200, 200)  # Light red
             else:
-                item.setText(11, '○ Not Graded')
                 color = None
 
             # Update item color
