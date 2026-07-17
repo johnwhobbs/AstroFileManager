@@ -1323,14 +1323,16 @@ Imported: {result[11] or 'N/A'}
 
         imagetyp_lower = imagetyp.lower()
 
-        # Master frames - purple/magenta
-        if 'master' in imagetyp_lower:
-            return QColor(200, 150, 255)  # Light purple
+        # Issue #253: The green and purple row coloring based on normal and
+        # master frames has been removed. Master frames (previously purple) and
+        # light/"normal" frames (previously green) are now left uncolored.
+        # Master frames are checked first so that names like "Master Dark" are
+        # not accidentally colored by the calibration rules below.
+        if 'master' in imagetyp_lower or 'light' in imagetyp_lower:
+            return None
 
-        # Regular frames
-        if 'light' in imagetyp_lower:
-            return QColor(200, 255, 200)  # Light green
-        elif 'dark' in imagetyp_lower:
+        # Regular calibration frames
+        if 'dark' in imagetyp_lower:
             return QColor(220, 220, 255)  # Light blue
         elif 'flat' in imagetyp_lower:
             return QColor(255, 240, 200)  # Light orange/yellow
