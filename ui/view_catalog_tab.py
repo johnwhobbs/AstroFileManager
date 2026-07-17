@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
     QGroupBox, QLineEdit, QComboBox, QPushButton, QMenu, QMessageBox,
     QFileDialog, QApplication, QProgressBar, QSplitter, QTableWidget,
-    QTableWidgetItem, QHeaderView, QScrollArea, QAbstractItemView
+    QTableWidgetItem, QHeaderView, QScrollArea, QAbstractItemView, QSizePolicy
 )
 
 # Import CSV exporter and background workers
@@ -85,6 +85,18 @@ class ViewCatalogTab(QWidget):
         stats_layout.addWidget(self.catalog_date_range_card)
 
         stats_group.setLayout(stats_layout)
+
+        # Keep the Database Summary tiles at their natural (compact) height.
+        #
+        # Previously the frame listing tree sat directly in this vertical layout
+        # and, because a tree expands vertically, it absorbed all the spare
+        # vertical space, leaving the summary group at its preferred height.
+        # Now that the tree lives inside the multi-window splitter below, the
+        # summary group would otherwise stretch to fill space and enlarge the
+        # tiles. Setting a Maximum vertical size policy caps the group at its
+        # preferred height, restoring the tiles to their previous size.
+        stats_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+
         layout.addWidget(stats_group)
 
         # Search and filter controls
