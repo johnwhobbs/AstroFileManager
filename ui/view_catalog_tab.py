@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 # Import CSV exporter and background workers
+from ui.status_pill_delegate import StatusPillDelegate
 from import_export.csv_exporter import CSVExporter
 from ui.background_workers import CatalogLoaderWorker
 from ui.assign_session_dialog import AssignSessionDialog
@@ -266,12 +267,20 @@ class ViewCatalogTab(QWidget):
         for col in self.fits_header_columns:
             self.catalog_tree.setColumnHidden(col, True)
 
+        # Render the Status column (index 11) as a rounded "pill" badge that
+        # hugs the status text instead of coloring the whole cell.
+        self.status_column_index = 11
+        self.catalog_tree.setItemDelegateForColumn(
+            self.status_column_index, StatusPillDelegate(self.catalog_tree)
+        )
+
         # Make columns resizable and movable
         self.catalog_tree.header().setSectionsMovable(True)
         self.catalog_tree.header().setStretchLastSection(True)
 
-        # Set initial column widths or restore from settings
-        default_widths = [300, 120, 80, 80, 60, 70, 100, 70, 60, 60, 60, 80, 120, 120]
+        # Set initial column widths or restore from settings. The Status column
+        # (index 11) is a little wider so the pill has room to hug its text.
+        default_widths = [300, 120, 80, 80, 60, 70, 100, 70, 60, 60, 60, 120, 120, 120]
         for col in range(14):
             saved_width = self.settings.value(f'catalog_tree_col_{col}')
             if saved_width:
