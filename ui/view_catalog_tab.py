@@ -8,21 +8,106 @@ import subprocess
 import platform
 from typing import Callable, List, Optional
 
-from PyQt6.QtCore import Qt, QSettings
-from PyQt6.QtGui import QColor, QBrush, QImage, QPixmap
+from PyQt6.QtCore import Qt, QSettings, QRectF
+from PyQt6.QtGui import QColor, QBrush, QImage, QPixmap, QPainter
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
     QGroupBox, QLineEdit, QComboBox, QPushButton, QMenu, QMessageBox,
     QFileDialog, QApplication, QProgressBar, QSplitter, QTableWidget,
-    QTableWidgetItem, QHeaderView, QScrollArea, QAbstractItemView, QSizePolicy
+    QTableWidgetItem, QHeaderView, QScrollArea, QAbstractItemView, QSizePolicy,
+    QStyledItemDelegate, QStyle
 )
 
 # Import CSV exporter and background workers
+from ui.status_pill_delegate import StatusPillDelegate
 from import_export.csv_exporter import CSVExporter
 from ui.background_workers import CatalogLoaderWorker
 from ui.assign_session_dialog import AssignSessionDialog
 from core.project_manager import ProjectManager
 from utils.fits_reader import read_header_keywords, get_image_data
+
+
+# Data role used to store the raw approval status ('approved', 'rejected' or
+# 'not_graded') on the Status column of each frame item. The pill delegate reads
+# this value to decide which color to paint.
+STATUS_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+
+
+class StatusPillDelegate(QStyledItemDelegate):
+    """
+    Custom item delegate that renders the approval status column as a colored
+    "pill" (a rounded rectangle) containing the status text.
+
+    Instead of coloring the whole row, the status is shown as a small badge:
+        - Green  for 'approved'
+        - Red    for 'rejected'
+        - Yellow for 'not_graded' (also used for any unknown value)
+    """
+
+    # Map each approval status to a (pill background, text) color pair.
+    _STATUS_COLORS = {
+        'approved': (QColor(76, 175, 80), QColor(255, 255, 255)),    # Green pill
+        'rejected': (QColor(229, 57, 53), QColor(255, 255, 255)),    # Red pill
+        'not_graded': (QColor(253, 216, 53), QColor(33, 33, 33)),    # Yellow pill
+    }
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        """
+        Paint a colored pill containing the status text for the given cell.
+
+        Cells without a status (for example group/date rows or calibration
+        frames) are painted using the default delegate behaviour.
+
+        Args:
+            painter: The QPainter used to draw the cell.
+            option: Style options describing the cell (geometry, state, palette).
+            index: The model index for the cell being painted.
+        """
+        status = index.data(STATUS_ROLE)
+        text = index.data(Qt.ItemDataRole.DisplayRole)
+
+        # No status/text means this is not a gradable frame row - draw normally.
+        if not status or not text:
+            super().paint(painter, option, index)
+            return
+
+        # Pick the pill colors, defaulting to the "not graded" (yellow) style.
+        bg_color, text_color = self._STATUS_COLORS.get(
+            status, self._STATUS_COLORS['not_graded']
+        )
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Fill the cell background so the area around the pill matches the rest
+        # of the row: the selection highlight when selected, otherwise the row's
+        # own background brush (e.g. the image-type color coding) if it has one.
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(option.rect, option.palette.highlight())
+        else:
+            background = index.data(Qt.ItemDataRole.BackgroundRole)
+            if background is not None:
+                painter.fillRect(option.rect, background)
+
+        # Inset the pill within the cell so it does not touch the cell edges.
+        padding_x = 6.0
+        padding_y = 4.0
+        pill_rect = QRectF(option.rect).adjusted(
+            padding_x, padding_y, -padding_x, -padding_y
+        )
+
+        # Rounded corners equal to half the height produce a pill shape.
+        radius = pill_rect.height() / 2.0
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(bg_color)
+        painter.drawRoundedRect(pill_rect, radius, radius)
+
+        # Draw the status text centered inside the pill.
+        painter.setPen(text_color)
+        painter.drawText(pill_rect, Qt.AlignmentFlag.AlignCenter, text)
+
+        painter.restore()
 
 
 class ViewCatalogTab(QWidget):
@@ -164,6 +249,13 @@ class ViewCatalogTab(QWidget):
             'FWHM', 'Ecc', 'SNR', 'Stars', 'Status', 'Telescope', 'Instrument'
         ])
 
+        # Render the Status column (index 11) as a colored pill instead of
+        # coloring the whole row based on the approval status.
+        self.status_column = 11
+        self.catalog_tree.setItemDelegateForColumn(
+            self.status_column, StatusPillDelegate(self.catalog_tree)
+        )
+
         # Columns whose data comes from the FITS header. These are hidden from the
         # frame listing because that information is now shown in the dedicated FITS
         # Header pane on the right. The underlying data is still stored on each item
@@ -175,12 +267,20 @@ class ViewCatalogTab(QWidget):
         for col in self.fits_header_columns:
             self.catalog_tree.setColumnHidden(col, True)
 
+        # Render the Status column (index 11) as a rounded "pill" badge that
+        # hugs the status text instead of coloring the whole cell.
+        self.status_column_index = 11
+        self.catalog_tree.setItemDelegateForColumn(
+            self.status_column_index, StatusPillDelegate(self.catalog_tree)
+        )
+
         # Make columns resizable and movable
         self.catalog_tree.header().setSectionsMovable(True)
         self.catalog_tree.header().setStretchLastSection(True)
 
-        # Set initial column widths or restore from settings
-        default_widths = [300, 120, 80, 80, 60, 70, 100, 70, 60, 60, 60, 80, 120, 120]
+        # Set initial column widths or restore from settings. The Status column
+        # (index 11) is a little wider so the pill has room to hug its text.
+        default_widths = [300, 120, 80, 80, 60, 70, 100, 70, 60, 60, 60, 120, 120, 120]
         for col in range(14):
             saved_width = self.settings.value(f'catalog_tree_col_{col}')
             if saved_width:
@@ -1192,6 +1292,30 @@ Imported: {result[11] or 'N/A'}
         else:
             self.catalog_date_range_label.setText("N/A")
 
+    def _set_status_pill(self, item: QTreeWidgetItem, approval_status: Optional[str]) -> None:
+        """
+        Set the Status column text and pill data for a frame item.
+
+        The visible text is a friendly label ('Approved', 'Rejected' or
+        'Not Graded') and the raw status key is stored in STATUS_ROLE so the
+        StatusPillDelegate knows which pill color to draw.
+
+        Args:
+            item: The tree widget item representing a frame.
+            approval_status: Raw status from the database ('approved',
+                'rejected', 'not_graded', or None/unknown -> treated as not graded).
+        """
+        # Normalize the raw status into a known key and a display label.
+        if approval_status == 'approved':
+            status_key, label = 'approved', 'Approved'
+        elif approval_status == 'rejected':
+            status_key, label = 'rejected', 'Rejected'
+        else:
+            status_key, label = 'not_graded', 'Not Graded'
+
+        item.setText(self.status_column, label)
+        item.setData(self.status_column, STATUS_ROLE, status_key)
+
     def get_item_color(self, imagetyp: Optional[str]) -> Optional[QColor]:
         """Get color for tree item based on image type."""
         if not imagetyp:
@@ -1199,14 +1323,16 @@ Imported: {result[11] or 'N/A'}
 
         imagetyp_lower = imagetyp.lower()
 
-        # Master frames - purple/magenta
-        if 'master' in imagetyp_lower:
-            return QColor(200, 150, 255)  # Light purple
+        # Issue #253: The green and purple row coloring based on normal and
+        # master frames has been removed. Master frames (previously purple) and
+        # light/"normal" frames (previously green) are now left uncolored.
+        # Master frames are checked first so that names like "Master Dark" are
+        # not accidentally colored by the calibration rules below.
+        if 'master' in imagetyp_lower or 'light' in imagetyp_lower:
+            return None
 
-        # Regular frames
-        if 'light' in imagetyp_lower:
-            return QColor(200, 255, 200)  # Light green
-        elif 'dark' in imagetyp_lower:
+        # Regular calibration frames
+        if 'dark' in imagetyp_lower:
             return QColor(220, 220, 255)  # Light blue
         elif 'flat' in imagetyp_lower:
             return QColor(255, 240, 200)  # Light orange/yellow
@@ -1214,6 +1340,60 @@ Imported: {result[11] or 'N/A'}
             return QColor(255, 220, 220)  # Light red/pink
 
         return None
+
+    def _create_status_pill(self, approval_status: Optional[str]) -> QWidget:
+        """
+        Build a small "pill" widget for the approval status column.
+
+        The colored label is wrapped inside a container widget that uses a
+        centered horizontal layout. This keeps the pill only as wide/tall as
+        the text it holds (plus a little padding) instead of stretching across
+        the entire column, while still centering it inside the cell.
+
+        Args:
+            approval_status: The frame's approval status
+                ('approved', 'rejected', or anything else for not graded).
+
+        Returns:
+            QWidget: A container widget holding the centered status pill.
+        """
+        # Pick the label text and pill colors based on the status.
+        if approval_status == 'approved':
+            text = '✓ Approved'
+            background = '#4caf50'  # Green
+        elif approval_status == 'rejected':
+            text = '✗ Rejected'
+            background = '#f44336'  # Red
+        else:
+            text = '○ Not Graded'
+            background = '#9e9e9e'  # Gray
+
+        # The pill itself is a QLabel styled with rounded corners and padding.
+        # The padding is what gives the pill just enough size to cover the text.
+        pill = QLabel(text)
+        pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pill.setStyleSheet(
+            "QLabel {"
+            f"    background-color: {background};"
+            "    color: white;"
+            "    border-radius: 8px;"
+            "    padding: 2px 8px;"
+            "    font-size: 11px;"
+            "    font-weight: bold;"
+            "}"
+        )
+
+        # Wrap the pill in a container so we can center it within the cell.
+        # A stretch on each side of the pill keeps it from filling the column.
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(0)
+        layout.addStretch()
+        layout.addWidget(pill)
+        layout.addStretch()
+
+        return container
 
     def refresh_catalog_view(self) -> None:
         """Refresh the catalog view using background thread (non-blocking)."""
@@ -1488,33 +1668,21 @@ Imported: {result[11] or 'N/A'}
                 file_item.setText(9, f"{snr:.1f}" if snr is not None else '')
                 file_item.setText(10, f"{star_count}" if star_count is not None else '')
 
-                # Approval status with icon
-                if approval_status == 'approved':
-                    file_item.setText(11, '✓ Approved')
-                elif approval_status == 'rejected':
-                    file_item.setText(11, '✗ Rejected')
-                else:
-                    file_item.setText(11, '○ Not Graded')
+                # Approval status shown as a centered "pill" widget instead of
+                # plain text so the colored label only covers its text.
+                self.catalog_tree.setItemWidget(
+                    file_item, 11, self._create_status_pill(approval_status)
+                )
 
                 file_item.setText(12, telescop or 'N/A')
                 file_item.setText(13, instrume or 'N/A')
 
-                # Apply color coding based on approval status
-                approval_color = None
-                if approval_status == 'approved':
-                    approval_color = QColor(200, 255, 200)  # Light green
-                elif approval_status == 'rejected':
-                    approval_color = QColor(255, 200, 200)  # Light red
-
-                if approval_color:
+                # Apply imagetyp color coding for the rest of the row. The status
+                # is no longer used to color the row - it is shown as a pill.
+                color = self.get_item_color(imagetyp)
+                if color:
                     for col in range(14):
-                        file_item.setBackground(col, QBrush(approval_color))
-                else:
-                    # Apply imagetyp color coding for non-graded frames
-                    color = self.get_item_color(imagetyp)
-                    if color:
-                        for col in range(14):
-                            file_item.setBackground(col, QBrush(color))
+                        file_item.setBackground(col, QBrush(color))
 
         # Mark as loaded by removing lazy_load flag
         item_data['lazy_load'] = False
@@ -1841,17 +2009,17 @@ Imported: {result[11] or 'N/A'}
 
             # Update visual display for all items
             if status == 'approved':
-                status_text = '✓ Approved'
                 color = QColor(200, 255, 200)  # Light green
             elif status == 'rejected':
-                status_text = '✗ Rejected'
                 color = QColor(255, 200, 200)  # Light red
             else:
-                status_text = '○ Not Graded'
                 color = None
 
             for item in items:
-                item.setText(11, status_text)
+                # Refresh the centered status pill widget for this row.
+                self.catalog_tree.setItemWidget(
+                    item, 11, self._create_status_pill(status)
+                )
                 if color:
                     for col in range(14):
                         item.setBackground(col, QBrush(color))
@@ -1906,15 +2074,15 @@ Imported: {result[11] or 'N/A'}
             if project_id:
                 self.project_manager.recalculate_project_counts(project_id)
 
-            # Update the item display
+            # Update the item display with a refreshed, centered status pill.
+            self.catalog_tree.setItemWidget(
+                item, 11, self._create_status_pill(status)
+            )
             if status == 'approved':
-                item.setText(11, '✓ Approved')
                 color = QColor(200, 255, 200)  # Light green
             elif status == 'rejected':
-                item.setText(11, '✗ Rejected')
                 color = QColor(255, 200, 200)  # Light red
             else:
-                item.setText(11, '○ Not Graded')
                 color = None
 
             # Update item color
