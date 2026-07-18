@@ -42,6 +42,18 @@ class CatalogLoaderWorker(QThread):
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
+            # Make sure the calculated image-metric columns exist before we
+            # query them. This lets older databases (created before these
+            # metrics were added) load without raising "no such column" errors.
+            try:
+                from utils.image_metrics import ensure_metric_columns
+                ensure_metric_columns(cursor)
+                conn.commit()
+            except Exception:
+                # Non-fatal: if this fails the query below will surface a
+                # clearer error to the user via error_occurred.
+                pass
+
             # Prepare result dictionary
             result = {
                 'objects': [],
@@ -96,7 +108,8 @@ class CatalogLoaderWorker(QThread):
                     SELECT
                         object, filter, date_loc, filename, imagetyp,
                         exposure, ccd_temp, xbinning, ybinning, telescop, instrume,
-                        fwhm, eccentricity, snr, star_count, approval_status
+                        fwhm, eccentricity, snr, star_count, approval_status,
+                        hfd, sky_flux_mean, star_roundness, num_stars, snr_weight
                     FROM xisf_files
                     WHERE {where_clause}
                     ORDER BY object, filter NULLS FIRST, date_loc DESC, filename
@@ -171,6 +184,104 @@ class CatalogLoaderWorker(QThread):
             calib_data['bias'] = cursor.fetchall()
 
         return calib_data
+
+
+class MetricsCalculationWorker(QThread):
+    """
+    Background worker that calculates image quality metrics for files.
+
+    For each requested file it computes the Half Flux Diameter, Sky Flux Mean,
+    Star Roundness, number of stars and SNR Weight using Astropy and photutils,
+    then stores the results in the database. Running this in a background
+    thread keeps the UI responsive because the calculation can be slow for
+    large images.
+    """
+
+    # Signals
+    progress_updated = pyqtSignal(int, int, str)  # current, total, message
+    finished_calculation = pyqtSignal(int, int)   # processed, errors
+    error_occurred = pyqtSignal(str)              # fatal error message
+
+    def __init__(self, db_path: str, filenames: List[str]):
+        """
+        Initialize the metrics calculation worker.
+
+        Args:
+            db_path: Path to the SQLite database.
+            filenames: List of filenames (as shown in the catalog) to process.
+        """
+        super().__init__()
+        self.db_path = db_path
+        self.filenames = filenames
+
+    def run(self):
+        """Calculate metrics for each file and store them in the database."""
+        # Import here so the worker module does not require photutils to load.
+        from utils.image_metrics import calculate_image_metrics, ensure_metric_columns
+
+        processed = 0
+        errors = 0
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Ensure the metric columns exist before we try to write to them.
+            ensure_metric_columns(cursor)
+            conn.commit()
+
+            total = len(self.filenames)
+
+            for index, filename in enumerate(self.filenames):
+                # Stop early if the user cancelled the operation.
+                if self.isInterruptionRequested():
+                    break
+
+                self.progress_updated.emit(
+                    index + 1, total, f"Calculating metrics: {filename}"
+                )
+
+                # Look up the file path for this filename.
+                cursor.execute(
+                    'SELECT filepath FROM xisf_files WHERE filename = ?',
+                    (filename,)
+                )
+                result = cursor.fetchone()
+
+                if not result or not result[0]:
+                    errors += 1
+                    continue
+
+                filepath = result[0]
+
+                try:
+                    metrics = calculate_image_metrics(filepath)
+
+                    cursor.execute('''
+                        UPDATE xisf_files
+                        SET hfd = ?, sky_flux_mean = ?, star_roundness = ?,
+                            num_stars = ?, snr_weight = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE filename = ?
+                    ''', (
+                        metrics.get('hfd'),
+                        metrics.get('sky_flux_mean'),
+                        metrics.get('star_roundness'),
+                        metrics.get('num_stars'),
+                        metrics.get('snr_weight'),
+                        filename
+                    ))
+                    conn.commit()
+                    processed += 1
+                except Exception:
+                    # Skip this file but keep processing the rest.
+                    errors += 1
+
+            conn.close()
+            self.finished_calculation.emit(processed, errors)
+
+        except Exception as e:
+            self.error_occurred.emit(f"Failed to calculate metrics: {str(e)}")
 
 
 class SessionsLoaderWorker(QThread):
