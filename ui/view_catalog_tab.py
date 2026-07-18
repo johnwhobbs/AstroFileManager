@@ -761,7 +761,12 @@ Imported: {result[11] or 'N/A'}
 
     def _get_filepath_for_item(self, item: QTreeWidgetItem) -> Optional[str]:
         """
-        Look up the full file path for a file tree item using its filename.
+        Look up the full file path for a file tree item.
+
+        The unique file path is stored on each file item when the tree is built,
+        so it is used directly when available. As a fallback (for example if the
+        item pre-dates this behavior) the path is looked up by filename, which
+        may be ambiguous when filenames repeat.
 
         Args:
             item: A file tree item
@@ -769,6 +774,12 @@ Imported: {result[11] or 'N/A'}
         Returns:
             The full file path, or None if the file is not in the database.
         """
+        # Prefer the exact file path stored on the item.
+        item_data = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(item_data, dict) and item_data.get('filepath'):
+            return item_data['filepath']
+
+        # Fallback: resolve by filename (may match more than one row).
         filename = item.text(0)
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -1676,10 +1687,14 @@ Imported: {result[11] or 'N/A'}
                 (obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin,
                  ybin, telescop, instrume, fwhm, eccentricity, snr, star_count,
                  approval_status, hfd, sky_flux_mean, star_roundness, num_stars,
-                 snr_weight) = row
+                 snr_weight, filepath) = row
 
                 file_item = QTreeWidgetItem(date_item)
                 file_item.setText(0, filename)
+                # Store the unique file path on the item so operations like
+                # metric calculation can target the exact frame (filenames are
+                # not unique across nights/targets).
+                file_item.setData(0, Qt.ItemDataRole.UserRole, {'filepath': filepath})
                 file_item.setText(1, imagetyp or 'N/A')
                 file_item.setText(2, filt or 'N/A')
                 file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
@@ -1765,7 +1780,7 @@ Imported: {result[11] or 'N/A'}
         date_item = None
 
         for row in darks_data:
-            exp, temp, xbin, ybin, date_loc, filename, imagetyp, telescop, instrume, actual_temp = row
+            exp, temp, xbin, ybin, date_loc, filename, imagetyp, telescop, instrume, actual_temp, filepath = row
 
             # Create group node if new
             group_key = (exp, temp, xbin, ybin)
@@ -1792,6 +1807,8 @@ Imported: {result[11] or 'N/A'}
             # Add file node
             file_item = QTreeWidgetItem(date_item)
             file_item.setText(0, filename)
+            # Store the unique file path so per-file operations target this frame.
+            file_item.setData(0, Qt.ItemDataRole.UserRole, {'filepath': filepath})
             file_item.setText(1, imagetyp or 'N/A')
             file_item.setText(3, f"{exp:.1f}s" if exp else 'N/A')
             file_item.setText(4, f"{actual_temp:.1f}°C" if actual_temp is not None else 'N/A')
@@ -1805,8 +1822,8 @@ Imported: {result[11] or 'N/A'}
             if color:
                 for col in range(9):
                     file_item.setBackground(col, QBrush(color))
-    
-    
+
+
     def _build_flats_from_data(self, calib_root, flats_data: list) -> None:
         """Build flats tree from pre-loaded data."""
         flat_root = QTreeWidgetItem(calib_root)
@@ -1819,7 +1836,7 @@ Imported: {result[11] or 'N/A'}
         group_item = None
 
         for row in flats_data:
-            date_loc, filt, temp, xbin, ybin, filename, imagetyp, exposure, telescop, instrume, actual_temp = row
+            date_loc, filt, temp, xbin, ybin, filename, imagetyp, exposure, telescop, instrume, actual_temp, filepath = row
 
             # Create date node if new
             if date_loc != current_date:
@@ -1846,6 +1863,8 @@ Imported: {result[11] or 'N/A'}
             # Add file node
             file_item = QTreeWidgetItem(group_item)
             file_item.setText(0, filename)
+            # Store the unique file path so per-file operations target this frame.
+            file_item.setData(0, Qt.ItemDataRole.UserRole, {'filepath': filepath})
             file_item.setText(1, imagetyp or 'N/A')
             file_item.setText(2, filt or 'N/A')
             file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
@@ -1860,8 +1879,8 @@ Imported: {result[11] or 'N/A'}
             if color:
                 for col in range(9):
                     file_item.setBackground(col, QBrush(color))
-    
-    
+
+
     def _build_bias_from_data(self, calib_root, bias_data: list) -> None:
         """Build bias tree from pre-loaded data."""
         bias_root = QTreeWidgetItem(calib_root)
@@ -1874,7 +1893,7 @@ Imported: {result[11] or 'N/A'}
         date_item = None
 
         for row in bias_data:
-            temp, xbin, ybin, date_loc, filename, imagetyp, exposure, telescop, instrume, actual_temp, filt = row
+            temp, xbin, ybin, date_loc, filename, imagetyp, exposure, telescop, instrume, actual_temp, filt, filepath = row
 
             # Create group node if new
             group_key = (temp, xbin, ybin)
@@ -1899,6 +1918,8 @@ Imported: {result[11] or 'N/A'}
             # Add file node
             file_item = QTreeWidgetItem(date_item)
             file_item.setText(0, filename)
+            # Store the unique file path so per-file operations target this frame.
+            file_item.setData(0, Qt.ItemDataRole.UserRole, {'filepath': filepath})
             file_item.setText(1, imagetyp or 'N/A')
             file_item.setText(2, filt or 'N/A')
             file_item.setText(3, f"{exposure:.1f}s" if exposure else 'N/A')
@@ -1986,19 +2007,35 @@ Imported: {result[11] or 'N/A'}
         if not items:
             return
 
-        # Collect the filenames from the selected tree items.
-        filenames = [item.text(0) for item in items]
+        # Collect the unique file path for each selected tree item. Using the
+        # full path (rather than the filename) guarantees the metrics are stored
+        # against the exact frame the user selected, even when several frames
+        # share the same filename.
+        filepaths = []
+        for item in items:
+            filepath = self._get_filepath_for_item(item)
+            if filepath:
+                filepaths.append(filepath)
+
+        # Nothing to do if none of the selected items could be resolved to a
+        # file on disk (for example a group node was passed in by mistake).
+        if not filepaths:
+            QMessageBox.warning(
+                self, 'Calculate Image Metrics',
+                'Could not determine the file path for the selected item(s).'
+            )
+            return
 
         # Set up a modal progress dialog the user can cancel.
         progress = QProgressDialog(
-            "Calculating image metrics...", "Cancel", 0, len(filenames), self
+            "Calculating image metrics...", "Cancel", 0, len(filepaths), self
         )
         progress.setWindowTitle("Calculate Image Metrics")
         progress.setMinimumDuration(0)
         progress.setValue(0)
 
         # Create the background worker.
-        self.metrics_worker = MetricsCalculationWorker(self.db_path, filenames)
+        self.metrics_worker = MetricsCalculationWorker(self.db_path, filepaths)
 
         def on_progress(current: int, total: int, message: str) -> None:
             """Update the progress dialog as each file is processed."""
