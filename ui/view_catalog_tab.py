@@ -15,13 +15,13 @@ from PyQt6.QtWidgets import (
     QGroupBox, QLineEdit, QComboBox, QPushButton, QMenu, QMessageBox,
     QFileDialog, QApplication, QProgressBar, QSplitter, QTableWidget,
     QTableWidgetItem, QHeaderView, QScrollArea, QAbstractItemView, QSizePolicy,
-    QStyledItemDelegate, QStyle
+    QStyledItemDelegate, QStyle, QProgressDialog
 )
 
 # Import CSV exporter and background workers
 from ui.status_pill_delegate import StatusPillDelegate
 from import_export.csv_exporter import CSVExporter
-from ui.background_workers import CatalogLoaderWorker
+from ui.background_workers import CatalogLoaderWorker, MetricsCalculationWorker
 from ui.assign_session_dialog import AssignSessionDialog
 from core.project_manager import ProjectManager
 from utils.fits_reader import read_header_keywords, get_image_data
@@ -241,12 +241,20 @@ class ViewCatalogTab(QWidget):
         self.catalog_progress_widget = progress_widget
         layout.addWidget(progress_widget)
 
-        # Tree widget with expanded columns
+        # Tree widget with expanded columns.
+        #
+        # Columns 14-18 hold the image quality metrics that AstroFileManager
+        # now calculates itself (using Astropy and photutils): Half Flux
+        # Diameter, Sky Flux Mean, Star Roundness, number of detected stars and
+        # a relative SNR Weight. They are appended at the end so the existing
+        # column indices (in particular the Status pill at index 11) do not
+        # change.
         self.catalog_tree = QTreeWidget()
-        self.catalog_tree.setColumnCount(14)
+        self.catalog_tree.setColumnCount(19)
         self.catalog_tree.setHeaderLabels([
             'Name', 'Image Type', 'Filter', 'Exposure', 'Temp', 'Binning', 'Date',
-            'FWHM', 'Ecc', 'SNR', 'Stars', 'Status', 'Telescope', 'Instrument'
+            'FWHM', 'Ecc', 'SNR', 'Stars', 'Status', 'Telescope', 'Instrument',
+            'HFD', 'Sky Flux', 'Roundness', '# Stars', 'SNR Weight'
         ])
 
         # Render the Status column (index 11) as a colored pill instead of
@@ -280,8 +288,9 @@ class ViewCatalogTab(QWidget):
 
         # Set initial column widths or restore from settings. The Status column
         # (index 11) is a little wider so the pill has room to hug its text.
-        default_widths = [300, 120, 80, 80, 60, 70, 100, 70, 60, 60, 60, 120, 120, 120]
-        for col in range(14):
+        default_widths = [300, 120, 80, 80, 60, 70, 100, 70, 60, 60, 60, 120, 120, 120,
+                          70, 90, 90, 70, 90]
+        for col in range(self.catalog_tree.columnCount()):
             saved_width = self.settings.value(f'catalog_tree_col_{col}')
             if saved_width:
                 self.catalog_tree.setColumnWidth(col, int(saved_width))
@@ -461,6 +470,14 @@ class ViewCatalogTab(QWidget):
                     bulk_clear_action = menu.addAction(f"○ Clear Grading for {len(light_frames)} Frame(s)")
                     menu.addSeparator()
 
+                # Add action to calculate image quality metrics for all
+                # selected files (HFD, Sky Flux Mean, Roundness, star count,
+                # SNR Weight).
+                bulk_metrics_action = menu.addAction(
+                    f"📊 Calculate Image Metrics for {len(file_items)} File(s)"
+                )
+                menu.addSeparator()
+
                 # Add bulk delete submenu for all file types
                 bulk_delete_menu = menu.addMenu(f"Delete {len(file_items)} File(s)...")
                 bulk_delete_db_only_action = bulk_delete_menu.addAction("From Database Only")
@@ -478,6 +495,8 @@ class ViewCatalogTab(QWidget):
                     self.bulk_reject_frames(light_frames)
                 elif light_frames and action == bulk_clear_action:
                     self.bulk_clear_grading(light_frames)
+                elif action == bulk_metrics_action:
+                    self.calculate_metrics_for_items(file_items)
                 elif action == bulk_delete_db_only_action:
                     self.delete_files_with_options(file_items, delete_from_db=True, delete_from_disk=False)
                 elif action == bulk_delete_disk_only_action:
@@ -513,6 +532,8 @@ class ViewCatalogTab(QWidget):
             open_location_action = menu.addAction("Open File Location")
             menu.addSeparator()
             show_details_action = menu.addAction("Show File Details")
+            # Calculate image quality metrics for this single file.
+            calculate_metrics_action = menu.addAction("📊 Calculate Image Metrics")
             menu.addSeparator()
 
             # Delete submenu with options
@@ -550,6 +571,8 @@ class ViewCatalogTab(QWidget):
                 self.open_file_location(item)
             elif action == show_details_action:
                 self.show_file_details(item)
+            elif action == calculate_metrics_action:
+                self.calculate_metrics_for_items([item])
             elif action == delete_db_only_action:
                 self.delete_files_with_options([item], delete_from_db=True, delete_from_disk=False)
             elif action == delete_disk_only_action:
@@ -1650,7 +1673,10 @@ Imported: {result[11] or 'N/A'}
 
             # Add file nodes for this date
             for row in sorted(date_stats['rows'], key=lambda x: x[3]):  # Sort by filename
-                obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume, fwhm, eccentricity, snr, star_count, approval_status = row
+                (obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin,
+                 ybin, telescop, instrume, fwhm, eccentricity, snr, star_count,
+                 approval_status, hfd, sky_flux_mean, star_roundness, num_stars,
+                 snr_weight) = row
 
                 file_item = QTreeWidgetItem(date_item)
                 file_item.setText(0, filename)
@@ -1677,11 +1703,19 @@ Imported: {result[11] or 'N/A'}
                 file_item.setText(12, telescop or 'N/A')
                 file_item.setText(13, instrume or 'N/A')
 
+                # Calculated image quality metric columns (HFD, Sky Flux Mean,
+                # Star Roundness, number of stars, SNR Weight).
+                file_item.setText(14, f"{hfd:.2f}" if hfd is not None else '')
+                file_item.setText(15, f"{sky_flux_mean:.1f}" if sky_flux_mean is not None else '')
+                file_item.setText(16, f"{star_roundness:.3f}" if star_roundness is not None else '')
+                file_item.setText(17, f"{num_stars}" if num_stars is not None else '')
+                file_item.setText(18, f"{snr_weight:.1f}" if snr_weight is not None else '')
+
                 # Apply imagetyp color coding for the rest of the row. The status
                 # is no longer used to color the row - it is shown as a pill.
                 color = self.get_item_color(imagetyp)
                 if color:
-                    for col in range(14):
+                    for col in range(self.catalog_tree.columnCount()):
                         file_item.setBackground(col, QBrush(color))
 
         # Mark as loaded by removing lazy_load flag
@@ -1937,6 +1971,64 @@ Imported: {result[11] or 'N/A'}
         for i in range(root.childCount()):
             restore_item_state(root.child(i))
 
+    def calculate_metrics_for_items(self, items: list) -> None:
+        """
+        Calculate and store image quality metrics for the given file items.
+
+        This computes the Half Flux Diameter, Sky Flux Mean, Star Roundness,
+        number of stars and SNR Weight for each selected file using Astropy
+        and photutils, storing the results in the database. The work runs in a
+        background thread with a progress dialog so the UI stays responsive.
+
+        Args:
+            items: List of QTreeWidgetItem objects representing files.
+        """
+        if not items:
+            return
+
+        # Collect the filenames from the selected tree items.
+        filenames = [item.text(0) for item in items]
+
+        # Set up a modal progress dialog the user can cancel.
+        progress = QProgressDialog(
+            "Calculating image metrics...", "Cancel", 0, len(filenames), self
+        )
+        progress.setWindowTitle("Calculate Image Metrics")
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        # Create the background worker.
+        self.metrics_worker = MetricsCalculationWorker(self.db_path, filenames)
+
+        def on_progress(current: int, total: int, message: str) -> None:
+            """Update the progress dialog as each file is processed."""
+            progress.setMaximum(total)
+            progress.setValue(current)
+            progress.setLabelText(message)
+
+        def on_finished(processed: int, errors: int) -> None:
+            """Refresh the view and report results when calculation finishes."""
+            progress.close()
+            self.status_callback(
+                f"Metrics calculated for {processed} file(s), {errors} error(s)"
+            )
+            # Reload the catalog so the new metric values appear in the columns.
+            self.refresh_catalog_view()
+
+        def on_error(message: str) -> None:
+            """Show an error message if the calculation fails fatally."""
+            progress.close()
+            QMessageBox.critical(self, 'Error', message)
+
+        # Allow the user to cancel the calculation part-way through.
+        progress.canceled.connect(self.metrics_worker.requestInterruption)
+
+        # Connect worker signals and start the background thread.
+        self.metrics_worker.progress_updated.connect(on_progress)
+        self.metrics_worker.finished_calculation.connect(on_finished)
+        self.metrics_worker.error_occurred.connect(on_error)
+        self.metrics_worker.start()
+
     def approve_frame(self, item: QTreeWidgetItem) -> None:
         """Mark a frame as approved."""
         self._update_approval_status(item, 'approved')
@@ -2015,17 +2107,18 @@ Imported: {result[11] or 'N/A'}
             else:
                 color = None
 
+            column_count = self.catalog_tree.columnCount()
             for item in items:
                 # Refresh the centered status pill widget for this row.
                 self.catalog_tree.setItemWidget(
                     item, 11, self._create_status_pill(status)
                 )
                 if color:
-                    for col in range(14):
+                    for col in range(column_count):
                         item.setBackground(col, QBrush(color))
                 else:
                     # Clear background
-                    for col in range(14):
+                    for col in range(column_count):
                         item.setBackground(col, QBrush())
 
             self.status_callback(f"{len(items)} frame(s) marked as {status}")
@@ -2086,12 +2179,13 @@ Imported: {result[11] or 'N/A'}
                 color = None
 
             # Update item color
+            column_count = self.catalog_tree.columnCount()
             if color:
-                for col in range(14):
+                for col in range(column_count):
                     item.setBackground(col, QBrush(color))
             else:
                 # Clear background to show default
-                for col in range(14):
+                for col in range(column_count):
                     item.setBackground(col, QBrush())
 
             self.status_callback(f"Frame {filename} marked as {status}")
