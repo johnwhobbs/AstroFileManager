@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar,
     QLabel, QGroupBox, QSplitter, QTextBrowser, QMessageBox,
-    QComboBox, QFileDialog, QDialog
+    QComboBox, QFileDialog, QDialog, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QColor, QBrush
@@ -110,6 +110,16 @@ class ProjectsTab(QWidget):
         # holding the summary info pane on top and the detailed sections on the
         # bottom.
         self.projects_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # A horizontal splitter defaults to a "Preferred" vertical size policy,
+        # which means it only asks for its natural (small) height instead of
+        # filling the tab. That left a large empty band at the top and pushed
+        # the toolbar buttons (New Project, Edit Project, etc.) down the page.
+        # Force the splitter to expand vertically so it fills the available
+        # space and the toolbar stays at the top, matching the previous layout.
+        self.projects_splitter.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
 
         # Projects table
         self.projects_table = QTableWidget()
