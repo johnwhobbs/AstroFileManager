@@ -44,6 +44,11 @@ def create_database(db_path='xisf_catalog.db'):
             snr REAL,
             star_count INTEGER,
             background_level REAL,
+            hfd REAL,
+            sky_flux_mean REAL,
+            star_roundness REAL,
+            num_stars INTEGER,
+            snr_weight REAL,
             approval_status TEXT DEFAULT 'not_graded',
             grading_date TEXT,
             grading_notes TEXT,
@@ -212,6 +217,11 @@ def create_database(db_path='xisf_catalog.db'):
     print("  snr (REAL) - Signal-to-noise ratio")
     print("  star_count (INTEGER) - Number of stars")
     print("  background_level (REAL) - Background level")
+    print("  hfd (REAL) - Half Flux Diameter (calculated by AstroFileManager)")
+    print("  sky_flux_mean (REAL) - Sky/background flux mean (calculated)")
+    print("  star_roundness (REAL) - Average star roundness (calculated)")
+    print("  num_stars (INTEGER) - Number of detected stars (calculated)")
+    print("  snr_weight (REAL) - Relative SNR weight (calculated)")
     print("  approval_status (TEXT) - Grading status (not_graded/approved/rejected)")
     print("  grading_date (TEXT) - Date graded")
     print("  grading_notes (TEXT) - Grading notes")

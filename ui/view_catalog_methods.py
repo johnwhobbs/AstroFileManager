@@ -145,7 +145,9 @@ def _build_light_frames_from_data(self, light_data: list) -> None:
 
     # First pass: aggregate counts
     for row in light_data:
-        obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume, fwhm, eccentricity, snr, star_count, approval_status = row
+        (obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin,
+         telescop, instrume, fwhm, eccentricity, snr, star_count, approval_status,
+         hfd, sky_flux_mean, star_roundness, num_stars, snr_weight) = row
 
         if obj not in obj_files:
             obj_files[obj] = {'count': 0, 'exposure': 0}
@@ -166,7 +168,9 @@ def _build_light_frames_from_data(self, light_data: list) -> None:
 
     # Second pass: build tree
     for row in light_data:
-        obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin, telescop, instrume, fwhm, eccentricity, snr, star_count, approval_status = row
+        (obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin, ybin,
+         telescop, instrume, fwhm, eccentricity, snr, star_count, approval_status,
+         hfd, sky_flux_mean, star_roundness, num_stars, snr_weight) = row
 
         # Create object node if new
         if obj != current_obj:
@@ -226,6 +230,14 @@ def _build_light_frames_from_data(self, light_data: list) -> None:
         file_item.setText(12, telescop or 'N/A')
         file_item.setText(13, instrume or 'N/A')
 
+        # Calculated image quality metric columns (HFD, Sky Flux Mean,
+        # Star Roundness, number of stars, SNR Weight).
+        file_item.setText(14, f"{hfd:.2f}" if hfd is not None else '')
+        file_item.setText(15, f"{sky_flux_mean:.1f}" if sky_flux_mean is not None else '')
+        file_item.setText(16, f"{star_roundness:.3f}" if star_roundness is not None else '')
+        file_item.setText(17, f"{num_stars}" if num_stars is not None else '')
+        file_item.setText(18, f"{snr_weight:.1f}" if snr_weight is not None else '')
+
         # Apply color coding based on approval status
         approval_color = None
         if approval_status == 'approved':
@@ -233,14 +245,15 @@ def _build_light_frames_from_data(self, light_data: list) -> None:
         elif approval_status == 'rejected':
             approval_color = QColor(255, 200, 200)  # Light red
 
+        column_count = self.catalog_tree.columnCount()
         if approval_color:
-            for col in range(14):
+            for col in range(column_count):
                 file_item.setBackground(col, QBrush(approval_color))
         else:
             # Apply imagetyp color coding for non-graded frames
             color = self.get_item_color(imagetyp)
             if color:
-                for col in range(14):
+                for col in range(column_count):
                     file_item.setBackground(col, QBrush(color))
 
 

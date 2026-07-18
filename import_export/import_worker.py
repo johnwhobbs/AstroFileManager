@@ -26,6 +26,11 @@ if parent_dir not in sys.path:
 
 from constants import IMPORT_BATCH_SIZE, DATE_OFFSET_HOURS
 from utils.fits_reader import read_fits_keywords as read_fits_file
+from utils.image_metrics import (
+    calculate_image_metrics,
+    ensure_metric_columns,
+    METRIC_KEYS,
+)
 
 
 def generate_organized_path(
@@ -380,6 +385,17 @@ class ImportWorker(QThread):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
+        # Make sure the calculated image-metric columns exist. This is an
+        # idempotent, lightweight migration so older databases gain the new
+        # columns automatically on the next import.
+        try:
+            ensure_metric_columns(cursor)
+            conn.commit()
+        except Exception:
+            # If the migration fails we still continue with the import; the
+            # metric writes below are wrapped in their own error handling.
+            pass
+
         # Use batch processing for better performance
         batch_size = IMPORT_BATCH_SIZE
         batch_data = []
@@ -449,14 +465,34 @@ class ImportWorker(QThread):
                             self.progress.emit(i + 1, len(self.files), f"⚠️  Organization failed for {basename}: {str(e)} - using original path")
                             # Don't increment errors, just continue with original path
 
-                    # Add to batch
+                    # Calculate image quality metrics (Half Flux Diameter, Sky
+                    # Flux Mean, Star Roundness, number of stars and SNR Weight).
+                    # These are only meaningful for light frames, so calibration
+                    # frames (dark/flat/bias) are skipped to save time.
+                    metrics = {key: None for key in METRIC_KEYS}
+                    if not is_calibration:
+                        try:
+                            self.progress.emit(
+                                i + 1, len(self.files),
+                                f"Calculating metrics: {filename}"
+                            )
+                            metrics = calculate_image_metrics(filepath)
+                        except Exception:
+                            # If metric calculation fails, keep the None values
+                            # so the file is still imported without metrics.
+                            metrics = {key: None for key in METRIC_KEYS}
+
+                    # Add to batch (base keywords followed by calculated metrics)
                     batch_data.append((
                         file_hash, filepath, filename,
                         keywords.get('TELESCOP'), keywords.get('INSTRUME'),
                         obj, keywords.get('FILTER'),
                         keywords.get('IMAGETYP'), keywords.get('EXPOSURE'),
                         keywords.get('CCD-TEMP'), keywords.get('XBINNING'),
-                        keywords.get('YBINNING'), date_loc
+                        keywords.get('YBINNING'), date_loc,
+                        metrics.get('hfd'), metrics.get('sky_flux_mean'),
+                        metrics.get('star_roundness'), metrics.get('num_stars'),
+                        metrics.get('snr_weight')
                     ))
 
                     # Process batch when it reaches batch_size or on last file
@@ -477,6 +513,8 @@ class ImportWorker(QThread):
                                     SET filepath = ?, filename = ?, telescop = ?, instrume = ?,
                                         object = ?, filter = ?, imagetyp = ?, exposure = ?,
                                         ccd_temp = ?, xbinning = ?, ybinning = ?, date_loc = ?,
+                                        hfd = ?, sky_flux_mean = ?, star_roundness = ?,
+                                        num_stars = ?, snr_weight = ?,
                                         updated_at = CURRENT_TIMESTAMP
                                     WHERE file_hash = ?
                                 ''', data[1:] + (file_hash,))
@@ -484,8 +522,9 @@ class ImportWorker(QThread):
                                 cursor.execute('''
                                     INSERT INTO xisf_files
                                     (file_hash, filepath, filename, telescop, instrume, object,
-                                     filter, imagetyp, exposure, ccd_temp, xbinning, ybinning, date_loc)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     filter, imagetyp, exposure, ccd_temp, xbinning, ybinning, date_loc,
+                                     hfd, sky_flux_mean, star_roundness, num_stars, snr_weight)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 ''', data)
 
                         conn.commit()
