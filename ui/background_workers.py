@@ -112,7 +112,7 @@ class CatalogLoaderWorker(QThread):
                     SELECT
                         object, filter, date_loc, filename, imagetyp,
                         exposure, ccd_temp, xbinning, ybinning, telescop, instrume,
-                        fwhm, eccentricity, snr, star_count, approval_status,
+                        approval_status,
                         hfd, sky_flux_mean, star_roundness, num_stars, snr_weight,
                         filepath
                     FROM xisf_files
