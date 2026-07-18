@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar,
     QLabel, QGroupBox, QSplitter, QTextBrowser, QMessageBox,
-    QComboBox, QFileDialog, QDialog
+    QComboBox, QFileDialog, QDialog, QSizePolicy
 )
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QColor, QBrush
@@ -96,8 +96,30 @@ class ProjectsTab(QWidget):
 
         layout.addLayout(toolbar)
 
-        # Splitter for projects list and details
-        self.projects_splitter = QSplitter(Qt.Orientation.Vertical)
+        # Build the multi-window layout for the Projects tab.
+        #
+        # The tab is split into three windows, mirroring the View Catalog tab:
+        #   - Left: the list of projects by name (the projects table below).
+        #   - Upper right: summary info for the selected project (Project Name,
+        #     Object, Year and Status).
+        #   - Lower right: the detailed sections for the selected project
+        #     (Filter Goals Progress, Master Light Frames and Next Steps).
+        #
+        # A horizontal splitter separates the project list (left) from the
+        # details area (right). The details area is itself a vertical splitter
+        # holding the summary info pane on top and the detailed sections on the
+        # bottom.
+        self.projects_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # A horizontal splitter defaults to a "Preferred" vertical size policy,
+        # which means it only asks for its natural (small) height instead of
+        # filling the tab. That left a large empty band at the top and pushed
+        # the toolbar buttons (New Project, Edit Project, etc.) down the page.
+        # Force the splitter to expand vertically so it fills the available
+        # space and the toolbar stays at the top, matching the previous layout.
+        self.projects_splitter.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
 
         # Projects table
         self.projects_table = QTableWidget()
@@ -166,14 +188,35 @@ class ProjectsTab(QWidget):
 
         self.projects_splitter.addWidget(self.projects_table)
 
-        # Project details panel
-        details_panel = QWidget()
-        details_layout = QVBoxLayout(details_panel)
+        # Right-hand side: summary info (top) and detailed sections (bottom).
+        # A vertical splitter lets the user resize the two right-hand windows.
+        self.details_splitter = QSplitter(Qt.Orientation.Vertical)
 
-        # Project info section
+        # --- Project info pane (upper right) ---
+        # Shows the Project Name, Object, Year and Status of the selected
+        # project.
+        self.info_group = QGroupBox("Project Info")
+        info_layout = QVBoxLayout(self.info_group)
         self.info_label = QLabel("Select a project to view details")
         self.info_label.setWordWrap(True)
-        details_layout.addWidget(self.info_label)
+        # Center the project info both horizontally and vertically so the
+        # details read as a tidy, focused summary block (issue #260).
+        self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Increase the base font size so the project information is easier
+        # to read at a glance.
+        info_font = self.info_label.font()
+        info_font.setPointSize(12)
+        self.info_label.setFont(info_font)
+        # The info label lives inside the "Project Info" group box, which is
+        # the top pane of the right-hand splitter.
+        info_layout.addWidget(self.info_label)
+
+        # --- Detailed sections pane (lower right) ---
+        # A single container widget holds the goals/master-frames/next-steps
+        # splitter and the action buttons. This becomes the bottom pane of the
+        # right-hand splitter.
+        details_panel = QWidget()
+        details_layout = QVBoxLayout(details_panel)
 
         # Create a splitter for goals, master frames, and next steps sections
         self.details_content_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -207,7 +250,11 @@ class ProjectsTab(QWidget):
         # Connect splitter movement to save settings
         self.details_content_splitter.splitterMoved.connect(self.save_details_content_splitter_state)
 
-        details_layout.addWidget(self.details_content_splitter)
+        # Give the content splitter a stretch factor of 1 so the goals,
+        # master frames, and next steps windows expand to fill all the
+        # available vertical space. This pushes the action buttons below
+        # (see issue #261), giving these windows as much room as possible.
+        details_layout.addWidget(self.details_content_splitter, 1)
 
         # Action buttons - Data import and pre-processing workflow
         action_buttons = QHBoxLayout()
@@ -233,14 +280,30 @@ class ProjectsTab(QWidget):
         action_buttons.addWidget(self.mark_complete_btn)
 
         action_buttons.addStretch()
+
+        # Add the action buttons at the very bottom of the details panel.
+        # No trailing vertical stretch is added after them so the content
+        # splitter above keeps all the extra space (issue #261).
         details_layout.addLayout(action_buttons)
 
-        details_layout.addStretch()
         self.projects_splitter.addWidget(details_panel)
 
-        # Set initial proportions: 70% for projects table, 30% for details
-        # Use 400:200 ratio to give more space to the projects list
-        self.projects_splitter.setSizes([400, 200])
+        # Add the detailed sections pane to the right-hand vertical splitter and
+        # give the two right-hand windows a sensible starting split (a smaller
+        # summary pane on top, larger detail pane on the bottom).
+        self.details_splitter.addWidget(self.info_group)
+        self.details_splitter.addWidget(details_panel)
+        self.details_splitter.setSizes([150, 450])
+
+        # Save the right-hand splitter position when the user drags it.
+        self.details_splitter.splitterMoved.connect(self.save_details_splitter_state)
+
+        # Add the right-hand details area to the main horizontal splitter.
+        self.projects_splitter.addWidget(self.details_splitter)
+
+        # Set initial proportions: give the project list and the details area
+        # a roughly even split, matching the View Catalog tab layout.
+        self.projects_splitter.setSizes([400, 500])
 
         # Connect splitter movement to save settings
         self.projects_splitter.splitterMoved.connect(self.save_splitter_state)
@@ -367,13 +430,29 @@ class ProjectsTab(QWidget):
             return
 
         # Update info label
-        info_html = f"<h3>{project.name}</h3>"
-        info_html += f"<p><b>Object:</b> {project.object_name}</p>"
+        # Build the details as centered HTML with larger fonts so the project
+        # information is easy to read and neatly centered (issue #260). The
+        # QLabel alignment centers the block, and the inline text-align styles
+        # ensure each line of HTML content is centered too.
+        info_html = f"<h2 style='text-align:center;'>{project.name}</h2>"
+        info_html += (
+            f"<p style='text-align:center; font-size:14px;'>"
+            f"<b>Object:</b> {project.object_name}</p>"
+        )
         if project.description:
-            info_html += f"<p><b>Description:</b> {project.description}</p>"
+            info_html += (
+                f"<p style='text-align:center; font-size:14px;'>"
+                f"<b>Description:</b> {project.description}</p>"
+            )
         if project.year:
-            info_html += f"<p><b>Year:</b> {project.year}</p>"
-        info_html += f"<p><b>Status:</b> {project.status.title()}</p>"
+            info_html += (
+                f"<p style='text-align:center; font-size:14px;'>"
+                f"<b>Year:</b> {project.year}</p>"
+            )
+        info_html += (
+            f"<p style='text-align:center; font-size:14px;'>"
+            f"<b>Status:</b> {project.status.title()}</p>"
+        )
 
         self.info_label.setText(info_html)
 
@@ -797,7 +876,8 @@ class ProjectsTab(QWidget):
         sizes = self.projects_splitter.sizes()
         self.settings.setValue('projects_splitter_sizes', sizes)
 
-        # Also save the details content splitter state
+        # Also save the right-hand and details content splitter states
+        self.save_details_splitter_state()
         self.save_details_content_splitter_state()
 
     def restore_splitter_state(self) -> None:
@@ -808,8 +888,22 @@ class ProjectsTab(QWidget):
             sizes = [int(s) for s in saved_sizes]
             self.projects_splitter.setSizes(sizes)
 
-        # Also restore the details content splitter state
+        # Also restore the right-hand and details content splitter states
+        self.restore_details_splitter_state()
         self.restore_details_content_splitter_state()
+
+    def save_details_splitter_state(self) -> None:
+        """Save the right-hand (info/details) splitter sizes to settings."""
+        sizes = self.details_splitter.sizes()
+        self.settings.setValue('projects_details_splitter_sizes', sizes)
+
+    def restore_details_splitter_state(self) -> None:
+        """Restore the right-hand (info/details) splitter sizes from settings."""
+        saved_sizes = self.settings.value('projects_details_splitter_sizes')
+        if saved_sizes:
+            # Convert to integers (QSettings may return strings)
+            sizes = [int(s) for s in saved_sizes]
+            self.details_splitter.setSizes(sizes)
 
     def save_details_content_splitter_state(self) -> None:
         """Save the details content splitter sizes to settings."""
