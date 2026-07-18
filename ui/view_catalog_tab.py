@@ -243,23 +243,26 @@ class ViewCatalogTab(QWidget):
 
         # Tree widget with expanded columns.
         #
-        # Columns 14-18 hold the image quality metrics that AstroFileManager
+        # Columns 10-14 hold the image quality metrics that AstroFileManager
         # now calculates itself (using Astropy and photutils): Half Flux
         # Diameter, Sky Flux Mean, Star Roundness, number of detected stars and
-        # a relative SNR Weight. They are appended at the end so the existing
-        # column indices (in particular the Status pill at index 11) do not
-        # change.
+        # a relative SNR Weight.
+        #
+        # The old FWHM/Ecc/SNR/Stars columns (which were imported from
+        # PixInsight's SubFrame Selector) have been removed - see issue #283 -
+        # because those metrics are now calculated natively and shown in the
+        # columns above, so importing them is no longer needed.
         self.catalog_tree = QTreeWidget()
-        self.catalog_tree.setColumnCount(19)
+        self.catalog_tree.setColumnCount(15)
         self.catalog_tree.setHeaderLabels([
             'Name', 'Image Type', 'Filter', 'Exposure', 'Temp', 'Binning', 'Date',
-            'FWHM', 'Ecc', 'SNR', 'Stars', 'Status', 'Telescope', 'Instrument',
+            'Status', 'Telescope', 'Instrument',
             'HFD', 'Sky Flux', 'Roundness', '# Stars', 'SNR Weight'
         ])
 
-        # Render the Status column (index 11) as a colored pill instead of
+        # Render the Status column (index 7) as a colored pill instead of
         # coloring the whole row based on the approval status.
-        self.status_column = 11
+        self.status_column = 7
         self.catalog_tree.setItemDelegateForColumn(
             self.status_column, StatusPillDelegate(self.catalog_tree)
         )
@@ -270,14 +273,14 @@ class ViewCatalogTab(QWidget):
         # (so features like session assignment and image-type detection keep working),
         # it is simply not displayed as a column in the listing.
         # Columns: 1=Image Type, 2=Filter, 3=Exposure, 4=Temp, 5=Binning, 6=Date,
-        #          12=Telescope, 13=Instrument
-        self.fits_header_columns = [1, 2, 3, 4, 5, 6, 12, 13]
+        #          8=Telescope, 9=Instrument
+        self.fits_header_columns = [1, 2, 3, 4, 5, 6, 8, 9]
         for col in self.fits_header_columns:
             self.catalog_tree.setColumnHidden(col, True)
 
-        # Render the Status column (index 11) as a rounded "pill" badge that
+        # Render the Status column (index 7) as a rounded "pill" badge that
         # hugs the status text instead of coloring the whole cell.
-        self.status_column_index = 11
+        self.status_column_index = 7
         self.catalog_tree.setItemDelegateForColumn(
             self.status_column_index, StatusPillDelegate(self.catalog_tree)
         )
@@ -287,8 +290,8 @@ class ViewCatalogTab(QWidget):
         self.catalog_tree.header().setStretchLastSection(True)
 
         # Set initial column widths or restore from settings. The Status column
-        # (index 11) is a little wider so the pill has room to hug its text.
-        default_widths = [300, 120, 80, 80, 60, 70, 100, 70, 60, 60, 60, 120, 120, 120,
+        # (index 7) is a little wider so the pill has room to hug its text.
+        default_widths = [300, 120, 80, 80, 60, 70, 100, 120, 120, 120,
                           70, 90, 90, 70, 90]
         for col in range(self.catalog_tree.columnCount()):
             saved_width = self.settings.value(f'catalog_tree_col_{col}')
@@ -302,11 +305,17 @@ class ViewCatalogTab(QWidget):
         if saved_order:
             # Convert to integers (QSettings may return strings)
             saved_order = [int(idx) for idx in saved_order]
-            for visual_index, logical_index in enumerate(saved_order):
-                self.catalog_tree.header().moveSection(
-                    self.catalog_tree.header().visualIndex(logical_index),
-                    visual_index
-                )
+
+            # Ignore a saved order that does not match the current number of
+            # columns. This can happen after an upgrade that changed the columns
+            # (for example issue #283 removed the FWHM/Ecc/SNR/Stars columns);
+            # applying a stale order would move sections to invalid positions.
+            if len(saved_order) == self.catalog_tree.columnCount():
+                for visual_index, logical_index in enumerate(saved_order):
+                    self.catalog_tree.header().moveSection(
+                        self.catalog_tree.header().visualIndex(logical_index),
+                        visual_index
+                    )
 
         # Connect signals to save settings
         self.catalog_tree.header().sectionResized.connect(self.save_catalog_tree_column_widths)
@@ -1758,9 +1767,8 @@ Imported: {result[11] or 'N/A'}
             # Add file nodes for this date
             for row in sorted(date_stats['rows'], key=lambda x: x[3]):  # Sort by filename
                 (obj, filt, date_loc, filename, imagetyp, exposure, temp, xbin,
-                 ybin, telescop, instrume, fwhm, eccentricity, snr, star_count,
-                 approval_status, hfd, sky_flux_mean, star_roundness, num_stars,
-                 snr_weight, filepath) = row
+                 ybin, telescop, instrume, approval_status, hfd, sky_flux_mean,
+                 star_roundness, num_stars, snr_weight, filepath) = row
 
                 file_item = QTreeWidgetItem(date_item)
                 file_item.setText(0, filename)
@@ -1776,28 +1784,22 @@ Imported: {result[11] or 'N/A'}
                 file_item.setText(5, binning)
                 file_item.setText(6, date_loc or 'N/A')
 
-                # Quality metrics columns
-                file_item.setText(7, f"{fwhm:.2f}" if fwhm is not None else '')
-                file_item.setText(8, f"{eccentricity:.2f}" if eccentricity is not None else '')
-                file_item.setText(9, f"{snr:.1f}" if snr is not None else '')
-                file_item.setText(10, f"{star_count}" if star_count is not None else '')
-
                 # Approval status shown as a centered "pill" widget instead of
                 # plain text so the colored label only covers its text.
                 self.catalog_tree.setItemWidget(
-                    file_item, 11, self._create_status_pill(approval_status)
+                    file_item, 7, self._create_status_pill(approval_status)
                 )
 
-                file_item.setText(12, telescop or 'N/A')
-                file_item.setText(13, instrume or 'N/A')
+                file_item.setText(8, telescop or 'N/A')
+                file_item.setText(9, instrume or 'N/A')
 
                 # Calculated image quality metric columns (HFD, Sky Flux Mean,
                 # Star Roundness, number of stars, SNR Weight).
-                file_item.setText(14, f"{hfd:.2f}" if hfd is not None else '')
-                file_item.setText(15, f"{sky_flux_mean:.1f}" if sky_flux_mean is not None else '')
-                file_item.setText(16, f"{star_roundness:.3f}" if star_roundness is not None else '')
-                file_item.setText(17, f"{num_stars}" if num_stars is not None else '')
-                file_item.setText(18, f"{snr_weight:.1f}" if snr_weight is not None else '')
+                file_item.setText(10, f"{hfd:.2f}" if hfd is not None else '')
+                file_item.setText(11, f"{sky_flux_mean:.1f}" if sky_flux_mean is not None else '')
+                file_item.setText(12, f"{star_roundness:.3f}" if star_roundness is not None else '')
+                file_item.setText(13, f"{num_stars}" if num_stars is not None else '')
+                file_item.setText(14, f"{snr_weight:.1f}" if snr_weight is not None else '')
 
                 # Apply imagetyp color coding for the rest of the row. The status
                 # is no longer used to color the row - it is shown as a pill.
@@ -1888,12 +1890,15 @@ Imported: {result[11] or 'N/A'}
             binning_str = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
             file_item.setText(5, binning_str)
             file_item.setText(6, date_loc or 'N/A')
-            file_item.setText(7, telescop or 'N/A')
-            file_item.setText(8, instrume or 'N/A')
+            # Telescope/Instrument now live at columns 8/9 (columns 7-10 that
+            # previously held the imported FWHM/Ecc/SNR/Stars metrics were
+            # removed in issue #283). Column 7 is the Status pill.
+            file_item.setText(8, telescop or 'N/A')
+            file_item.setText(9, instrume or 'N/A')
 
             color = self.get_item_color(imagetyp)
             if color:
-                for col in range(9):
+                for col in range(self.catalog_tree.columnCount()):
                     file_item.setBackground(col, QBrush(color))
 
 
@@ -1945,12 +1950,15 @@ Imported: {result[11] or 'N/A'}
             binning_str = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
             file_item.setText(5, binning_str)
             file_item.setText(6, date_loc or 'N/A')
-            file_item.setText(7, telescop or 'N/A')
-            file_item.setText(8, instrume or 'N/A')
+            # Telescope/Instrument now live at columns 8/9 (columns 7-10 that
+            # previously held the imported FWHM/Ecc/SNR/Stars metrics were
+            # removed in issue #283). Column 7 is the Status pill.
+            file_item.setText(8, telescop or 'N/A')
+            file_item.setText(9, instrume or 'N/A')
 
             color = self.get_item_color(imagetyp)
             if color:
-                for col in range(9):
+                for col in range(self.catalog_tree.columnCount()):
                     file_item.setBackground(col, QBrush(color))
 
 
@@ -2000,12 +2008,15 @@ Imported: {result[11] or 'N/A'}
             binning_str = f"{int(xbin)}x{int(ybin)}" if xbin and ybin else 'N/A'
             file_item.setText(5, binning_str)
             file_item.setText(6, date_loc or 'N/A')
-            file_item.setText(7, telescop or 'N/A')
-            file_item.setText(8, instrume or 'N/A')
+            # Telescope/Instrument now live at columns 8/9 (columns 7-10 that
+            # previously held the imported FWHM/Ecc/SNR/Stars metrics were
+            # removed in issue #283). Column 7 is the Status pill.
+            file_item.setText(8, telescop or 'N/A')
+            file_item.setText(9, instrume or 'N/A')
 
             color = self.get_item_color(imagetyp)
             if color:
-                for col in range(9):
+                for col in range(self.catalog_tree.columnCount()):
                     file_item.setBackground(col, QBrush(color))
 
     def _save_expanded_state(self) -> set:
@@ -2324,7 +2335,7 @@ Imported: {result[11] or 'N/A'}
             for item in items:
                 # Refresh the centered status pill widget for this row.
                 self.catalog_tree.setItemWidget(
-                    item, 11, self._create_status_pill(status)
+                    item, self.status_column, self._create_status_pill(status)
                 )
                 if color:
                     for col in range(column_count):
@@ -2382,7 +2393,7 @@ Imported: {result[11] or 'N/A'}
 
             # Update the item display with a refreshed, centered status pill.
             self.catalog_tree.setItemWidget(
-                item, 11, self._create_status_pill(status)
+                item, self.status_column, self._create_status_pill(status)
             )
             if status == 'approved':
                 color = QColor(200, 255, 200)  # Light green

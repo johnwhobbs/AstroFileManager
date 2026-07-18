@@ -18,7 +18,6 @@ from core.project_manager import ProjectManager, Project, FilterGoalProgress
 from core.calibration import CalibrationMatcher
 from ui.new_project_dialog import NewProjectDialog
 from ui.export_project_dialog import ExportProjectDialog
-from import_export.subframe_selector_importer import SubFrameSelectorImporter
 
 
 class ProjectsTab(QWidget):
@@ -259,11 +258,6 @@ class ProjectsTab(QWidget):
         # Action buttons - Data import and pre-processing workflow
         action_buttons = QHBoxLayout()
 
-        self.import_quality_btn = QPushButton("Import Quality Data")
-        self.import_quality_btn.clicked.connect(self.import_quality_data)
-        self.import_quality_btn.setVisible(False)
-        action_buttons.addWidget(self.import_quality_btn)
-
         self.import_masters_btn = QPushButton("Import Master Light Frames")
         self.import_masters_btn.clicked.connect(self.import_master_frames)
         self.import_masters_btn.setVisible(False)
@@ -474,7 +468,6 @@ class ProjectsTab(QWidget):
         self.delete_btn.setVisible(True)
 
         # Action buttons (data import and pre-processing workflow)
-        self.import_quality_btn.setVisible(True)  # Always visible when project selected
         self.import_masters_btn.setVisible(True)  # Always visible when project selected
         self.export_files_btn.setVisible(True)  # Always visible when project selected
         self.mark_complete_btn.setVisible(project.status == 'active')
@@ -644,8 +637,11 @@ class ProjectsTab(QWidget):
             steps_html += "</ul></li>"
 
         if needs_grading:
-            steps_html += "<li><b>Grade frames in PixInsight SubFrame Selector</b></li>"
-            steps_html += "<li><b>Import quality data CSV</b></li>"
+            # Frames are now graded directly in the View Catalog tab using the
+            # image metrics that AstroFileManager calculates itself, so importing
+            # quality data from PixInsight SubFrame Selector is no longer needed
+            # (see issue #283).
+            steps_html += "<li><b>Grade frames in the View Catalog tab</b></li>"
 
         if needs_more_approved and not needs_frames:
             steps_html += "<li><b>Capture additional frames to reach approved target:</b><ul>"
@@ -678,7 +674,6 @@ class ProjectsTab(QWidget):
         self.delete_btn.setVisible(False)
 
         # Hide action buttons (data import and pre-processing workflow)
-        self.import_quality_btn.setVisible(False)
         self.import_masters_btn.setVisible(False)
         self.export_files_btn.setVisible(False)
         self.mark_complete_btn.setVisible(False)
@@ -801,53 +796,6 @@ class ProjectsTab(QWidget):
                 QMessageBox.critical(
                     self, "Error", f"Failed to delete project:\n{str(e)}"
                 )
-
-    def import_quality_data(self):
-        """Import quality data from PixInsight SubFrame Selector CSV."""
-        # Select CSV file
-        csv_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select SubFrame Selector CSV",
-            "",
-            "CSV Files (*.csv);;All Files (*)"
-        )
-
-        if not csv_path:
-            return
-
-        try:
-            # Import CSV
-            importer = SubFrameSelectorImporter(self.db_path)
-            stats = importer.import_csv(csv_path, approval_column="Approved")
-
-            # Show results
-            result_msg = (
-                f"Quality data import completed!\n\n"
-                f"Total frames in CSV: {stats['total_csv_frames']}\n"
-                f"Matched in database: {stats['matched']}\n"
-                f"Not found: {stats['not_found']}\n\n"
-                f"Approval Status:\n"
-                f"  Approved: {stats['approved']}\n"
-                f"  Rejected: {stats['rejected']}\n"
-                f"  Not graded: {stats['not_graded']}\n\n"
-                f"Updated projects: {stats['updated_projects']}"
-            )
-
-            QMessageBox.information(self, "Import Complete", result_msg)
-
-            # Refresh to show updated progress
-            self.refresh_projects()
-            if self.selected_project_id:
-                self.show_project_details(self.selected_project_id)
-
-        except FileNotFoundError as e:
-            QMessageBox.critical(self, "File Not Found", str(e))
-        except ValueError as e:
-            QMessageBox.critical(self, "Invalid CSV", str(e))
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Import Failed", f"Failed to import quality data:\n{str(e)}"
-            )
 
     def export_project_files(self):
         """Export project files with calibration frames for processing."""
