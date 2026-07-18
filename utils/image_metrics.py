@@ -86,7 +86,7 @@ def _empty_metrics() -> Dict[str, Optional[float]]:
     return {key: None for key in METRIC_KEYS}
 
 
-def _calculate_hfd(data, sources, background_median, max_stars: int = 100) -> Optional[float]:
+def _calculate_hfd(bg_subtracted_data, sources, max_stars: int = 100) -> Optional[float]:
     """
     Calculate the average Half Flux Diameter (HFD) for the detected stars.
 
@@ -101,9 +101,12 @@ def _calculate_hfd(data, sources, background_median, max_stars: int = 100) -> Op
     result is averaged over the brightest stars in the image.
 
     Args:
-        data: 2D numpy array of image pixel values.
+        bg_subtracted_data: 2D numpy array of image pixel values that has
+                            already had the background median subtracted. This
+                            is the same array passed to ``DAOStarFinder`` so the
+                            detection and HFD measurement stay consistent (no
+                            double subtraction and matching centroids).
         sources: Astropy table of detected sources (from DAOStarFinder).
-        background_median: Median background level to subtract from pixels.
         max_stars: Maximum number of (brightest) stars to use for the average.
 
     Returns:
@@ -129,7 +132,7 @@ def _calculate_hfd(data, sources, background_median, max_stars: int = 100) -> Op
 
         # Half-size of the square cutout taken around each star, in pixels.
         box_half = 8
-        height, width = data.shape
+        height, width = bg_subtracted_data.shape
 
         hfd_values = []
 
@@ -148,11 +151,14 @@ def _calculate_hfd(data, sources, background_median, max_stars: int = 100) -> Op
             if x_max - x_min < 3 or y_max - y_min < 3:
                 continue
 
-            cutout = data[y_min:y_max, x_min:x_max].astype(float)
+            # Take an explicit copy of the slice so clipping negatives below
+            # does not modify (or raise a warning on) the shared background-
+            # subtracted array, which is only a view into the original data.
+            cutout = bg_subtracted_data[y_min:y_max, x_min:x_max].astype(float).copy()
 
-            # Subtract the background and clip negatives to zero so noise
-            # pixels below the background do not distort the weighting.
-            cutout = cutout - background_median
+            # The background has already been subtracted globally, so here we
+            # only clip negatives to zero so noise pixels below the background
+            # do not distort the flux-weighting.
             cutout[cutout < 0] = 0
 
             total_flux = cutout.sum()
@@ -214,10 +220,29 @@ def calculate_metrics_from_data(data) -> Dict[str, Optional[float]]:
         # If the image has multiple channels (e.g. shape (H, W, 3) or (3, H, W)),
         # reduce it to a single 2D plane so the detection routines work.
         if data.ndim == 3:
-            # Assume the smallest axis is the channel axis and average it out
-            # to get a luminance-like plane.
+            # Assume the smallest axis is the channel axis.
             channel_axis = int(np.argmin(data.shape))
-            data = data.mean(axis=channel_axis)
+
+            if data.shape[channel_axis] == 3:
+                # For a true 3-channel colour image, combine the Red, Green and
+                # Blue channels using the standard CIE luminance weights
+                # (Y = 0.299*R + 0.587*G + 0.114*B). This preserves star
+                # profiles far better than a uniform average, which over-weights
+                # the noisier blue channel.
+                cie_weights = np.array([0.299, 0.587, 0.114], dtype=float)
+
+                if channel_axis == 0:
+                    # Shape is (3, H, W): move the channel axis to the end so we
+                    # can apply the weights with a simple dot product.
+                    data = np.moveaxis(data, 0, -1)
+
+                # After the (possible) reorientation the channel axis is last,
+                # so the dot product collapses it into a single 2D plane.
+                data = np.dot(data, cie_weights)
+            else:
+                # Not a standard 3-channel image (e.g. a stacked mono cube):
+                # fall back to a plain average to get a luminance-like plane.
+                data = data.mean(axis=channel_axis)
 
         if data.ndim != 2:
             return metrics
@@ -233,6 +258,12 @@ def calculate_metrics_from_data(data) -> Dict[str, Optional[float]]:
         # Sky Flux Mean is the sigma-clipped mean background level.
         metrics["sky_flux_mean"] = float(mean)
 
+        # Subtract the background once, globally, right after computing the
+        # statistics. Using this single background-subtracted array for both
+        # detection and the HFD measurement avoids double subtraction and keeps
+        # the star centroids consistent between the two steps.
+        bg_subtracted_data = data - median
+
         # Guard against a completely flat image where std is zero, which would
         # make star detection meaningless and could cause divide-by-zero.
         if std <= 0:
@@ -243,7 +274,7 @@ def calculate_metrics_from_data(data) -> Dict[str, Optional[float]]:
         # and the threshold is set well above the background noise so we only
         # pick up real stars.
         finder = DAOStarFinder(fwhm=3.0, threshold=5.0 * std)
-        sources = finder(data - median)
+        sources = finder(bg_subtracted_data)
 
         if sources is None or len(sources) == 0:
             # No stars found - record a star count of zero and stop here.
@@ -291,8 +322,9 @@ def calculate_metrics_from_data(data) -> Dict[str, Optional[float]]:
             median_peak = float(np.median(peaks))
             metrics["snr_weight"] = float(median_peak / std)
 
-        # Half Flux Diameter, averaged over the brightest stars.
-        metrics["hfd"] = _calculate_hfd(data, sources, median)
+        # Half Flux Diameter, averaged over the brightest stars. We reuse the
+        # same background-subtracted array that was used for detection.
+        metrics["hfd"] = _calculate_hfd(bg_subtracted_data, sources)
 
     except Exception:
         # If anything unexpected happens, return whatever we managed to
