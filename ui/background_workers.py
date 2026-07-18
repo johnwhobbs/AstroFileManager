@@ -104,12 +104,17 @@ class CatalogLoaderWorker(QThread):
 
                 where_clause = ' AND '.join(where_conditions)
 
+                # ``filepath`` is included last so it can be stored on each
+                # file tree item. It uniquely identifies a frame (unlike
+                # ``filename``, which can repeat across nights/targets), which
+                # lets features such as metric calculation update the exact row.
                 cursor.execute(f'''
                     SELECT
                         object, filter, date_loc, filename, imagetyp,
                         exposure, ccd_temp, xbinning, ybinning, telescop, instrume,
                         fwhm, eccentricity, snr, star_count, approval_status,
-                        hfd, sky_flux_mean, star_roundness, num_stars, snr_weight
+                        hfd, sky_flux_mean, star_roundness, num_stars, snr_weight,
+                        filepath
                     FROM xisf_files
                     WHERE {where_clause}
                     ORDER BY object, filter NULLS FIRST, date_loc DESC, filename
@@ -142,7 +147,7 @@ class CatalogLoaderWorker(QThread):
             cursor.execute(f'''
                 SELECT exposure, ROUND(ccd_temp / 2.0) * 2 as ccd_temp,
                        xbinning, ybinning, date_loc, filename, imagetyp,
-                       telescop, instrume, ccd_temp as actual_temp
+                       telescop, instrume, ccd_temp as actual_temp, filepath
                 FROM xisf_files
                 WHERE {dark_where}
                 ORDER BY exposure, ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning, date_loc DESC, filename
@@ -159,7 +164,7 @@ class CatalogLoaderWorker(QThread):
             cursor.execute(f'''
                 SELECT date_loc, filter, ROUND(ccd_temp / 2.0) * 2 as ccd_temp,
                        xbinning, ybinning, filename, imagetyp, exposure,
-                       telescop, instrume, ccd_temp as actual_temp
+                       telescop, instrume, ccd_temp as actual_temp, filepath
                 FROM xisf_files
                 WHERE {flat_where}
                 ORDER BY date_loc DESC, filter NULLS FIRST, ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning, filename
@@ -176,7 +181,8 @@ class CatalogLoaderWorker(QThread):
             cursor.execute(f'''
                 SELECT ROUND(ccd_temp / 2.0) * 2 as ccd_temp,
                        xbinning, ybinning, date_loc, filename, imagetyp,
-                       exposure, telescop, instrume, ccd_temp as actual_temp, filter
+                       exposure, telescop, instrume, ccd_temp as actual_temp, filter,
+                       filepath
                 FROM xisf_files
                 WHERE {bias_where}
                 ORDER BY ROUND(ccd_temp / 2.0) * 2, xbinning, ybinning, date_loc DESC, filename
@@ -202,21 +208,26 @@ class MetricsCalculationWorker(QThread):
     finished_calculation = pyqtSignal(int, int)   # processed, errors
     error_occurred = pyqtSignal(str)              # fatal error message
 
-    def __init__(self, db_path: str, filenames: List[str]):
+    def __init__(self, db_path: str, filepaths: List[str]):
         """
         Initialize the metrics calculation worker.
 
         Args:
             db_path: Path to the SQLite database.
-            filenames: List of filenames (as shown in the catalog) to process.
+            filepaths: List of full file paths to process. Full paths are used
+                       (instead of bare filenames) because they uniquely
+                       identify a frame; filenames can repeat across different
+                       nights or targets, which previously caused the metrics
+                       to be written to the wrong row (or to several rows).
         """
         super().__init__()
         self.db_path = db_path
-        self.filenames = filenames
+        self.filepaths = filepaths
 
     def run(self):
         """Calculate metrics for each file and store them in the database."""
         # Import here so the worker module does not require photutils to load.
+        import os
         from utils.image_metrics import calculate_image_metrics, ensure_metric_columns
 
         processed = 0
@@ -230,49 +241,52 @@ class MetricsCalculationWorker(QThread):
             ensure_metric_columns(cursor)
             conn.commit()
 
-            total = len(self.filenames)
+            total = len(self.filepaths)
 
-            for index, filename in enumerate(self.filenames):
+            for index, filepath in enumerate(self.filepaths):
                 # Stop early if the user cancelled the operation.
                 if self.isInterruptionRequested():
                     break
 
+                # Show just the filename in the progress dialog for readability.
+                display_name = os.path.basename(filepath) if filepath else filepath
                 self.progress_updated.emit(
-                    index + 1, total, f"Calculating metrics: {filename}"
+                    index + 1, total, f"Calculating metrics: {display_name}"
                 )
 
-                # Look up the file path for this filename.
-                cursor.execute(
-                    'SELECT filepath FROM xisf_files WHERE filename = ?',
-                    (filename,)
-                )
-                result = cursor.fetchone()
-
-                if not result or not result[0]:
+                # A missing path means we cannot read the image at all.
+                if not filepath:
                     errors += 1
                     continue
-
-                filepath = result[0]
 
                 try:
                     metrics = calculate_image_metrics(filepath)
 
+                    # Update the exact row identified by its unique file path so
+                    # only the selected frame's metrics are changed.
                     cursor.execute('''
                         UPDATE xisf_files
                         SET hfd = ?, sky_flux_mean = ?, star_roundness = ?,
                             num_stars = ?, snr_weight = ?,
                             updated_at = CURRENT_TIMESTAMP
-                        WHERE filename = ?
+                        WHERE filepath = ?
                     ''', (
                         metrics.get('hfd'),
                         metrics.get('sky_flux_mean'),
                         metrics.get('star_roundness'),
                         metrics.get('num_stars'),
                         metrics.get('snr_weight'),
-                        filename
+                        filepath
                     ))
                     conn.commit()
-                    processed += 1
+
+                    # rowcount is 0 when no row matched the path (e.g. the file
+                    # was removed from the database) - treat that as an error so
+                    # the user is told the metrics were not stored.
+                    if cursor.rowcount > 0:
+                        processed += 1
+                    else:
+                        errors += 1
                 except Exception:
                     # Skip this file but keep processing the rest.
                     errors += 1
