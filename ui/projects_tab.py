@@ -207,7 +207,16 @@ class ProjectsTab(QWidget):
         info_font = self.info_label.font()
         info_font.setPointSize(12)
         self.info_label.setFont(info_font)
-        details_layout.addWidget(self.info_label)
+        # The info label lives inside the "Project Info" group box, which is
+        # the top pane of the right-hand splitter.
+        info_layout.addWidget(self.info_label)
+
+        # --- Detailed sections pane (lower right) ---
+        # A single container widget holds the goals/master-frames/next-steps
+        # splitter and the action buttons. This becomes the bottom pane of the
+        # right-hand splitter.
+        details_panel = QWidget()
+        details_layout = QVBoxLayout(details_panel)
 
         # Create a splitter for goals, master frames, and next steps sections
         self.details_content_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -274,6 +283,7 @@ class ProjectsTab(QWidget):
         # Add the detailed sections pane to the right-hand vertical splitter and
         # give the two right-hand windows a sensible starting split (a smaller
         # summary pane on top, larger detail pane on the bottom).
+        self.details_splitter.addWidget(self.info_group)
         self.details_splitter.addWidget(details_panel)
         self.details_splitter.setSizes([150, 450])
 
