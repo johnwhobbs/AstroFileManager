@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QLineEdit, QComboBox, QPushButton, QMenu, QMessageBox,
     QFileDialog, QApplication, QProgressBar, QSplitter, QTableWidget,
     QTableWidgetItem, QHeaderView, QScrollArea, QAbstractItemView, QSizePolicy,
-    QStyledItemDelegate, QStyle, QProgressDialog
+    QStyledItemDelegate, QStyle, QProgressDialog, QDialog, QDialogButtonBox
 )
 
 # Import CSV exporter and background workers
@@ -2043,12 +2043,16 @@ Imported: {result[11] or 'N/A'}
             progress.setValue(current)
             progress.setLabelText(message)
 
-        def on_finished(processed: int, errors: int) -> None:
+        def on_finished(processed: int, errors: int, results: list) -> None:
             """Refresh the view and report results when calculation finishes."""
             progress.close()
             self.status_callback(
                 f"Metrics calculated for {processed} file(s), {errors} error(s)"
             )
+            # Show a popup listing the calculated metrics for each file. This
+            # makes it easy to confirm what was calculated and whether it was
+            # successfully written to the database (useful for troubleshooting).
+            self._show_metrics_results(results)
             # Reload the catalog so the new metric values appear in the columns.
             self.refresh_catalog_view()
 
@@ -2065,6 +2069,105 @@ Imported: {result[11] or 'N/A'}
         self.metrics_worker.finished_calculation.connect(on_finished)
         self.metrics_worker.error_occurred.connect(on_error)
         self.metrics_worker.start()
+
+    def _show_metrics_results(self, results: list) -> None:
+        """
+        Show a popup window listing the calculated image metrics.
+
+        The popup displays, for every processed file, the values that were
+        calculated (Half Flux Diameter, Sky Flux Mean, Star Roundness, Number
+        of Stars and SNR Weight) and whether they were successfully saved to the
+        database. This is primarily a troubleshooting aid so the user can see
+        exactly what happened for each file.
+
+        Args:
+            results: List of per-file result dictionaries produced by
+                     ``MetricsCalculationWorker``. Each dictionary contains the
+                     keys ``filename``, ``filepath``, ``metrics``, ``stored``
+                     and ``error``.
+        """
+        # Nothing to show (for example, the operation was cancelled immediately).
+        if not results:
+            return
+
+        # Build a modal dialog window to hold the results table.
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Calculated Image Metrics")
+        dialog.resize(800, 400)
+        layout = QVBoxLayout(dialog)
+
+        # A short explanatory heading at the top of the window.
+        heading = QLabel(
+            "Below are the image metrics calculated for each selected file. "
+            "The 'Saved' column shows whether the values were written to the "
+            "database."
+        )
+        heading.setWordWrap(True)
+        layout.addWidget(heading)
+
+        # Column headings for the results table.
+        columns = [
+            "File", "HFD", "Sky Flux Mean", "Star Roundness",
+            "Num Stars", "SNR Weight", "Saved", "Notes"
+        ]
+
+        table = QTableWidget(len(results), len(columns))
+        table.setHorizontalHeaderLabels(columns)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+
+        def format_value(value) -> str:
+            """Format a metric value for display, handling None gracefully."""
+            if value is None:
+                return "N/A"
+            # Integers (such as the star count) are shown without decimals.
+            if isinstance(value, int):
+                return str(value)
+            # Floats are rounded to three decimal places for readability.
+            try:
+                return f"{float(value):.3f}"
+            except (TypeError, ValueError):
+                return str(value)
+
+        # Fill in one table row per processed file.
+        for row_index, result in enumerate(results):
+            metrics = result.get('metrics') or {}
+
+            # The file name (with the full path shown as a tooltip on hover).
+            name_item = QTableWidgetItem(result.get('filename') or 'Unknown')
+            if result.get('filepath'):
+                name_item.setToolTip(result['filepath'])
+            table.setItem(row_index, 0, name_item)
+
+            # The five calculated metric values.
+            table.setItem(row_index, 1, QTableWidgetItem(format_value(metrics.get('hfd'))))
+            table.setItem(row_index, 2, QTableWidgetItem(format_value(metrics.get('sky_flux_mean'))))
+            table.setItem(row_index, 3, QTableWidgetItem(format_value(metrics.get('star_roundness'))))
+            table.setItem(row_index, 4, QTableWidgetItem(format_value(metrics.get('num_stars'))))
+            table.setItem(row_index, 5, QTableWidgetItem(format_value(metrics.get('snr_weight'))))
+
+            # Whether the metrics were saved to the database.
+            saved_item = QTableWidgetItem("Yes" if result.get('stored') else "No")
+            table.setItem(row_index, 6, saved_item)
+
+            # Any error/warning note for this file.
+            notes_item = QTableWidgetItem(result.get('error') or '')
+            if result.get('error'):
+                notes_item.setToolTip(result['error'])
+            table.setItem(row_index, 7, notes_item)
+
+        # Make the columns share the available width sensibly.
+        table.resizeColumnsToContents()
+        table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(table)
+
+        # A single "Close" button at the bottom of the dialog.
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        button_box.rejected.connect(dialog.reject)
+        button_box.accepted.connect(dialog.accept)
+        layout.addWidget(button_box)
+
+        dialog.exec()
 
     def approve_frame(self, item: QTreeWidgetItem) -> None:
         """Mark a frame as approved."""
