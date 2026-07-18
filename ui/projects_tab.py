@@ -250,7 +250,11 @@ class ProjectsTab(QWidget):
         # Connect splitter movement to save settings
         self.details_content_splitter.splitterMoved.connect(self.save_details_content_splitter_state)
 
-        details_layout.addWidget(self.details_content_splitter)
+        # Give the content splitter a stretch factor of 1 so the goals,
+        # master frames, and next steps windows expand to fill all the
+        # available vertical space. This pushes the action buttons below
+        # (see issue #261), giving these windows as much room as possible.
+        details_layout.addWidget(self.details_content_splitter, 1)
 
         # Action buttons - Data import and pre-processing workflow
         action_buttons = QHBoxLayout()
@@ -276,9 +280,13 @@ class ProjectsTab(QWidget):
         action_buttons.addWidget(self.mark_complete_btn)
 
         action_buttons.addStretch()
+
+        # Add the action buttons at the very bottom of the details panel.
+        # No trailing vertical stretch is added after them so the content
+        # splitter above keeps all the extra space (issue #261).
         details_layout.addLayout(action_buttons)
 
-        details_layout.addStretch()
+        self.projects_splitter.addWidget(details_panel)
 
         # Add the detailed sections pane to the right-hand vertical splitter and
         # give the two right-hand windows a sensible starting split (a smaller
