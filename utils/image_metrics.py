@@ -285,18 +285,33 @@ def calculate_metrics_from_data(data) -> Dict[str, Optional[float]]:
         metrics["num_stars"] = int(len(sources))
 
         # Star Roundness: DAOStarFinder reports two roundness statistics per
-        # star ('roundness1' and 'roundness2'). We take the MAXIMUM absolute
-        # value across all stars and both statistics. Using the maximum (rather
-        # than an average) means a single badly elongated star - for example
-        # from a wind gust or periodic tracking error along one axis - is not
-        # diluted away, giving stricter quality control on tracking.
-        roundness_values = []
-        for column in ("roundness1", "roundness2"):
-            if column in sources.colnames:
-                roundness_values.append(np.abs(np.asarray(sources[column], dtype=float)))
-        if roundness_values:
-            combined_roundness = np.concatenate(roundness_values)
-            metrics["star_roundness"] = float(np.max(combined_roundness))
+        # star ('roundness1' and 'roundness2'). Each describes asymmetry along a
+        # different axis, so for every star we take the larger magnitude of the
+        # two to capture that star's dominant asymmetry axis.
+        #
+        # We deliberately avoid globally concatenating all values and taking the
+        # maximum: a single hot pixel, saturated star, or other artifact would
+        # then pin the whole metric to an artificially high value regardless of
+        # the real tracking quality. Instead we combine the two statistics
+        # per-star and then take the median across stars, which reflects the
+        # overall tracking health of the subframe while shrugging off isolated
+        # pixel defects.
+        abs_r1 = None
+        abs_r2 = None
+        if "roundness1" in sources.colnames:
+            abs_r1 = np.abs(np.asarray(sources["roundness1"], dtype=float))
+        if "roundness2" in sources.colnames:
+            abs_r2 = np.abs(np.asarray(sources["roundness2"], dtype=float))
+
+        if abs_r1 is not None and abs_r2 is not None:
+            # Both statistics available: dominant asymmetry axis per star.
+            per_star_roundness = np.maximum(abs_r1, abs_r2)
+        else:
+            # Only one statistic available: fall back to whichever we have.
+            per_star_roundness = abs_r1 if abs_r1 is not None else abs_r2
+
+        if per_star_roundness is not None and per_star_roundness.size > 0:
+            metrics["star_roundness"] = float(np.median(per_star_roundness))
 
         # SNR Weight: a relative signal-to-noise measure. We take the median
         # peak brightness of the detected stars (above background) and divide
