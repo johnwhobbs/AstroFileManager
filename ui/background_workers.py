@@ -205,7 +205,10 @@ class MetricsCalculationWorker(QThread):
 
     # Signals
     progress_updated = pyqtSignal(int, int, str)  # current, total, message
-    finished_calculation = pyqtSignal(int, int)   # processed, errors
+    # processed, errors, results. ``results`` is a list of per-file dictionaries
+    # (see ``run``) so the UI can show exactly what was calculated and whether it
+    # was stored in the database - useful for troubleshooting.
+    finished_calculation = pyqtSignal(int, int, list)
     error_occurred = pyqtSignal(str)              # fatal error message
 
     def __init__(self, db_path: str, filepaths: List[str]):
@@ -233,6 +236,16 @@ class MetricsCalculationWorker(QThread):
         processed = 0
         errors = 0
 
+        # Collect a record for every file we process so the UI can display the
+        # calculated metrics (and whether they were saved) in a popup window.
+        # Each entry is a dictionary with these keys:
+        #   filepath  - the full path of the file
+        #   filename  - just the file name (for display)
+        #   metrics   - the calculated metrics dict, or None if it failed
+        #   stored    - True if the database row was actually updated
+        #   error     - a short error message, or None if there was no error
+        results = []
+
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -257,6 +270,13 @@ class MetricsCalculationWorker(QThread):
                 # A missing path means we cannot read the image at all.
                 if not filepath:
                     errors += 1
+                    results.append({
+                        'filepath': filepath,
+                        'filename': display_name,
+                        'metrics': None,
+                        'stored': False,
+                        'error': 'No file path is associated with this item.',
+                    })
                     continue
 
                 try:
@@ -283,16 +303,38 @@ class MetricsCalculationWorker(QThread):
                     # rowcount is 0 when no row matched the path (e.g. the file
                     # was removed from the database) - treat that as an error so
                     # the user is told the metrics were not stored.
-                    if cursor.rowcount > 0:
+                    stored = cursor.rowcount > 0
+                    if stored:
                         processed += 1
+                        error_message = None
                     else:
                         errors += 1
-                except Exception:
-                    # Skip this file but keep processing the rest.
+                        error_message = (
+                            'No matching database row was found for this file '
+                            'path, so the metrics were not saved.'
+                        )
+
+                    results.append({
+                        'filepath': filepath,
+                        'filename': display_name,
+                        'metrics': metrics,
+                        'stored': stored,
+                        'error': error_message,
+                    })
+                except Exception as file_error:
+                    # Skip this file but keep processing the rest. Record the
+                    # error message so the troubleshooting popup can show it.
                     errors += 1
+                    results.append({
+                        'filepath': filepath,
+                        'filename': display_name,
+                        'metrics': None,
+                        'stored': False,
+                        'error': str(file_error) or 'Unknown error.',
+                    })
 
             conn.close()
-            self.finished_calculation.emit(processed, errors)
+            self.finished_calculation.emit(processed, errors, results)
 
         except Exception as e:
             self.error_occurred.emit(f"Failed to calculate metrics: {str(e)}")
