@@ -199,16 +199,15 @@ class ProjectsTab(QWidget):
         info_layout = QVBoxLayout(self.info_group)
         self.info_label = QLabel("Select a project to view details")
         self.info_label.setWordWrap(True)
-        self.info_label.setAlignment(Qt.AlignmentFlag.AlignTop)
-        info_layout.addWidget(self.info_label)
-        info_layout.addStretch()
-        self.details_splitter.addWidget(self.info_group)
-
-        # --- Project details pane (lower right) ---
-        # Holds the Filter Goals Progress, Master Light Frames and Next Steps
-        # sections plus the workflow action buttons.
-        details_panel = QWidget()
-        details_layout = QVBoxLayout(details_panel)
+        # Center the project info both horizontally and vertically so the
+        # details read as a tidy, focused summary block (issue #260).
+        self.info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Increase the base font size so the project information is easier
+        # to read at a glance.
+        info_font = self.info_label.font()
+        info_font.setPointSize(12)
+        self.info_label.setFont(info_font)
+        details_layout.addWidget(self.info_label)
 
         # Create a splitter for goals, master frames, and next steps sections
         self.details_content_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -413,13 +412,29 @@ class ProjectsTab(QWidget):
             return
 
         # Update info label
-        info_html = f"<h3>{project.name}</h3>"
-        info_html += f"<p><b>Object:</b> {project.object_name}</p>"
+        # Build the details as centered HTML with larger fonts so the project
+        # information is easy to read and neatly centered (issue #260). The
+        # QLabel alignment centers the block, and the inline text-align styles
+        # ensure each line of HTML content is centered too.
+        info_html = f"<h2 style='text-align:center;'>{project.name}</h2>"
+        info_html += (
+            f"<p style='text-align:center; font-size:14px;'>"
+            f"<b>Object:</b> {project.object_name}</p>"
+        )
         if project.description:
-            info_html += f"<p><b>Description:</b> {project.description}</p>"
+            info_html += (
+                f"<p style='text-align:center; font-size:14px;'>"
+                f"<b>Description:</b> {project.description}</p>"
+            )
         if project.year:
-            info_html += f"<p><b>Year:</b> {project.year}</p>"
-        info_html += f"<p><b>Status:</b> {project.status.title()}</p>"
+            info_html += (
+                f"<p style='text-align:center; font-size:14px;'>"
+                f"<b>Year:</b> {project.year}</p>"
+            )
+        info_html += (
+            f"<p style='text-align:center; font-size:14px;'>"
+            f"<b>Status:</b> {project.status.title()}</p>"
+        )
 
         self.info_label.setText(info_html)
 
