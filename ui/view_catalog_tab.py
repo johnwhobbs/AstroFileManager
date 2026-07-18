@@ -335,11 +335,14 @@ class ViewCatalogTab(QWidget):
         # A horizontal splitter separates the frame listing (left) from the
         # details area (right). The details area is itself a vertical splitter
         # holding the FITS header pane on top and the image pane on the bottom.
-        main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_splitter.addWidget(self.catalog_tree)
+        # Store the splitters as instance attributes so their positions can be
+        # saved to and restored from the application settings (see
+        # save_splitter_state / restore_splitter_state below).
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter.addWidget(self.catalog_tree)
 
         # Right-hand side: FITS header (top) and image preview (bottom)
-        details_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.details_splitter = QSplitter(Qt.Orientation.Vertical)
 
         # --- FITS header pane (upper right) ---
         header_group = QGroupBox("FITS Header")
@@ -357,7 +360,7 @@ class ViewCatalogTab(QWidget):
         header_hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header_hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         header_layout.addWidget(self.fits_header_table)
-        details_splitter.addWidget(header_group)
+        self.details_splitter.addWidget(header_group)
 
         # --- Image pane (lower right) ---
         image_group = QGroupBox("Image Preview")
@@ -370,19 +373,89 @@ class ViewCatalogTab(QWidget):
         self.image_label.setStyleSheet("color: #888888;")
         self.image_scroll_area.setWidget(self.image_label)
         image_layout.addWidget(self.image_scroll_area)
-        details_splitter.addWidget(image_group)
+        self.details_splitter.addWidget(image_group)
 
         # Give the two right-hand panes an equal starting size
-        details_splitter.setSizes([400, 400])
+        self.details_splitter.setSizes([400, 400])
 
-        main_splitter.addWidget(details_splitter)
+        self.main_splitter.addWidget(self.details_splitter)
         # Give the frame listing more room than the details area by default
-        main_splitter.setSizes([700, 500])
+        self.main_splitter.setSizes([700, 500])
 
-        layout.addWidget(main_splitter)
+        # Save the splitter positions whenever the user drags a divider so the
+        # layout is remembered the next time the application is opened.
+        self.main_splitter.splitterMoved.connect(self.save_main_splitter_state)
+        self.details_splitter.splitterMoved.connect(self.save_details_splitter_state)
+
+        layout.addWidget(self.main_splitter)
 
         # Holds the currently loaded image so it can be re-scaled on resize
         self._current_pixmap = None
+
+    def save_main_splitter_state(self) -> None:
+        """
+        Save the main (left/right) splitter sizes to settings.
+
+        The main splitter separates the frame listing on the left from the
+        details area on the right. Saving its sizes lets the layout be
+        restored the next time the application is opened.
+        """
+        try:
+            sizes = self.main_splitter.sizes()
+            self.settings.setValue('catalog_main_splitter_sizes', sizes)
+        except Exception as e:
+            print(f"Warning: Could not save catalog main splitter state: {e}")
+
+    def save_details_splitter_state(self) -> None:
+        """
+        Save the details (FITS header / image) splitter sizes to settings.
+
+        The details splitter separates the FITS header pane (top) from the
+        image preview pane (bottom) on the right-hand side of the tab.
+        """
+        try:
+            sizes = self.details_splitter.sizes()
+            self.settings.setValue('catalog_details_splitter_sizes', sizes)
+        except Exception as e:
+            print(f"Warning: Could not save catalog details splitter state: {e}")
+
+    def save_splitter_state(self) -> None:
+        """
+        Save the positions of both adjustable windows (splitters).
+
+        This convenience method saves both the main and details splitter
+        states in one call. It is invoked by the main window when the
+        application is closing.
+        """
+        self.save_main_splitter_state()
+        self.save_details_splitter_state()
+
+    def restore_splitter_state(self) -> None:
+        """
+        Restore the positions of both adjustable windows (splitters).
+
+        Reads the previously saved splitter sizes from settings and applies
+        them. If no saved sizes exist (for example, on first run), the
+        default sizes set in init_ui are kept.
+        """
+        # Restore the main (left/right) splitter sizes.
+        try:
+            saved_main = self.settings.value('catalog_main_splitter_sizes')
+            if saved_main:
+                # Settings may return the sizes as strings, so convert to int.
+                sizes = [int(s) for s in saved_main]
+                self.main_splitter.setSizes(sizes)
+        except (ValueError, TypeError) as e:
+            print(f"Warning: Could not restore catalog main splitter state: {e}")
+
+        # Restore the details (FITS header / image) splitter sizes.
+        try:
+            saved_details = self.settings.value('catalog_details_splitter_sizes')
+            if saved_details:
+                sizes = [int(s) for s in saved_details]
+                self.details_splitter.setSizes(sizes)
+        except (ValueError, TypeError) as e:
+            print(f"Warning: Could not restore catalog details splitter state: {e}")
 
     def create_stat_card(self, title: str, value_label: QLabel) -> QWidget:
         """Create a statistics card widget."""
