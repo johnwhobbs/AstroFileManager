@@ -35,7 +35,13 @@ class CSVExporter:
             def write_items(item):
                 # Only write file items (leaf nodes)
                 if item.childCount() == 0 and '(' not in item.text(0):
-                    row = [item.text(i) for i in range(9)]
+                    # Columns 0-6 hold Filename..Date. Telescope and Instrument
+                    # live at tree columns 8 and 9 (column 7 is the Status pill).
+                    # The old FWHM/Ecc/SNR/Stars columns were removed in issue
+                    # #283, so we skip the Status column when exporting.
+                    row = [item.text(i) for i in range(7)]
+                    row.append(item.text(8))   # Telescope
+                    row.append(item.text(9))   # Instrument
                     writer.writerow(row)
                 # Recurse to children
                 for i in range(item.childCount()):
