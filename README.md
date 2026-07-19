@@ -9,7 +9,8 @@ AstroFileManager solves common astrophotography data management challenges:
 - **Organize thousands of files** from multiple imaging sessions
 - **Track multi-night imaging projects** with target frame counts per filter
 - **Match light frames to calibration frames** automatically
-- **Import quality grades** from PixInsight SubFrame Selector
+- **Calculate image quality metrics** (HFD, roundness, SNR and more) built-in — no PixInsight needed
+- **Grade frames** (approve/reject) directly in the app
 - **Monitor progress** toward your imaging goals
 - **Ensure complete calibration** before processing
 
@@ -17,7 +18,8 @@ AstroFileManager solves common astrophotography data management challenges:
 
 ```bash
 # Install dependencies
-pip install PyQt6 xisf astropy
+pip install -r requirements.txt
+# (installs PyQt6, xisf, astropy, pytz, numpy, and photutils)
 
 # Create database
 python create_db.py
@@ -26,40 +28,54 @@ python create_db.py
 python AstroFileManager.py
 ```
 
-## What's New in v2.4.0
+## What's New in v2.5.0
 
 **Major new features added:**
 
-1. **Self-Update System** (Help menu → Check for Updates)
-   - Update application directly from GitHub with one click
-   - Choose Main (Stable) or Development (Latest) branch
-   - Automatic backups before updates, database preservation
+1. **Built-in Image Quality Metrics** (no PixInsight required)
+   - AstroFileManager now calculates image quality metrics itself, directly from
+     the image pixel data using Astropy and photutils
+   - Metrics calculated per light frame: **HFD** (Half Flux Diameter),
+     **Sky Flux Mean**, **Star Roundness**, **Number of Stars**, and **SNR Weight**
+   - Metrics are computed automatically during import (light frames only) and
+     shown as columns in the View Catalog tab
+   - Right-click any light frame(s) → **"📊 Calculate Image Metrics"** to
+     (re)calculate on demand
 
-2. **Database Backup and Restore** (Maintenance tab → Database tab)
-   - Create timestamped backups with one click
-   - Restore from any previous backup
-   - Automatic safety backup before restore
+2. **Grade Frames Directly in the App** (View Catalog tab)
+   - Approve, reject, or clear grading on frames right in the catalog
+   - Right-click → **Approve Frame / Reject Frame / Clear Grading** (bulk actions
+     available when multiple frames are selected)
+   - Filter the catalog by approval status (All / Approved / Rejected / Not Graded)
+   - **The old PixInsight SubFrame Selector CSV import has been removed** — grading
+     is now done in-app using the metrics AstroFileManager calculates itself
 
-3. **Checkout Files for Processing** (Projects tab)
-   - Export approved frames with matching calibration for PixInsight
-   - One-click export to organized folder structure (Lights/, Darks/, Flats/, Biases/)
-   - Automatic master calibration filename cleanup for WBPP compatibility
-   - Only exports approved frames (quality-first approach)
+3. **Status Pills in the Catalog** (View Catalog tab)
+   - The Status column is now drawn as a rounded, color-coded "pill" badge that
+     hugs the status text (green = approved, red = rejected, yellow = not graded)
+   - Replaces the previous whole-row green/purple color coding
 
-4. **Reactivate Completed Projects** (Projects tab)
-   - Resume work on completed projects to add more data
-   - Useful when integration reveals need for more frames
+4. **Master Light Frames in Projects** (Projects tab)
+   - **Import Master Light Frames** button links your stacked master light images
+     (the finished deep-sky object images) to a project
+   - Filter the selection list by filename and pick exactly which masters to import
+   - Imported masters are listed in a dedicated "Master Light Frames" panel in the
+     project details
 
-5. **Calibration Frame Maintenance** (Maintenance tab → Calibration Frames tab)
-   - Master Frame Temperature Tagging: Fix missing temps on PixInsight masters
-   - Remove Duplicate Calibration: Clean up individual frames when masters exist
-   - Remove Orphaned Calibration: Delete calibration with no matching lights
+5. **Redesigned Projects Tab Layout**
+   - Multi-window, resizable layout similar to the View Catalog tab
+   - Separate adjustable panels for Project Info, Filter Goals Progress,
+     Master Light Frames, and Next Steps
+   - Filter Goals table now also shows average **FWHM** and **SNR** per filter
+   - Panel/splitter positions are saved and restored across sessions
 
-6. **Cross-Platform Configuration** (Settings tab)
-   - Settings now stored in JSON file instead of Windows registry
-   - Platform-independent, easy to backup
+6. **Persistent Window Layouts** (View Catalog and Projects tabs)
+   - Adjustable window/splitter positions are now saved and restored automatically
 
-**See "Self-Update System" and "Application Tabs Overview" sections below for complete details.**
+**Previous highlights (v2.4.0):** Self-Update System, Database Backup and Restore,
+Checkout Files for Pre-Processing, Reactivate Completed Projects, Calibration Frame
+Maintenance, and Cross-Platform Configuration. See "Self-Update System" and
+"Application Tabs Overview" below for complete details.
 
 ## Typical Workflows
 
@@ -92,28 +108,29 @@ python AstroFileManager.py
 
 ### Workflow 2: Quality Grading and Final Selection
 
-**Goal:** Grade captured frames and update project progress
+**Goal:** Grade captured frames and update project progress — all inside AstroFileManager
 
-1. **Grade Frames in PixInsight**
-   - Open SubFrame Selector
-   - Load all frames for your project
-   - Review quality metrics (FWHM, eccentricity, SNR)
-   - Approve/reject frames based on criteria
-   - Export CSV file with results
+1. **Calculate Image Metrics** (View Catalog tab)
+   - Metrics are calculated automatically when you import light frames
+   - To (re)calculate on demand, right-click frame(s) → **"📊 Calculate Image Metrics"**
+   - Review the metrics shown as columns: HFD, Sky Flux, Roundness, # Stars, SNR Weight
+   - No PixInsight SubFrame Selector or CSV export/import is required anymore
 
-2. **Import Quality Data** (Projects tab → Import Quality Data)
-   - Select the exported CSV file
-   - Review import results (matched, approved, rejected counts)
-   - System automatically updates project progress
+2. **Grade Frames** (View Catalog tab)
+   - Right-click a frame (or select several) → **Approve Frame** / **Reject Frame**
+   - Use **Clear Grading** to reset a frame back to "Not Graded"
+   - The Status column shows a color-coded pill for each frame
+   - Use the approval filter (All / Approved / Rejected / Not Graded) to focus your review
 
 3. **Check Final Status** (Projects tab)
-   - View approved frame counts vs targets
+   - View total and approved frame counts vs targets
+   - The Filter Goals table also shows average FWHM and SNR per filter
    - Identify filters that need more captures
-   - If targets met, mark project complete
+   - If targets met, mark the project complete
 
-4. **Generate Integration Lists**
-   - Export file lists for WeightedBatchPreProcessing (future feature)
-   - Begin integration in PixInsight
+4. **Checkout Files for Pre-Processing** (Projects tab)
+   - Export approved frames with matching calibration
+   - Begin integration in PixInsight WeightedBatchPreProcessing
 
 ### Workflow 3: Managing Calibration Library
 
@@ -170,22 +187,19 @@ python AstroFileManager.py
    - Monitor progress in Projects tab
    - Follow "Next Steps" recommendations
 
-5. **Grade Frames in PixInsight**
-   - Once you have sufficient data, grade all frames
-   - Open SubFrame Selector in PixInsight
-   - Load all light frames for the project
-   - Review FWHM, eccentricity, SNR metrics
-   - Approve good frames, reject poor frames
-   - Export CSV with results
+5. **Grade Frames in the View Catalog Tab**
+   - Once you have sufficient data, review all frames
+   - Metrics (HFD, Sky Flux, Roundness, # Stars, SNR Weight) are already calculated
+     from import; recalculate any time with "📊 Calculate Image Metrics"
+   - Right-click frames → **Approve Frame** / **Reject Frame** based on the metrics
+   - No external tools or CSV files needed
 
-6. **Import Quality Data** (Projects tab)
-   - Click "Import Quality Data" button
-   - Select the exported CSV file
-   - System updates approval status and recalculates progress
-   - Review approved frame counts vs targets
+6. **Review Progress** (Projects tab)
+   - Approval status and progress update automatically as you grade
+   - Review approved frame counts vs targets, plus average FWHM/SNR per filter
 
-7. **Checkout Files for Processing** (Projects tab)
-   - Click "Checkout Files for Processing" button
+7. **Checkout Files for Pre-Processing** (Projects tab)
+   - Click "Checkout Files for Pre-Processing" button
    - Choose destination folder
    - Application exports:
      - All approved light frames
@@ -315,11 +329,44 @@ python AstroFileManager.py
 - Lazy loading for fast performance with large catalogs
 - Temperature grouping (frames within ±0.5°C)
 - Right-click to assign sessions to projects
-- Filter by image type and object
+- Filter by image type, object, and approval status (All / Approved / Rejected / Not Graded)
+- Dedicated FITS Header pane on the right showing the full header for the selected frame
+
+**Image Quality Metrics Columns:**
+
+The catalog listing shows the quality metrics AstroFileManager calculates itself
+(no PixInsight needed):
+
+| Column | Meaning |
+|--------|---------|
+| HFD | Half Flux Diameter — smaller is sharper focus/better seeing |
+| Sky Flux | Sigma-clipped mean background (sky) level |
+| Roundness | Median star roundness — near 0 = round stars, larger = elongated |
+| # Stars | Number of detected stars |
+| SNR Weight | Relative signal-to-noise weight for the frame |
+
+- Metrics are calculated automatically at import time (light frames only)
+- Right-click frame(s) → **"📊 Calculate Image Metrics"** to (re)calculate on demand
+- The older FITS-header columns (Image Type, Filter, Exposure, Temp, Binning, Date,
+  Telescope, Instrument) are hidden from the listing because they now appear in the
+  FITS Header pane — the data is still stored for session matching and export
+
+**Grading Frames (right-click a light frame or a selection):**
+- **✓ Approve Frame** / **✗ Reject Frame** — set the approval status
+- **○ Clear Grading** — reset back to "Not Graded"
+- Bulk versions of all three actions appear when multiple frames are selected
+
+**Status Pills:**
+- The Status column is drawn as a rounded, color-coded "pill" badge that hugs the text:
+  - Green pill: Approved
+  - Red pill: Rejected
+  - Yellow pill: Not Graded
+- This replaces the previous whole-row green/purple color coding
 
 **When to Use:**
 - Browse your entire catalog
 - Find specific frames by object, filter, or date
+- Calculate metrics and grade frames (approve/reject) directly in the app
 - Assign imaging sessions to projects
 - Verify import results
 
@@ -329,18 +376,25 @@ python AstroFileManager.py
 
 **Main Features:**
 - **Project Creation:** Templates for common workflows (Narrowband, Broadband, Custom)
-- **Progress Tracking:** Compact table showing total and approved frame counts
+- **Progress Tracking:** Compact table showing total and approved frame counts, plus
+  average FWHM and SNR per filter
 - **Edit Projects:** Modify project details and filter goals
-- **Quality Import:** Import PixInsight SubFrame Selector CSV data
+- **Master Light Frames:** Import stacked master light images to the project
 - **Next Steps:** Smart recommendations based on progress
+- **Multi-Window Layout:** Resizable panels for Project Info, Filter Goals Progress,
+  Master Light Frames, and Next Steps — positions saved across sessions
+
+> **Note:** Frame grading now happens in the **View Catalog** tab using the metrics
+> AstroFileManager calculates itself. The old "Import Quality Data" (PixInsight
+> SubFrame Selector CSV) button has been removed.
 
 **Progress Display:**
 
-| Filter | Total | Approved | Progress |
-|--------|-------|----------|----------|
-| Ha     | 100/90 (111%) | 85/90 (94%) | ● 94%  |
-| OIII   | 50/90 (56%)   | 48/90 (53%) | ● 53%  |
-| SII    | 90/90 (100%)  | 90/90 (100%) | ● 100% |
+| Filter | Total | Approved | FWHM | SNR | Progress |
+|--------|-------|----------|------|-----|----------|
+| Ha     | 100/90 (111%) | 85/90 (94%) | 2.4 | 18.2 | ● 94%  |
+| OIII   | 50/90 (56%)   | 48/90 (53%) | 2.6 | 12.1 | ● 53%  |
+| SII    | 90/90 (100%)  | 90/90 (100%) | 2.3 | 15.7 | ● 100% |
 
 **Color-Coded Progress:**
 - ● Green (100%): Goal met
@@ -355,9 +409,17 @@ python AstroFileManager.py
 - Adjustable splitter between goals and recommendations
 - All preferences saved across sessions
 
-**Export Files for Processing:**
-- **Checkout Files for Processing** button exports approved frames with matching calibration
-- Only exports frames with `approval_status = 'approved'` (must grade in PixInsight first)
+**Master Light Frames:**
+- **Import Master Light Frames** button links stacked master light images (your finished
+  deep-sky object images) to the project
+- Selection dialog lists available Master Light frames with a case-insensitive filename
+  filter, Select All / Deselect All, and an "Already Imported" indicator
+- Imported masters appear in a dedicated "Master Light Frames" panel (Type, Filter,
+  Exposure, Temp, Binning, Filename) and are excluded from filter-goal frame counts
+
+**Export Files for Pre-Processing:**
+- **Checkout Files for Pre-Processing** button exports approved frames with matching calibration
+- Only exports frames with `approval_status = 'approved'` (grade frames in the View Catalog tab first)
 - Automatically includes matching calibration frames:
   - Dark frames (matching exposure, temperature, binning)
   - Flat frames (matching filter, date, temperature, binning)
@@ -375,7 +437,9 @@ python AstroFileManager.py
 
 **Project Management:**
 - **Edit Project:** Modify project details, filter goals, and target counts after creation
+- **Mark Complete:** Mark a project as completed once goals are met
 - **Reactivate Project:** Change completed projects back to active status to add more data
+- **Archive:** Archive projects for reference without deleting them
 - **Delete Project:** Remove projects from database (does not delete image files)
 
 **UI Customization:**
@@ -391,9 +455,10 @@ python AstroFileManager.py
 **When to Use:**
 - Plan new imaging campaigns
 - Track progress across multiple nights
-- Import quality grades from PixInsight
+- Review approved frame counts and average FWHM/SNR per filter
 - Know when you have enough data
 - Edit project goals as conditions change
+- Import master light frames to keep finished images with the project
 - Export approved frames for final processing
 - Resume work on previously completed projects
 
@@ -628,8 +693,11 @@ Application settings are stored in a JSON file for easy backup and cross-platfor
 - Unique file identification via SHA256 hash
 - Complete FITS header metadata
 - Project and session linkage
-- Quality metrics from SubFrame Selector
-- Approval status tracking
+- Built-in image quality metrics: `hfd`, `sky_flux_mean`, `star_roundness`,
+  `num_stars`, `snr_weight` (calculated by AstroFileManager)
+- Legacy quality columns retained (`fwhm`, `eccentricity`, `snr`, `star_count`,
+  `background_level`) but no longer displayed
+- Approval status tracking (`approval_status`, `grading_date`, `grading_notes`)
 
 **projects table** - Imaging campaigns:
 - Project name, object, description
@@ -646,6 +714,11 @@ Application settings are stored in a JSON file for easy backup and cross-platfor
 - Tracks grading status
 - Stores quality metrics
 
+**project_master_frames table** - Master light frames per project:
+- Links imported master light frames to a project (`project_id`, `file_id`)
+- Stores frame type, filter, exposure, temperature, and binning
+- Unique per project/file so a master is only linked once
+
 ### Metadata Extraction
 
 **Automatic extraction from FITS headers:**
@@ -658,6 +731,11 @@ Application settings are stored in a JSON file for easy backup and cross-platfor
 - CCD-TEMP, TEMPERAT, CCD_TEMP - Temperature
 - XBINNING, YBINNING - Binning
 - DATE-LOC or DATE-OBS - Observation date
+
+**Image Quality Metrics (calculated, not from headers):**
+- On import, light frames are analyzed with photutils to compute HFD, Sky Flux Mean,
+  Star Roundness, Number of Stars, and SNR Weight (see "Image Quality Metrics" below)
+- These are stored alongside the header metadata and can be recalculated on demand
 
 **Date Processing:**
 1. Prefers DATE-LOC (local time)
@@ -716,40 +794,41 @@ Example: `Calibration/Bias/-10C_Bin1x1/2024-10-15_Bias_-10C_Bin1x1_001.xisf`
 - Simplified workflow for stacking software
 - Organized by object and filter for browsing
 
-### CSV Quality Import Format
+### Image Quality Metrics (Built-In)
 
-**Supported Formats:**
-- Standard PixInsight SubFrame Selector CSV
-- Custom exports with approval columns
-- Flexible column name handling
+AstroFileManager calculates image quality metrics itself, directly from the image
+pixel data, using Astropy and photutils. **This replaces the previous workflow of
+exporting a CSV from PixInsight's SubFrame Selector and importing it** — no external
+tool is required.
 
-**Approval Column Handling:**
-The importer automatically detects approval status from various formats:
+**When Metrics Are Calculated:**
+- Automatically during import (light frames only; calibration frames are skipped)
+- On demand via right-click → **"📊 Calculate Image Metrics"** in the View Catalog tab
+  (single frame or multi-select). A progress dialog runs the calculation in the
+  background and a results table (File, HFD, Sky Flux Mean, Star Roundness, Num Stars,
+  SNR Weight, Saved, Notes) summarizes what was updated.
 
-**Boolean Text Values:**
-- "True", "Yes", "1", "Approved" → approved
-- "False", "No", "0", "Rejected" → rejected
+**Metrics Calculated:**
 
-**Numeric Weight Values:**
-- Weight > 0 → approved
-- Weight = 0 → rejected
+| Metric | Description |
+|--------|-------------|
+| HFD (Half Flux Diameter) | Flux-weighted diameter containing half a star's flux, averaged (median) over the brightest stars. Smaller = sharper focus/better seeing. |
+| Sky Flux Mean | Sigma-clipped (σ=3.0) mean background/sky level. |
+| Star Roundness | Median per-star roundness from DAOStarFinder (0 = round, larger = elongated). Uses a per-star median to shrug off single hot pixels/artifacts. |
+| Number of Stars | Count of detected stars (DAOStarFinder, threshold 5σ above background). |
+| SNR Weight | Relative signal-to-noise weight (median star peak ÷ background noise). |
 
-**Column Names:**
-- Works with "Approved", "Weight", or any column name
-- Specify column name during import
-- Default: "Approved" column
+**How It Works:**
+- Color images are collapsed to a luminance plane using CIE weights (0.299R, 0.587G, 0.114B)
+- All calculations include error handling; if a metric cannot be computed (e.g.
+  photutils not installed, or no stars found) it is stored as NULL and the file is
+  still cataloged
+- Results are written to the `hfd`, `sky_flux_mean`, `star_roundness`, `num_stars`,
+  and `snr_weight` columns of the database
 
-**Required CSV Columns:**
-- "Index" - Row number
-- "File" - Filename or path
-- Approval column (configurable name)
-
-**Optional Quality Metrics:**
-- FWHM - Full Width Half Maximum
-- Eccentricity - Star eccentricity
-- SNRWeight - Signal-to-noise ratio
-- Stars - Star count
-- Median - Background level
+**Grading:** Once metrics are calculated, grade frames directly in the View Catalog
+tab (right-click → Approve / Reject / Clear Grading). Approval status feeds project
+progress automatically.
 
 ### Performance Optimizations
 
@@ -809,17 +888,27 @@ The importer automatically detects approval status from various formats:
 
 ## Requirements
 
-- Python 3.7 or higher
+- Python 3.8 or higher
 - PyQt6 (GUI framework)
 - xisf (XISF file support)
-- astropy (FITS file support)
+- astropy (FITS file support and image statistics)
+- pytz (timezone handling for DATE-OBS conversion)
+- numpy (image array processing)
+- photutils (star detection for built-in image quality metrics)
 - sqlite3 (included with Python)
+
+> Note: numpy, astropy, and photutils are imported lazily. If photutils is not
+> installed the application still runs — image quality metrics are simply left
+> blank (NULL) instead of being calculated.
 
 ## Installation
 
 ```bash
-# Install dependencies
-pip install PyQt6 xisf astropy
+# Install dependencies (from requirements.txt)
+pip install -r requirements.txt
+
+# Or install them individually
+pip install PyQt6 xisf astropy pytz numpy photutils
 
 # Create database
 python create_db.py
@@ -840,10 +929,16 @@ python AstroFileManager.py
 - Set timezone in Settings tab if using DATE-OBS
 - Check that timezone matches your imaging location
 
-**CSV import shows all rejected:**
-- Check approval column name (should be "Approved")
-- Verify CSV has True/False or 1/0 values
-- Review import results for column detection
+**Image metrics show blank / no values:**
+- Ensure `photutils` (and numpy/astropy) are installed: `pip install -r requirements.txt`
+- Metrics are only calculated for light frames, not calibration frames
+- Right-click the frame(s) → "📊 Calculate Image Metrics" to recalculate
+- Frames with no detectable stars will report 0 stars and blank star-based metrics
+
+**All frames show "Not Graded":**
+- Grade frames in the View Catalog tab: right-click → Approve / Reject Frame
+- Calculate image metrics first so you have data to grade against
+- The PixInsight SubFrame Selector CSV import has been removed — grading is now in-app
 
 **Calibration frames not matching:**
 - Verify temperature within tolerance (±1°C for Darks/Bias, ±3°C for Flats)
@@ -870,9 +965,8 @@ python AstroFileManager.py
 - Try switching update branch in Settings tab
 - Check `.update_commit_sha` file exists in application directory
 
-**"Checkout Files for Processing" exports no files:**
-- Ensure frames are graded in PixInsight SubFrame Selector first
-- Import CSV quality data in Projects tab
+**"Checkout Files for Pre-Processing" exports no files:**
+- Ensure frames are graded (approved) in the View Catalog tab first
 - Only approved frames are exported
 - Verify project has sessions assigned and approved frames
 
@@ -894,18 +988,25 @@ AstroFileManager/
 ├── create_db.py                    # Database creation with schema
 ├── AstroFileManager.py             # Main application entry point
 ├── constants.py                    # Configuration constants
+├── requirements.txt                # Python dependencies
 ├── .update_commit_sha              # Current version commit tracking (auto-generated)
+├── migrate_add_image_metrics.py    # Migration: add built-in image metric columns
+├── migrate_add_project_master_frames.py  # Migration: add project_master_frames table
+├── migrate_add_instrument_indexes.py     # Migration: add instrument indexes
 ├── core/
 │   ├── database.py                 # Database manager with backup/restore
 │   ├── calibration.py              # Calibration matching logic
-│   ├── project_manager.py          # Project CRUD operations
+│   ├── project_manager.py          # Project CRUD + master frame linkage
 │   ├── project_templates.py        # Project templates
 │   ├── config_manager.py           # Cross-platform configuration manager
 │   └── update_manager.py           # Self-update system
 ├── ui/
-│   ├── background_workers.py       # Async data loading
-│   ├── view_catalog_tab.py         # Catalog browser
-│   ├── projects_tab.py             # Project management
+│   ├── background_workers.py       # Async data loading + metrics calculation worker
+│   ├── catalog_worker.py           # Background catalog loading worker
+│   ├── view_catalog_tab.py         # Catalog browser (metrics, grading, status pills)
+│   ├── view_catalog_methods.py     # Catalog helper methods
+│   ├── status_pill_delegate.py     # Rounded status "pill" rendering
+│   ├── projects_tab.py             # Project management (multi-window layout)
 │   ├── sessions_tab.py             # Calibration tracking
 │   ├── analytics_tab.py            # Activity heatmap
 │   ├── import_tab.py               # File import
@@ -913,20 +1014,54 @@ AstroFileManager/
 │   ├── settings_tab.py             # Application settings
 │   ├── new_project_dialog.py       # Create project dialog
 │   ├── edit_project_dialog.py      # Edit project dialog
-│   ├── export_project_dialog.py    # Export files for processing dialog
+│   ├── assign_session_dialog.py    # Assign session to project dialog
+│   ├── import_master_frames_dialog.py    # Import master light frames dialog
+│   ├── export_project_dialog.py    # Export files for pre-processing dialog
 │   ├── export_project_worker.py    # Background export worker
 │   └── update_dialog.py            # Update check and install dialog
 ├── import_export/
-│   ├── import_worker.py            # Multi-format import
+│   ├── import_worker.py            # Multi-format import (calculates metrics on import)
 │   ├── csv_exporter.py             # CSV export
-│   └── subframe_selector_importer.py  # Quality data import
+│   └── subframe_selector_importer.py  # Legacy PixInsight CSV importer (no longer used by UI)
 ├── utils/
-│   ├── fits_reader.py              # FITS file reader
+│   ├── fits_reader.py              # FITS/XISF file reader
+│   ├── image_metrics.py            # Built-in image quality metric calculations
 │   └── file_organizer.py           # File organization
 └── xisf_catalog.db                 # SQLite database (created on first run)
 ```
 
 ## Version History
+
+**v2.5.0** - Built-In Image Metrics, In-App Grading, and Projects Redesign
+- **Built-In Image Quality Metrics**: Calculate metrics without PixInsight
+  - HFD (Half Flux Diameter), Sky Flux Mean, Star Roundness, Number of Stars, SNR Weight
+  - Calculated directly from image pixel data using Astropy and photutils
+  - Computed automatically during import (light frames only)
+  - Right-click → "📊 Calculate Image Metrics" to (re)calculate on demand, with a
+    background progress dialog and a results summary
+  - Star Roundness uses a per-star median to avoid single-artifact contamination (issue #280)
+- **In-App Frame Grading** (View Catalog tab): Approve, reject, or clear grading via
+  right-click (single or bulk), with an approval-status filter
+  (All / Approved / Rejected / Not Graded)
+- **Removed PixInsight CSV Quality Import**: Grading now uses built-in metrics; the
+  "Import Quality Data" (SubFrame Selector CSV) workflow has been retired (issue #283)
+- **Status Pills** (View Catalog tab): Status column drawn as a rounded, color-coded
+  badge (green/red/yellow); removed the old green/purple whole-row coloring (issue #253)
+- **View Catalog Columns Updated**: Removed FWHM/ECC/SNR/Stars legacy columns and added
+  HFD, Sky Flux, Roundness, # Stars, SNR Weight; FITS-header fields moved to a dedicated
+  FITS Header pane (issue #283)
+- **Master Light Frames** (Projects tab): New "Import Master Light Frames" feature to
+  link stacked master light images to a project, with a filename filter and a dedicated
+  display panel (issues #207, #217)
+- **Projects Tab Redesign**: Multi-window, resizable layout (Project Info, Filter Goals
+  Progress, Master Light Frames, Next Steps); Filter Goals now shows average FWHM and SNR
+  (issues #256, #258, #260, #261)
+- **Persistent Window Layouts**: View Catalog and Projects tab splitter positions are
+  saved and restored across sessions (issue #275)
+- **Database Additions**: New `project_master_frames` table and built-in metric columns
+  (`hfd`, `sky_flux_mean`, `star_roundness`, `num_stars`, `snr_weight`); migration
+  scripts `migrate_add_image_metrics.py` and `migrate_add_project_master_frames.py`
+- **New Dependencies**: numpy, photutils, and pytz (photutils powers metric calculation)
 
 **v2.4.0** - Self-Update System, Database Backup/Restore, and Export Enhancements
 - **Self-Update System**: Update application directly from GitHub
