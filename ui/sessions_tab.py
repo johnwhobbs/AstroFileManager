@@ -126,10 +126,14 @@ class SessionsTab(QWidget):
         layout.addWidget(stats_group)
 
         # Sessions tree widget
+        # Quality columns come from AstroFileManager's native metrics engine
+        # (issue #289): HFD, SNR Weight, Roundness and Sky Flux replace the old
+        # PixInsight-imported FWHM/SNR columns.
         self.sessions_tree = QTreeWidget()
-        self.sessions_tree.setColumnCount(9)
+        self.sessions_tree.setColumnCount(11)
         self.sessions_tree.setHeaderLabels([
-            'Session', 'Status', 'Light Frames', 'FWHM', 'SNR', 'Approved', 'Darks', 'Bias', 'Flats'
+            'Session', 'Status', 'Light Frames', 'HFD', 'SNR Weight',
+            'Roundness', 'Sky Flux', 'Approved', 'Darks', 'Bias', 'Flats'
         ])
 
         # Make columns resizable and movable
@@ -137,8 +141,8 @@ class SessionsTab(QWidget):
         self.sessions_tree.header().setStretchLastSection(True)
 
         # Set initial column widths or restore from settings
-        default_widths = [250, 100, 120, 80, 80, 100, 150, 150, 150]
-        for col in range(9):
+        default_widths = [250, 100, 120, 80, 90, 80, 90, 100, 150, 150, 150]
+        for col in range(11):
             saved_width = self.settings.value(f'sessions_tree_col_{col}')
             if saved_width:
                 self.sessions_tree.setColumnWidth(col, int(saved_width))
@@ -147,7 +151,10 @@ class SessionsTab(QWidget):
 
         # Restore column order
         saved_order = self.settings.value('sessions_tree_col_order')
-        if saved_order:
+        # Only restore if the saved layout matches the current column count.
+        # Older settings saved with the previous 9-column layout would otherwise
+        # produce a broken order now that Roundness/Sky Flux were added.
+        if saved_order and len(saved_order) == self.sessions_tree.columnCount():
             # Convert to integers (QSettings may return strings)
             saved_order = [int(idx) for idx in saved_order]
             for visual_index, logical_index in enumerate(saved_order):
@@ -273,7 +280,9 @@ class SessionsTab(QWidget):
             missing_count = 0
 
             for session_data in sessions:
-                date, obj, filt, frame_count, avg_exp, avg_temp, xbin, ybin, avg_fwhm, avg_snr, approved_count, rejected_count, instrume = session_data
+                (date, obj, filt, frame_count, avg_exp, avg_temp, xbin, ybin,
+                 avg_hfd, avg_snr_weight, avg_roundness, avg_sky_flux,
+                 approved_count, rejected_count, instrume) = session_data
 
                 # Find matching calibration frames from cache (no database queries)
                 darks_info = self.calibration.find_matching_darks_from_cache(
@@ -310,19 +319,21 @@ class SessionsTab(QWidget):
                 session_item.setText(1, status)
                 session_item.setText(2, f"{frame_count} frames")
 
-                # Quality metrics
-                session_item.setText(3, f"{avg_fwhm:.2f}" if avg_fwhm is not None else 'N/A')
-                session_item.setText(4, f"{avg_snr:.1f}" if avg_snr is not None else 'N/A')
-                session_item.setText(5, f"{approved_count}/{frame_count}" if approved_count else '0/{}'.format(frame_count))
+                # Quality metrics (native AstroFileManager metrics engine)
+                session_item.setText(3, f"{avg_hfd:.2f}" if avg_hfd is not None else 'N/A')
+                session_item.setText(4, f"{avg_snr_weight:.1f}" if avg_snr_weight is not None else 'N/A')
+                session_item.setText(5, f"{avg_roundness:.2f}" if avg_roundness is not None else 'N/A')
+                session_item.setText(6, f"{avg_sky_flux:.1f}" if avg_sky_flux is not None else 'N/A')
+                session_item.setText(7, f"{approved_count}/{frame_count}" if approved_count else '0/{}'.format(frame_count))
 
                 # Calibration info
-                session_item.setText(6, darks_info['display'])
-                session_item.setText(7, bias_info['display'])
-                session_item.setText(8, flats_info['display'])
+                session_item.setText(8, darks_info['display'])
+                session_item.setText(9, bias_info['display'])
+                session_item.setText(10, flats_info['display'])
 
                 # Set status color (only for non-complete sessions)
                 if status != 'Complete':
-                    for col in range(9):
+                    for col in range(11):
                         session_item.setForeground(col, status_color)
 
                 # Store session data for details view
@@ -335,8 +346,10 @@ class SessionsTab(QWidget):
                     'avg_temp': avg_temp,
                     'xbinning': xbin,
                     'ybinning': ybin,
-                    'avg_fwhm': avg_fwhm,
-                    'avg_snr': avg_snr,
+                    'avg_hfd': avg_hfd,
+                    'avg_snr_weight': avg_snr_weight,
+                    'avg_roundness': avg_roundness,
+                    'avg_sky_flux': avg_sky_flux,
                     'approved_count': approved_count,
                     'rejected_count': rejected_count,
                     'darks': darks_info,
@@ -373,13 +386,19 @@ class SessionsTab(QWidget):
         details.append(f"<b>Binning:</b> {session_data['xbinning']}x{session_data['ybinning']}<br>")
         details.append(f"<b>Status:</b> {session_data['status']}<br>")
 
-        # Quality metrics
+        # Quality metrics (native AstroFileManager metrics engine)
         details.append("<h4>Quality Metrics:</h4>")
-        avg_fwhm = session_data.get('avg_fwhm')
-        details.append(f"<b>Average FWHM:</b> {avg_fwhm:.2f} arcsec<br>" if avg_fwhm is not None else "<b>Average FWHM:</b> N/A<br>")
+        avg_hfd = session_data.get('avg_hfd')
+        details.append(f"<b>Average HFD:</b> {avg_hfd:.2f} px<br>" if avg_hfd is not None else "<b>Average HFD:</b> N/A<br>")
 
-        avg_snr = session_data.get('avg_snr')
-        details.append(f"<b>Average SNR:</b> {avg_snr:.1f}<br>" if avg_snr is not None else "<b>Average SNR:</b> N/A<br>")
+        avg_snr_weight = session_data.get('avg_snr_weight')
+        details.append(f"<b>Average SNR Weight:</b> {avg_snr_weight:.1f}<br>" if avg_snr_weight is not None else "<b>Average SNR Weight:</b> N/A<br>")
+
+        avg_roundness = session_data.get('avg_roundness')
+        details.append(f"<b>Average Roundness:</b> {avg_roundness:.2f}<br>" if avg_roundness is not None else "<b>Average Roundness:</b> N/A<br>")
+
+        avg_sky_flux = session_data.get('avg_sky_flux')
+        details.append(f"<b>Average Sky Flux:</b> {avg_sky_flux:.1f}<br>" if avg_sky_flux is not None else "<b>Average Sky Flux:</b> N/A<br>")
 
         approved_count = session_data.get('approved_count', 0)
         rejected_count = session_data.get('rejected_count', 0)

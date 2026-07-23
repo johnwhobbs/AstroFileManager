@@ -492,10 +492,18 @@ class ProjectsTab(QWidget):
         self.goals_group.setVisible(True)
 
         # Create table
+        # Columns reflect AstroFileManager's native metrics engine:
+        #   HFD        - Half Flux Diameter (replaces the old FWHM column)
+        #   SNR Weight - robust signal-to-noise weight (replaces the old SNR)
+        #   Roundness  - median star roundness of approved frames (new)
+        #   Sky Flux   - background/sky flux level of approved frames (new)
         goals_table = QTableWidget()
         goals_table.setRowCount(len(goals))
-        goals_table.setColumnCount(6)
-        goals_table.setHorizontalHeaderLabels(["Filter", "Total", "Approved", "FWHM", "SNR", "Progress"])
+        goals_table.setColumnCount(8)
+        goals_table.setHorizontalHeaderLabels([
+            "Filter", "Total", "Approved", "HFD", "SNR Weight",
+            "Roundness", "Sky Flux", "Progress"
+        ])
 
         # Configure table appearance - make columns resizable and movable
         goals_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -503,8 +511,9 @@ class ProjectsTab(QWidget):
         goals_table.horizontalHeader().setSectionsMovable(True)
 
         # Restore saved column widths or use defaults
-        default_widths = [80, 120, 120, 70, 70, 80]  # Filter, Total, Approved, FWHM, SNR, Progress
-        for col in range(6):
+        # Filter, Total, Approved, HFD, SNR Weight, Roundness, Sky Flux, Progress
+        default_widths = [80, 120, 120, 70, 90, 80, 90, 80]
+        for col in range(8):
             saved_width = self.settings.value(f'projects_goals_table_col_{col}')
             if saved_width:
                 goals_table.setColumnWidth(col, int(saved_width))
@@ -513,7 +522,11 @@ class ProjectsTab(QWidget):
 
         # Restore column order
         saved_order = self.settings.value('projects_goals_table_col_order')
-        if saved_order:
+        # Only restore if the saved layout matches the current column count.
+        # This avoids a broken layout when older settings were saved with a
+        # different number of columns (e.g. before HFD/Roundness/Sky Flux were
+        # added by issue #289).
+        if saved_order and len(saved_order) == goals_table.columnCount():
             # Convert to integers (QSettings may return strings)
             saved_order = [int(idx) for idx in saved_order]
             for visual_index, logical_index in enumerate(saved_order):
@@ -550,13 +563,25 @@ class ProjectsTab(QWidget):
             approved_item = QTableWidgetItem(f"{goal.approved_count}/{goal.target_count} ({approved_percentage}%)")
             goals_table.setItem(row, 2, approved_item)
 
-            # Average FWHM
-            fwhm_item = QTableWidgetItem(f"{goal.avg_fwhm:.2f}\"" if goal.avg_fwhm is not None else "N/A")
-            goals_table.setItem(row, 3, fwhm_item)
+            # Average HFD (Half Flux Diameter) in pixels
+            hfd_item = QTableWidgetItem(
+                f"{goal.avg_hfd:.2f}" if goal.avg_hfd is not None else "N/A")
+            goals_table.setItem(row, 3, hfd_item)
 
-            # Average SNR
-            snr_item = QTableWidgetItem(f"{goal.avg_snr:.1f}" if goal.avg_snr is not None else "N/A")
-            goals_table.setItem(row, 4, snr_item)
+            # Average SNR Weight (robust signal-to-noise weighting)
+            snr_weight_item = QTableWidgetItem(
+                f"{goal.avg_snr_weight:.1f}" if goal.avg_snr_weight is not None else "N/A")
+            goals_table.setItem(row, 4, snr_weight_item)
+
+            # Median star Roundness (0 = perfectly round)
+            roundness_item = QTableWidgetItem(
+                f"{goal.avg_roundness:.2f}" if goal.avg_roundness is not None else "N/A")
+            goals_table.setItem(row, 5, roundness_item)
+
+            # Background Sky Flux level
+            sky_flux_item = QTableWidgetItem(
+                f"{goal.avg_sky_flux:.1f}" if goal.avg_sky_flux is not None else "N/A")
+            goals_table.setItem(row, 6, sky_flux_item)
 
             # Progress indicator with colored circle
             if approved_percentage >= 100:
@@ -585,7 +610,7 @@ class ProjectsTab(QWidget):
             font = progress_item.font()
             font.setBold(True)
             progress_item.setFont(font)
-            goals_table.setItem(row, 5, progress_item)
+            goals_table.setItem(row, 7, progress_item)
 
         # Set reasonable height based on content
         table_height = goals_table.horizontalHeader().height() + (len(goals) * 30) + 10
