@@ -4,9 +4,10 @@ Analytics tab UI for the AstroFileManager application.
 Displays imaging activity analytics with:
 - Yearly statistics (sessions, hours, streaks)
 - GitHub-style activity heatmap calendar
-- Frame quality metrics summary (FWHM, SNR, Eccentricity, approval rate)
+- Frame quality metrics summary (HFD, Roundness, # Stars, SNR Weight,
+  approval rate)
 - Quality breakdown by filter
-- FWHM trend over time by imaging session
+- HFD trend over time by imaging session
 - Theme-aware styling
 """
 
@@ -148,25 +149,25 @@ class AnalyticsTab(QWidget):
 
         layout.addWidget(self._make_separator())
 
-        # ── Section 4: FWHM Trend by Session ──────────────────────────────────
-        fwhm_label = QLabel("FWHM Trend by Session")
-        fwhm_label.setStyleSheet(
+        # ── Section 4: HFD Trend by Session ───────────────────────────────────
+        hfd_label = QLabel("HFD Trend by Session")
+        hfd_label.setStyleSheet(
             "font-weight: bold; font-size: 14px; margin-top: 5px;"
         )
-        layout.addWidget(fwhm_label)
+        layout.addWidget(hfd_label)
 
-        fwhm_note = QLabel(
-            "Average FWHM per imaging session  "
-            "(lower = sharper stars = better seeing conditions)"
+        hfd_note = QLabel(
+            "Average HFD per imaging session  "
+            "(lower = sharper stars = better focus and seeing conditions)"
         )
-        fwhm_note.setStyleSheet("font-size: 11px; color: #888;")
-        layout.addWidget(fwhm_note)
+        hfd_note.setStyleSheet("font-size: 11px; color: #888;")
+        layout.addWidget(hfd_note)
 
         # Container whose layout is rebuilt on every refresh
-        self.fwhm_trend_widget = QWidget()
-        self.fwhm_trend_layout = QVBoxLayout(self.fwhm_trend_widget)
-        self.fwhm_trend_layout.setSpacing(1)
-        layout.addWidget(self.fwhm_trend_widget)
+        self.hfd_trend_widget = QWidget()
+        self.hfd_trend_layout = QVBoxLayout(self.hfd_trend_widget)
+        self.hfd_trend_layout.setSpacing(1)
+        layout.addWidget(self.hfd_trend_widget)
 
         layout.addStretch()
 
@@ -248,39 +249,49 @@ class AnalyticsTab(QWidget):
     def _get_quality_color(self, metric: str, value: float) -> str:
         """Return a colour string based on metric quality thresholds.
 
-        For FWHM and eccentricity, lower values are better.
+        For HFD and roundness, lower values are better.
         For SNR weight, higher values are better.
 
-        Thresholds are based on common PixInsight SubFrame Selector guidelines:
-        - FWHM (arcseconds): < 2 excellent, 2–4 acceptable, > 4 poor
-        - Eccentricity (0–1 ratio): < 0.4 excellent, 0.4–0.6 acceptable, > 0.6 poor
-        - SNR weight (0–1 scale): > 0.7 excellent, 0.4–0.7 acceptable, < 0.4 poor
+        These metrics are calculated directly by AstroFileManager (see
+        utils/image_metrics.py). The thresholds below are approximate,
+        general-purpose guidelines — exact "good" values depend on your
+        equipment and pixel scale, so treat the colours as a quick visual cue
+        rather than a hard rule:
+        - HFD (pixels): < 3 excellent, 3–5 acceptable, > 5 poor
+          (smaller = sharper focus / better seeing)
+        - Roundness (absolute value): < 0.3 excellent, 0.3–0.5 acceptable,
+          > 0.5 poor (closer to 0 = rounder stars = better tracking)
+        - SNR weight (higher = stronger signal): > 50 excellent,
+          20–50 acceptable, < 20 poor
 
         Args:
-            metric: One of 'fwhm', 'eccentricity', or 'snr'
+            metric: One of 'hfd', 'roundness', or 'snr_weight'
             value: The metric value to evaluate
 
         Returns:
             CSS colour string — green = good, orange = average, red = poor
         """
-        if metric == 'fwhm':
-            if value < 2.0:
+        if metric == 'hfd':
+            if value < 3.0:
                 return "#39d353"   # Green — excellent
-            elif value < 4.0:
+            elif value < 5.0:
                 return "#f0a500"   # Orange — acceptable
             else:
                 return "#e05050"   # Red — poor
-        elif metric == 'eccentricity':
-            if value < 0.4:
+        elif metric == 'roundness':
+            # Roundness can be negative, so compare the absolute value:
+            # values close to 0 (either sign) indicate round stars.
+            abs_value = abs(value)
+            if abs_value < 0.3:
                 return "#39d353"
-            elif value < 0.6:
+            elif abs_value < 0.5:
                 return "#f0a500"
             else:
                 return "#e05050"
-        elif metric == 'snr':
-            if value > 0.7:
+        elif metric == 'snr_weight':
+            if value > 50.0:
                 return "#39d353"
-            elif value > 0.4:
+            elif value > 20.0:
                 return "#f0a500"
             else:
                 return "#e05050"
@@ -381,7 +392,7 @@ class AnalyticsTab(QWidget):
 
         Fetches activity data plus quality metrics from the database and
         updates all four dashboard sections: activity stats, heatmap, quality
-        summary, quality-by-filter table, and FWHM trend table.
+        summary, quality-by-filter table, and HFD trend table.
         """
         try:
             conn = sqlite3.connect(self.db_path)
@@ -494,20 +505,20 @@ class AnalyticsTab(QWidget):
                 ).days
 
             # ── Quality summary stats ──────────────────────────────────────────
-            # Averages and counts for light frames that have FWHM data
+            # Averages and counts for light frames that have HFD data
             cursor.execute('''
                 SELECT
-                    AVG(fwhm),
-                    AVG(snr),
-                    AVG(eccentricity),
-                    AVG(star_count),
+                    AVG(hfd),
+                    AVG(star_roundness),
+                    AVG(num_stars),
+                    AVG(snr_weight),
                     COUNT(CASE WHEN approval_status = 'approved' THEN 1 END),
                     COUNT(CASE WHEN approval_status = 'rejected' THEN 1 END),
                     COUNT(*)
                 FROM xisf_files
                 WHERE (imagetyp = 'Light Frame' OR imagetyp LIKE '%Light%')
                     AND strftime("%Y", date_loc) = ?
-                    AND fwhm IS NOT NULL
+                    AND hfd IS NOT NULL
             ''', (selected_year,))
             quality_row = cursor.fetchone()
 
@@ -516,38 +527,38 @@ class AnalyticsTab(QWidget):
             cursor.execute('''
                 SELECT
                     COALESCE(filter, 'Unknown') AS filter,
-                    AVG(fwhm),
-                    AVG(snr),
-                    AVG(eccentricity),
-                    AVG(star_count),
+                    AVG(hfd),
+                    AVG(star_roundness),
+                    AVG(num_stars),
+                    AVG(snr_weight),
                     COUNT(CASE WHEN approval_status = 'approved' THEN 1 END),
                     COUNT(*)
                 FROM xisf_files
                 WHERE (imagetyp = 'Light Frame' OR imagetyp LIKE '%Light%')
                     AND strftime("%Y", date_loc) = ?
-                    AND fwhm IS NOT NULL
+                    AND hfd IS NOT NULL
                 GROUP BY filter
                 ORDER BY filter
             ''', (selected_year,))
             filter_rows = cursor.fetchall()
 
-            # ── FWHM trend by session ──────────────────────────────────────────
+            # ── HFD trend by session ───────────────────────────────────────────
             # One row per imaging date showing session-level quality metrics
             cursor.execute('''
                 SELECT
                     date_loc,
-                    AVG(fwhm),
-                    AVG(snr),
+                    AVG(hfd),
+                    AVG(snr_weight),
                     COUNT(*),
                     COUNT(CASE WHEN approval_status = 'approved' THEN 1 END)
                 FROM xisf_files
                 WHERE (imagetyp = 'Light Frame' OR imagetyp LIKE '%Light%')
                     AND strftime("%Y", date_loc) = ?
-                    AND fwhm IS NOT NULL
+                    AND hfd IS NOT NULL
                 GROUP BY date_loc
                 ORDER BY date_loc
             ''', (selected_year,))
-            fwhm_rows = cursor.fetchall()
+            hfd_rows = cursor.fetchall()
 
             conn.close()
 
@@ -559,7 +570,7 @@ class AnalyticsTab(QWidget):
             self.update_heatmap(selected_year, activity_data)
             self.update_quality_stats(quality_row)
             self.update_quality_by_filter(filter_rows)
-            self.update_fwhm_trend(fwhm_rows)
+            self.update_hfd_trend(hfd_rows)
 
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to refresh analytics: {e}')
@@ -610,16 +621,17 @@ class AnalyticsTab(QWidget):
     def update_quality_stats(self, quality_row: Optional[Tuple]) -> None:
         """Rebuild the frame quality summary cards.
 
-        Displays aggregate quality metrics — avg FWHM, SNR, eccentricity,
-        star count, approval rate, and total frames graded — for all light
-        frames in the selected year that have quality data from SubFrame
-        Selector. Each card's value is colour-coded against quality thresholds.
+        Displays aggregate quality metrics — avg HFD, roundness, number of
+        stars, SNR weight, approval rate, and total frames graded — for all
+        light frames in the selected year that have quality data calculated by
+        AstroFileManager. Each card's value is colour-coded against quality
+        thresholds.
 
         Args:
             quality_row: Tuple from DB query:
-                (avg_fwhm, avg_snr, avg_eccentricity, avg_stars,
+                (avg_hfd, avg_roundness, avg_num_stars, avg_snr_weight,
                  approved_count, rejected_count, total_graded)
-                or None when no quality data has been imported yet.
+                or None when no quality data has been calculated yet.
         """
         while self.quality_stats_layout.count():
             child = self.quality_stats_layout.takeAt(0)
@@ -628,18 +640,18 @@ class AnalyticsTab(QWidget):
 
         colors = self._get_theme_colors()
 
-        # Guard: no quality data imported for this year
+        # Guard: no quality data available for this year
         if not quality_row or quality_row[6] == 0:
             msg = QLabel(
                 "No quality data found for this year. "
-                "Import a SubFrame Selector CSV via the Projects tab to see quality metrics."
+                "Calculate image metrics via the View Catalog tab to see quality metrics."
             )
             msg.setStyleSheet("color: #888; font-style: italic; padding: 10px;")
             msg.setWordWrap(True)
             self.quality_stats_layout.addWidget(msg)
             return
 
-        avg_fwhm, avg_snr, avg_eccentricity, avg_stars, approved, rejected, total = quality_row
+        avg_hfd, avg_roundness, avg_num_stars, avg_snr_weight, approved, rejected, total = quality_row
 
         # Approval rate is calculated only over frames that have been graded
         graded = (approved or 0) + (rejected or 0)
@@ -647,27 +659,27 @@ class AnalyticsTab(QWidget):
 
         quality_cards = [
             (
-                f"{avg_fwhm:.2f}\"" if avg_fwhm is not None else "N/A",
-                "Avg FWHM",
-                self._get_quality_color('fwhm', avg_fwhm)
-                if avg_fwhm is not None else "#888"
+                f"{avg_hfd:.2f}" if avg_hfd is not None else "N/A",
+                "Avg HFD",
+                self._get_quality_color('hfd', avg_hfd)
+                if avg_hfd is not None else "#888"
             ),
             (
-                f"{avg_snr:.3f}" if avg_snr is not None else "N/A",
-                "Avg SNR Weight",
-                self._get_quality_color('snr', avg_snr)
-                if avg_snr is not None else "#888"
+                f"{avg_roundness:.3f}" if avg_roundness is not None else "N/A",
+                "Avg Roundness",
+                self._get_quality_color('roundness', avg_roundness)
+                if avg_roundness is not None else "#888"
             ),
             (
-                f"{avg_eccentricity:.3f}" if avg_eccentricity is not None else "N/A",
-                "Avg Eccentricity",
-                self._get_quality_color('eccentricity', avg_eccentricity)
-                if avg_eccentricity is not None else "#888"
-            ),
-            (
-                f"{int(avg_stars)}" if avg_stars is not None else "N/A",
-                "Avg Star Count",
+                f"{int(avg_num_stars)}" if avg_num_stars is not None else "N/A",
+                "Avg # Stars",
                 "#39d353"
+            ),
+            (
+                f"{avg_snr_weight:.1f}" if avg_snr_weight is not None else "N/A",
+                "Avg SNR Weight",
+                self._get_quality_color('snr_weight', avg_snr_weight)
+                if avg_snr_weight is not None else "#888"
             ),
             (
                 f"{approval_rate:.0f}%",
@@ -694,14 +706,14 @@ class AnalyticsTab(QWidget):
         """Rebuild the quality-by-filter breakdown table.
 
         Shows a colour-coded tabular summary with one row per optical filter,
-        including average FWHM, SNR weight, eccentricity, total frame count,
-        and approval percentage. Metric values are colour-coded against the
-        quality thresholds defined in _get_quality_color().
+        including average HFD, roundness, number of stars, SNR weight, total
+        frame count, and approval percentage. Metric values are colour-coded
+        against the quality thresholds defined in _get_quality_color().
 
         Args:
             rows: List of tuples from DB query, each containing:
-                (filter, avg_fwhm, avg_snr, avg_eccentricity,
-                 avg_stars, approved_count, total)
+                (filter, avg_hfd, avg_roundness, avg_num_stars,
+                 avg_snr_weight, approved_count, total)
         """
         while self.filter_quality_layout.count():
             child = self.filter_quality_layout.takeAt(0)
@@ -719,8 +731,8 @@ class AnalyticsTab(QWidget):
         # Column definitions: (header text, min width in px)
         col_defs = [
             ("Filter", 120), ("Frames", 80), ("Approved", 80),
-            ("Approval %", 90), ("Avg FWHM", 90),
-            ("Avg SNR", 90), ("Avg Eccen.", 90),
+            ("Approval %", 90), ("Avg HFD", 90),
+            ("Avg Round.", 90), ("Avg # Stars", 90), ("Avg SNR Wt.", 90),
         ]
 
         # Header row
@@ -740,7 +752,7 @@ class AnalyticsTab(QWidget):
 
         # One data row per filter
         for idx, row in enumerate(rows):
-            filter_name, avg_fwhm, avg_snr, avg_eccentricity, avg_stars, approved, total = row
+            filter_name, avg_hfd, avg_roundness, avg_num_stars, avg_snr_weight, approved, total = row
             approval_pct = (approved / total * 100) if total > 0 else 0
 
             # Alternate row background for readability
@@ -768,55 +780,59 @@ class AnalyticsTab(QWidget):
                 else "#e05050"
             ))
             row_layout.addWidget(self._make_table_cell(
-                f"{avg_fwhm:.2f}\"" if avg_fwhm is not None else "N/A",
-                self._get_quality_color('fwhm', avg_fwhm)
-                if avg_fwhm is not None else "#888"
+                f"{avg_hfd:.2f}" if avg_hfd is not None else "N/A",
+                self._get_quality_color('hfd', avg_hfd)
+                if avg_hfd is not None else "#888"
             ))
             row_layout.addWidget(self._make_table_cell(
-                f"{avg_snr:.3f}" if avg_snr is not None else "N/A",
-                self._get_quality_color('snr', avg_snr)
-                if avg_snr is not None else "#888"
+                f"{avg_roundness:.3f}" if avg_roundness is not None else "N/A",
+                self._get_quality_color('roundness', avg_roundness)
+                if avg_roundness is not None else "#888"
             ))
             row_layout.addWidget(self._make_table_cell(
-                f"{avg_eccentricity:.3f}" if avg_eccentricity is not None else "N/A",
-                self._get_quality_color('eccentricity', avg_eccentricity)
-                if avg_eccentricity is not None else "#888"
+                f"{int(avg_num_stars)}" if avg_num_stars is not None else "N/A",
+                colors['text_color']
+            ))
+            row_layout.addWidget(self._make_table_cell(
+                f"{avg_snr_weight:.1f}" if avg_snr_weight is not None else "N/A",
+                self._get_quality_color('snr_weight', avg_snr_weight)
+                if avg_snr_weight is not None else "#888"
             ))
             self.filter_quality_layout.addWidget(row_widget)
 
-    def update_fwhm_trend(self, rows: List[Tuple]) -> None:
-        """Rebuild the FWHM-trend-by-session table.
+    def update_hfd_trend(self, rows: List[Tuple]) -> None:
+        """Rebuild the HFD-trend-by-session table.
 
-        Shows a chronological list of imaging sessions with colour-coded FWHM
-        and SNR values, plus approval counts. This helps astrophotographers
-        identify their best and worst seeing nights at a glance.
-        The session with the lowest average FWHM is labelled "(Best)".
+        Shows a chronological list of imaging sessions with colour-coded HFD
+        and SNR weight values, plus approval counts. This helps
+        astrophotographers identify their best and worst focus/seeing nights at
+        a glance. The session with the lowest average HFD is labelled "(Best)".
 
         Args:
             rows: List of tuples from DB query, each containing:
-                (date_loc, avg_fwhm, avg_snr, frame_count, approved_count)
+                (date_loc, avg_hfd, avg_snr_weight, frame_count, approved_count)
         """
-        while self.fwhm_trend_layout.count():
-            child = self.fwhm_trend_layout.takeAt(0)
+        while self.hfd_trend_layout.count():
+            child = self.hfd_trend_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
 
         if not rows:
-            msg = QLabel("No FWHM trend data available for this year.")
+            msg = QLabel("No HFD trend data available for this year.")
             msg.setStyleSheet("color: #888; font-style: italic; padding: 5px;")
-            self.fwhm_trend_layout.addWidget(msg)
+            self.hfd_trend_layout.addWidget(msg)
             return
 
         colors = self._get_theme_colors()
 
-        # Pre-compute the best (lowest) FWHM so we can highlight that session
-        valid_fwhm = [r[1] for r in rows if r[1] is not None]
-        best_fwhm = min(valid_fwhm) if valid_fwhm else None
+        # Pre-compute the best (lowest) HFD so we can highlight that session
+        valid_hfd = [r[1] for r in rows if r[1] is not None]
+        best_hfd = min(valid_hfd) if valid_hfd else None
 
         # Column definitions: (header text, min width in px)
         col_defs = [
-            ("Session Date", 130), ("Avg FWHM", 90),
-            ("Seeing Quality", 120), ("Avg SNR", 90),
+            ("Session Date", 130), ("Avg HFD", 90),
+            ("Focus Quality", 120), ("Avg SNR Wt.", 90),
             ("Frames Graded", 110), ("Approved", 90),
         ]
 
@@ -833,28 +849,28 @@ class AnalyticsTab(QWidget):
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setMinimumWidth(width)
             header_layout.addWidget(lbl)
-        self.fwhm_trend_layout.addWidget(header_widget)
+        self.hfd_trend_layout.addWidget(header_widget)
 
         # One data row per imaging session date
         for idx, row in enumerate(rows):
-            date_loc, avg_fwhm, avg_snr, frame_count, approved_count = row
+            date_loc, avg_hfd, avg_snr_weight, frame_count, approved_count = row
 
-            if avg_fwhm is not None:
-                fwhm_color = self._get_quality_color('fwhm', avg_fwhm)
-                # Human-readable seeing quality label
-                if avg_fwhm < 2.0:
+            if avg_hfd is not None:
+                hfd_color = self._get_quality_color('hfd', avg_hfd)
+                # Human-readable focus/seeing quality label
+                if avg_hfd < 3.0:
                     quality_text = "Excellent"
-                elif avg_fwhm < 3.0:
+                elif avg_hfd < 4.0:
                     quality_text = "Good"
-                elif avg_fwhm < 4.0:
+                elif avg_hfd < 5.0:
                     quality_text = "Average"
                 else:
                     quality_text = "Poor"
-                # Mark the session with the best (lowest) FWHM this year
-                if best_fwhm is not None and abs(avg_fwhm - best_fwhm) < 0.001:
+                # Mark the session with the best (lowest) HFD this year
+                if best_hfd is not None and abs(avg_hfd - best_hfd) < 0.001:
                     quality_text += " (Best)"
             else:
-                fwhm_color = "#888"
+                hfd_color = "#888"
                 quality_text = "N/A"
 
             # Alternate row background for readability
@@ -870,16 +886,16 @@ class AnalyticsTab(QWidget):
                 )
             )
             row_layout.addWidget(self._make_table_cell(
-                f"{avg_fwhm:.2f}\"" if avg_fwhm is not None else "N/A",
-                fwhm_color
+                f"{avg_hfd:.2f}" if avg_hfd is not None else "N/A",
+                hfd_color
             ))
             row_layout.addWidget(
-                self._make_table_cell(quality_text, fwhm_color, 120)
+                self._make_table_cell(quality_text, hfd_color, 120)
             )
             row_layout.addWidget(self._make_table_cell(
-                f"{avg_snr:.3f}" if avg_snr is not None else "N/A",
-                self._get_quality_color('snr', avg_snr)
-                if avg_snr is not None else "#888"
+                f"{avg_snr_weight:.1f}" if avg_snr_weight is not None else "N/A",
+                self._get_quality_color('snr_weight', avg_snr_weight)
+                if avg_snr_weight is not None else "#888"
             ))
             row_layout.addWidget(
                 self._make_table_cell(
@@ -891,7 +907,7 @@ class AnalyticsTab(QWidget):
                     str(int(approved_count or 0)), colors['text_color']
                 )
             )
-            self.fwhm_trend_layout.addWidget(row_widget)
+            self.hfd_trend_layout.addWidget(row_widget)
 
     def update_heatmap(self, year: str, activity_data: Dict[str, float]) -> None:
         """Rebuild the GitHub-style activity calendar heatmap.
