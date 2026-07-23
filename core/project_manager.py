@@ -26,15 +26,26 @@ class Project:
 
 @dataclass
 class FilterGoalProgress:
-    """Represents progress toward a filter goal."""
+    """Represents progress toward a filter goal.
+
+    The quality metrics below come from AstroFileManager's native, data-backend
+    metrics engine (no longer imported from PixInsight Subframe Selector):
+
+    * avg_hfd        - Average Half Flux Diameter (star size, lower is better)
+    * avg_snr_weight - Average robust signal-to-noise weight (higher is better)
+    * avg_roundness  - Average star roundness (0 = perfectly round)
+    * avg_sky_flux   - Average background/sky flux level (lower is darker sky)
+    """
     filter: str
     target_count: int
     total_count: int
     approved_count: int
     remaining: int
     approved_remaining: int
-    avg_fwhm: Optional[float] = None
-    avg_snr: Optional[float] = None
+    avg_hfd: Optional[float] = None
+    avg_snr_weight: Optional[float] = None
+    avg_roundness: Optional[float] = None
+    avg_sky_flux: Optional[float] = None
 
 
 @dataclass
@@ -204,19 +215,30 @@ class ProjectManager:
 
             goals = []
             for filter_name, target, total, approved in cursor.fetchall():
-                # Get average FWHM and SNR for this filter
+                # Get the native quality metrics for the APPROVED frames of this
+                # filter. These come from AstroFileManager's own metrics engine:
+                #   hfd            - Half Flux Diameter (star size)
+                #   snr_weight     - robust signal-to-noise weight
+                #   star_roundness - median star roundness
+                #   sky_flux_mean  - background/sky flux level
+                # We only average approved frames so the numbers reflect the
+                # data the user actually intends to keep.
                 cursor.execute('''
-                    SELECT AVG(fwhm), AVG(snr)
+                    SELECT AVG(hfd), AVG(snr_weight),
+                           AVG(star_roundness), AVG(sky_flux_mean)
                     FROM xisf_files
                     WHERE project_id = ?
                     AND COALESCE(filter, '') = COALESCE(?, '')
                     AND imagetyp LIKE '%Light%'
-                    AND fwhm IS NOT NULL
+                    AND approval_status = 'approved'
+                    AND hfd IS NOT NULL
                 ''', (project_id, filter_name))
 
                 avg_result = cursor.fetchone()
-                avg_fwhm = avg_result[0] if avg_result and avg_result[0] else None
-                avg_snr = avg_result[1] if avg_result and avg_result[1] else None
+                avg_hfd = avg_result[0] if avg_result and avg_result[0] else None
+                avg_snr_weight = avg_result[1] if avg_result and avg_result[1] else None
+                avg_roundness = avg_result[2] if avg_result and avg_result[2] else None
+                avg_sky_flux = avg_result[3] if avg_result and avg_result[3] else None
 
                 goals.append(FilterGoalProgress(
                     filter=filter_name,
@@ -225,8 +247,10 @@ class ProjectManager:
                     approved_count=approved,
                     remaining=max(0, target - total),
                     approved_remaining=max(0, target - approved),
-                    avg_fwhm=avg_fwhm,
-                    avg_snr=avg_snr
+                    avg_hfd=avg_hfd,
+                    avg_snr_weight=avg_snr_weight,
+                    avg_roundness=avg_roundness,
+                    avg_sky_flux=avg_sky_flux
                 ))
 
             return goals

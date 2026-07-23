@@ -376,8 +376,10 @@ class SessionsLoaderWorker(QThread):
                     AVG(exposure) as avg_exposure,
                     AVG(ccd_temp) as avg_temp,
                     xbinning, ybinning,
-                    AVG(fwhm) as avg_fwhm,
-                    AVG(snr) as avg_snr,
+                    AVG(hfd) as avg_hfd,
+                    AVG(snr_weight) as avg_snr_weight,
+                    AVG(star_roundness) as avg_roundness,
+                    AVG(sky_flux_mean) as avg_sky_flux,
                     SUM(CASE WHEN approval_status = 'approved' THEN 1 ELSE 0 END) as approved_count,
                     SUM(CASE WHEN approval_status = 'rejected' THEN 1 ELSE 0 END) as rejected_count,
                     instrume
