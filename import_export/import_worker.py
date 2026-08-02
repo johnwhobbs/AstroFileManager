@@ -423,11 +423,15 @@ class ImportWorker(QThread):
                     # Determine if this is a calibration frame
                     imagetyp = keywords.get('IMAGETYP', '')
                     is_calibration = False
+                    is_light = False
                     if imagetyp:
                         imagetyp_lower = imagetyp.lower()
                         is_calibration = ('dark' in imagetyp_lower or
                                         'flat' in imagetyp_lower or
                                         'bias' in imagetyp_lower)
+                        # Light frames are the only frames that contain stars,
+                        # so they are the only ones we measure metrics on.
+                        is_light = 'light' in imagetyp_lower
 
                     # Set object to None for calibration frames (they are not object-specific)
                     obj = None if is_calibration else keywords.get('OBJECT')
@@ -467,10 +471,11 @@ class ImportWorker(QThread):
 
                     # Calculate image quality metrics (Half Flux Diameter, Sky
                     # Flux Mean, Star Roundness, number of stars and SNR Weight).
-                    # These are only meaningful for light frames, so calibration
-                    # frames (dark/flat/bias) are skipped to save time.
+                    # These are only meaningful for light frames, so every other
+                    # frame type (dark/flat/bias/master/unknown) is skipped. The
+                    # metric columns stay NULL for those frames.
                     metrics = {key: None for key in METRIC_KEYS}
-                    if not is_calibration:
+                    if is_light:
                         try:
                             self.progress.emit(
                                 i + 1, len(self.files),
