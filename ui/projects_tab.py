@@ -18,6 +18,7 @@ from core.project_manager import ProjectManager, Project, FilterGoalProgress
 from core.calibration import CalibrationMatcher
 from ui.new_project_dialog import NewProjectDialog
 from ui.export_project_dialog import ExportProjectDialog
+from ui.table_utils import align_headers_with_data
 
 
 class ProjectsTab(QWidget):
@@ -126,6 +127,9 @@ class ProjectsTab(QWidget):
         self.projects_table.setHorizontalHeaderLabels([
             "Project Name", "Object", "Year", "Status", "Created"
         ])
+
+        # Left align the headers so they line up with the cell text (issue #296)
+        align_headers_with_data(self.projects_table)
 
         # Make columns resizable and movable
         self.projects_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -504,6 +508,9 @@ class ProjectsTab(QWidget):
             "Filter", "Total", "Approved", "HFD", "SNR Weight",
             "Roundness", "Sky Flux", "Progress"
         ])
+
+        # Left align the headers so they line up with the cell text (issue #296)
+        align_headers_with_data(goals_table)
 
         # Configure table appearance - make columns resizable and movable
         goals_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -971,6 +978,9 @@ class ProjectsTab(QWidget):
         masters_table.setHorizontalHeaderLabels([
             "Type", "Filter", "Exposure", "Temp (°C)", "Binning", "Filename"
         ])
+
+        # Left align the headers so they line up with the cell text (issue #296)
+        align_headers_with_data(masters_table)
 
         # Configure table appearance
         masters_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
