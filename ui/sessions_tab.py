@@ -19,6 +19,7 @@ from core.database import DatabaseManager
 from core.calibration import CalibrationMatcher
 from core.config_manager import ConfigManager
 from ui.background_workers import SessionsLoaderWorker
+from ui.table_utils import align_headers_with_data
 
 
 class SessionsTab(QWidget):
@@ -135,6 +136,9 @@ class SessionsTab(QWidget):
             'Session', 'Status', 'Light Frames', 'HFD', 'SNR Weight',
             'Roundness', 'Sky Flux', 'Approved', 'Darks', 'Bias', 'Flats'
         ])
+
+        # Left align the headers so they line up with the row text (issue #296)
+        align_headers_with_data(self.sessions_tree)
 
         # Make columns resizable and movable
         self.sessions_tree.header().setSectionsMovable(True)

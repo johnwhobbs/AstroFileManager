@@ -14,6 +14,7 @@ from PyQt6.QtCore import Qt
 from typing import Optional, Dict
 
 from core.project_manager import ProjectManager, Project
+from ui.table_utils import align_headers_with_data
 
 
 class EditProjectDialog(QDialog):
@@ -109,6 +110,8 @@ class EditProjectDialog(QDialog):
         self.goals_table = QTableWidget()
         self.goals_table.setColumnCount(2)
         self.goals_table.setHorizontalHeaderLabels(["Filter", "Target Count"])
+        # Left align the headers so they line up with the cell text (issue #296)
+        align_headers_with_data(self.goals_table)
         self.goals_table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )

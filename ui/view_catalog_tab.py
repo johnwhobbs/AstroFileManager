@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 
 # Import CSV exporter and background workers
 from ui.status_pill_delegate import StatusPillDelegate
+from ui.table_utils import align_headers_with_data
 from import_export.csv_exporter import CSVExporter
 from ui.background_workers import CatalogLoaderWorker, MetricsCalculationWorker
 from ui.assign_session_dialog import AssignSessionDialog
@@ -260,6 +261,9 @@ class ViewCatalogTab(QWidget):
             'HFD', 'Sky Flux', 'Roundness', '# Stars', 'SNR Weight'
         ])
 
+        # Left align the headers so they line up with the row text (issue #296)
+        align_headers_with_data(self.catalog_tree)
+
         # Render the Status column (index 7) as a colored pill instead of
         # coloring the whole row based on the approval status.
         self.status_column = 7
@@ -360,6 +364,8 @@ class ViewCatalogTab(QWidget):
         self.fits_header_table = QTableWidget()
         self.fits_header_table.setColumnCount(3)
         self.fits_header_table.setHorizontalHeaderLabels(['Keyword', 'Value', 'Comment'])
+        # Left align the headers so they line up with the cell text (issue #296)
+        align_headers_with_data(self.fits_header_table)
         self.fits_header_table.verticalHeader().setVisible(False)
         # Make the table read-only
         self.fits_header_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -537,7 +543,7 @@ class ViewCatalogTab(QWidget):
             # Filter to only light frame files for approval actions
             light_frames = [
                 item for item in file_items
-                if 'light' in item.text(1).lower()
+                if self.is_light_frame_item(item)
             ]
 
             if file_items:
@@ -545,6 +551,7 @@ class ViewCatalogTab(QWidget):
                 bulk_approve_action = None
                 bulk_reject_action = None
                 bulk_clear_action = None
+                bulk_metrics_action = None
 
                 if light_frames:
                     bulk_approve_action = menu.addAction(f"✓ Approve {len(light_frames)} Frame(s)")
@@ -552,13 +559,14 @@ class ViewCatalogTab(QWidget):
                     bulk_clear_action = menu.addAction(f"○ Clear Grading for {len(light_frames)} Frame(s)")
                     menu.addSeparator()
 
-                # Add action to calculate image quality metrics for all
-                # selected files (HFD, Sky Flux Mean, Roundness, star count,
-                # SNR Weight).
-                bulk_metrics_action = menu.addAction(
-                    f"📊 Calculate Image Metrics for {len(file_items)} File(s)"
-                )
-                menu.addSeparator()
+                    # Add action to calculate image quality metrics (HFD, Sky
+                    # Flux Mean, Roundness, star count, SNR Weight). These
+                    # metrics only make sense for light frames, so the action
+                    # is offered for the selected light frames only.
+                    bulk_metrics_action = menu.addAction(
+                        f"📊 Calculate Image Metrics for {len(light_frames)} Light Frame(s)"
+                    )
+                    menu.addSeparator()
 
                 # Add bulk delete submenu for all file types
                 bulk_delete_menu = menu.addMenu(f"Delete {len(file_items)} File(s)...")
@@ -577,8 +585,9 @@ class ViewCatalogTab(QWidget):
                     self.bulk_reject_frames(light_frames)
                 elif light_frames and action == bulk_clear_action:
                     self.bulk_clear_grading(light_frames)
-                elif action == bulk_metrics_action:
-                    self.calculate_metrics_for_items(file_items)
+                elif bulk_metrics_action and action == bulk_metrics_action:
+                    # Only the light frames are sent for metric calculation.
+                    self.calculate_metrics_for_items(light_frames)
                 elif action == bulk_delete_db_only_action:
                     self.delete_files_with_options(file_items, delete_from_db=True, delete_from_disk=False)
                 elif action == bulk_delete_disk_only_action:
@@ -596,14 +605,15 @@ class ViewCatalogTab(QWidget):
 
         if is_file:
             # Approval actions (only for light frames)
-            imagetyp = item.text(1)
+            is_light = self.is_light_frame_item(item)
 
             # Initialize approval action variables
             approve_action = None
             reject_action = None
             clear_grading_action = None
+            calculate_metrics_action = None
 
-            if 'light' in imagetyp.lower():
+            if is_light:
                 approve_action = menu.addAction("✓ Approve Frame")
                 reject_action = menu.addAction("✗ Reject Frame")
                 clear_grading_action = menu.addAction("○ Clear Grading")
@@ -614,8 +624,11 @@ class ViewCatalogTab(QWidget):
             open_location_action = menu.addAction("Open File Location")
             menu.addSeparator()
             show_details_action = menu.addAction("Show File Details")
-            # Calculate image quality metrics for this single file.
-            calculate_metrics_action = menu.addAction("📊 Calculate Image Metrics")
+            # Calculate image quality metrics for this single file. The metrics
+            # are only meaningful for light frames, so calibration frames
+            # (dark/flat/bias) and master frames do not get this action.
+            if is_light:
+                calculate_metrics_action = menu.addAction("📊 Calculate Image Metrics")
             menu.addSeparator()
 
             # Delete submenu with options
@@ -634,7 +647,7 @@ class ViewCatalogTab(QWidget):
                 return
 
             # Handle approval actions
-            if 'light' in imagetyp.lower():
+            if is_light:
                 if action == approve_action:
                     self.approve_frame(item)
                     return
@@ -653,7 +666,7 @@ class ViewCatalogTab(QWidget):
                 self.open_file_location(item)
             elif action == show_details_action:
                 self.show_file_details(item)
-            elif action == calculate_metrics_action:
+            elif calculate_metrics_action and action == calculate_metrics_action:
                 self.calculate_metrics_for_items([item])
             elif action == delete_db_only_action:
                 self.delete_files_with_options([item], delete_from_db=True, delete_from_disk=False)
@@ -2076,6 +2089,31 @@ Imported: {result[11] or 'N/A'}
         for i in range(root.childCount()):
             restore_item_state(root.child(i))
 
+    def is_light_frame_item(self, item) -> bool:
+        """
+        Check whether a catalog tree item represents a light frame.
+
+        The image type is shown in column 1 of the tree (for example "LIGHT",
+        "DARK", "FLAT", "BIAS" or "Master Dark"). Only light frames are valid
+        targets for image quality metric calculation, because the metrics
+        (HFD, star roundness, star count, ...) measure stars that calibration
+        and master frames do not contain.
+
+        Args:
+            item: QTreeWidgetItem to inspect.
+
+        Returns:
+            True if the item's image type contains "light", False otherwise.
+        """
+        try:
+            imagetyp = item.text(1) or ''
+        except Exception:
+            # Be defensive: if the item cannot be read, treat it as not a light
+            # frame so metric calculation is never offered for it.
+            return False
+
+        return 'light' in imagetyp.lower()
+
     def calculate_metrics_for_items(self, items: list) -> None:
         """
         Calculate and store image quality metrics for the given file items.
@@ -2085,10 +2123,27 @@ Imported: {result[11] or 'N/A'}
         and photutils, storing the results in the database. The work runs in a
         background thread with a progress dialog so the UI stays responsive.
 
+        Only light frames are processed. Any calibration or master frames that
+        are passed in are ignored, because the metrics are not meaningful for
+        frames without stars.
+
         Args:
             items: List of QTreeWidgetItem objects representing files.
         """
         if not items:
+            return
+
+        # Safety net: drop anything that is not a light frame. The context menu
+        # already hides the action for non-light frames, but this guarantees the
+        # rule holds for every caller.
+        light_items = [item for item in items if self.is_light_frame_item(item)]
+
+        if not light_items:
+            QMessageBox.information(
+                self, 'Calculate Image Metrics',
+                'Image metrics can only be calculated for light frames.\n\n'
+                'None of the selected files are light frames.'
+            )
             return
 
         # Collect the unique file path for each selected tree item. Using the
@@ -2096,7 +2151,7 @@ Imported: {result[11] or 'N/A'}
         # against the exact frame the user selected, even when several frames
         # share the same filename.
         filepaths = []
-        for item in items:
+        for item in light_items:
             filepath = self._get_filepath_for_item(item)
             if filepath:
                 filepaths.append(filepath)
@@ -2197,6 +2252,8 @@ Imported: {result[11] or 'N/A'}
 
         table = QTableWidget(len(results), len(columns))
         table.setHorizontalHeaderLabels(columns)
+        # Left align the headers so they line up with the cell text (issue #296)
+        align_headers_with_data(table)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 

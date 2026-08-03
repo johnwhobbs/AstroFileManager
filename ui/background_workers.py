@@ -227,6 +227,38 @@ class MetricsCalculationWorker(QThread):
         self.db_path = db_path
         self.filepaths = filepaths
 
+    @staticmethod
+    def _is_light_frame(cursor, filepath: str) -> bool:
+        """
+        Check whether the given file is recorded as a light frame.
+
+        Args:
+            cursor: An open SQLite cursor for the catalog database.
+            filepath: Full path of the file to look up.
+
+        Returns:
+            True if the file's IMAGETYP contains "light". Also returns True when
+            the file is not in the database, so the caller's existing
+            "no matching row" handling still reports that situation instead of
+            this method silently swallowing it.
+        """
+        try:
+            cursor.execute(
+                'SELECT imagetyp FROM xisf_files WHERE filepath = ?', (filepath,)
+            )
+            row = cursor.fetchone()
+        except Exception:
+            # If the lookup fails we cannot prove the frame is a light frame,
+            # so err on the side of not calculating metrics for it.
+            return False
+
+        # Unknown file: let the normal update path report the missing row.
+        if row is None:
+            return True
+
+        imagetyp = row[0] or ''
+        return 'light' in imagetyp.lower()
+
     def run(self):
         """Calculate metrics for each file and store them in the database."""
         # Import here so the worker module does not require photutils to load.
@@ -276,6 +308,22 @@ class MetricsCalculationWorker(QThread):
                         'metrics': None,
                         'stored': False,
                         'error': 'No file path is associated with this item.',
+                    })
+                    continue
+
+                # Image metrics are only meaningful for light frames, so look up
+                # the image type and skip anything else (dark/flat/bias/master).
+                # This keeps the rule in one place no matter which part of the
+                # UI asked for the calculation.
+                if not self._is_light_frame(cursor, filepath):
+                    errors += 1
+                    results.append({
+                        'filepath': filepath,
+                        'filename': display_name,
+                        'metrics': None,
+                        'stored': False,
+                        'error': 'Skipped: image metrics are only calculated '
+                                 'for light frames.',
                     })
                     continue
 
