@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 
 # Import CSV exporter and background workers
 from ui.status_pill_delegate import StatusPillDelegate
+from ui.table_utils import align_headers_with_data
 from import_export.csv_exporter import CSVExporter
 from ui.background_workers import CatalogLoaderWorker, MetricsCalculationWorker
 from ui.assign_session_dialog import AssignSessionDialog
@@ -260,6 +261,9 @@ class ViewCatalogTab(QWidget):
             'HFD', 'Sky Flux', 'Roundness', '# Stars', 'SNR Weight'
         ])
 
+        # Left align the headers so they line up with the row text (issue #296)
+        align_headers_with_data(self.catalog_tree)
+
         # Render the Status column (index 7) as a colored pill instead of
         # coloring the whole row based on the approval status.
         self.status_column = 7
@@ -360,6 +364,8 @@ class ViewCatalogTab(QWidget):
         self.fits_header_table = QTableWidget()
         self.fits_header_table.setColumnCount(3)
         self.fits_header_table.setHorizontalHeaderLabels(['Keyword', 'Value', 'Comment'])
+        # Left align the headers so they line up with the cell text (issue #296)
+        align_headers_with_data(self.fits_header_table)
         self.fits_header_table.verticalHeader().setVisible(False)
         # Make the table read-only
         self.fits_header_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -2197,6 +2203,8 @@ Imported: {result[11] or 'N/A'}
 
         table = QTableWidget(len(results), len(columns))
         table.setHorizontalHeaderLabels(columns)
+        # Left align the headers so they line up with the cell text (issue #296)
+        align_headers_with_data(table)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 

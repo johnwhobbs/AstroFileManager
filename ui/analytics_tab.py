@@ -21,6 +21,8 @@ from PyQt6.QtWidgets import (
     QMessageBox, QScrollArea, QFrame
 )
 
+from ui.table_utils import DATA_ALIGNMENT
+
 
 class AnalyticsTab(QWidget):
     """Analytics tab widget showing imaging activity statistics and quality dashboards."""
@@ -230,7 +232,10 @@ class AnalyticsTab(QWidget):
 
     def _make_table_cell(self, text: str, color: str,
                          min_width: int = 90) -> QLabel:
-        """Create a centred, colour-coded table cell label.
+        """Create a left-aligned, colour-coded table cell label.
+
+        The cell text is left aligned so it lines up with its column header,
+        matching the tables on the other tabs (issue #296).
 
         Args:
             text: Cell text content
@@ -242,7 +247,30 @@ class AnalyticsTab(QWidget):
         """
         lbl = QLabel(text)
         lbl.setStyleSheet(f"color: {color};")
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setAlignment(DATA_ALIGNMENT)
+        lbl.setMinimumWidth(min_width)
+        return lbl
+
+    def _make_table_header_cell(self, text: str, min_width: int,
+                                colors: dict) -> QLabel:
+        """Create a bold header label for one column of a summary table.
+
+        Headers use the same left alignment as the data cells below them so
+        every column reads as a single straight line (issue #296).
+
+        Args:
+            text: Header text content
+            min_width: Minimum column width in pixels
+            colors: Theme colour dictionary from _get_theme_colors()
+
+        Returns:
+            QLabel styled as a table column header
+        """
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            f"font-weight: bold; color: {colors['header_color']}; font-size: 11px;"
+        )
+        lbl.setAlignment(DATA_ALIGNMENT)
         lbl.setMinimumWidth(min_width)
         return lbl
 
@@ -741,13 +769,9 @@ class AnalyticsTab(QWidget):
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(5, 5, 5, 5)
         for text, width in col_defs:
-            lbl = QLabel(text)
-            lbl.setStyleSheet(
-                f"font-weight: bold; color: {colors['header_color']}; font-size: 11px;"
+            header_layout.addWidget(
+                self._make_table_header_cell(text, width, colors)
             )
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setMinimumWidth(width)
-            header_layout.addWidget(lbl)
         self.filter_quality_layout.addWidget(header_widget)
 
         # One data row per filter
@@ -842,13 +866,9 @@ class AnalyticsTab(QWidget):
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(5, 5, 5, 5)
         for text, width in col_defs:
-            lbl = QLabel(text)
-            lbl.setStyleSheet(
-                f"font-weight: bold; color: {colors['header_color']}; font-size: 11px;"
+            header_layout.addWidget(
+                self._make_table_header_cell(text, width, colors)
             )
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setMinimumWidth(width)
-            header_layout.addWidget(lbl)
         self.hfd_trend_layout.addWidget(header_widget)
 
         # One data row per imaging session date

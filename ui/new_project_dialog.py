@@ -16,6 +16,7 @@ from datetime import datetime
 
 from core.project_templates import get_templates, create_filter_goals_dict
 from core.project_manager import ProjectManager
+from ui.table_utils import align_headers_with_data
 
 
 class NewProjectDialog(QDialog):
@@ -98,6 +99,8 @@ class NewProjectDialog(QDialog):
         self.goals_table = QTableWidget()
         self.goals_table.setColumnCount(2)
         self.goals_table.setHorizontalHeaderLabels(["Filter", "Target Frames"])
+        # Left align the headers so they line up with the cell text (issue #296)
+        align_headers_with_data(self.goals_table)
         self.goals_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.goals_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.goals_table.setMaximumHeight(200)

@@ -15,6 +15,8 @@ from PyQt6.QtGui import QColor, QBrush
 import sqlite3
 from typing import List, Optional
 
+from ui.table_utils import align_headers_with_data, align_widget_cell
+
 
 class ImportMasterFramesDialog(QDialog):
     """Dialog for importing master frames to a project."""
@@ -100,6 +102,9 @@ class ImportMasterFramesDialog(QDialog):
         self.frames_table.setHorizontalHeaderLabels([
             "Select", "Type", "Filter", "Exposure", "Temp (°C)", "Binning", "Filename", "Already Imported"
         ])
+
+        # Left align the headers so they line up with the cell text (issue #296)
+        align_headers_with_data(self.frames_table)
 
         # Configure table
         self.frames_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -267,8 +272,9 @@ class ImportMasterFramesDialog(QDialog):
             checkbox_widget = QWidget()
             checkbox_layout = QHBoxLayout(checkbox_widget)
             checkbox_layout.addWidget(checkbox)
-            checkbox_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            checkbox_layout.setContentsMargins(0, 0, 0, 0)
+            # Pin the checkbox to the left edge so it sits underneath the
+            # left-aligned "Select" column header (issue #296).
+            align_widget_cell(checkbox_layout)
 
             self.frames_table.setCellWidget(row_idx, 0, checkbox_widget)
 

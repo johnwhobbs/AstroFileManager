@@ -22,6 +22,7 @@ from PyQt6.QtGui import QColor
 from utils.file_organizer import generate_organized_path
 from core.config_manager import ConfigManager
 from core.database import DatabaseManager
+from ui.table_utils import align_headers_with_data
 
 
 class MaintenanceTab(QWidget):
@@ -1121,6 +1122,8 @@ class MaintenanceTab(QWidget):
         table = QTableWidget()
         table.setColumnCount(4)
         table.setHorizontalHeaderLabels(['Type', 'Filename', 'Parameters', 'Path'])
+        # Left align the headers so they line up with the cell text (issue #296)
+        align_headers_with_data(table)
         table.horizontalHeader().setStretchLastSection(True)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -1417,6 +1420,8 @@ class MaintenanceTab(QWidget):
         table = QTableWidget()
         table.setColumnCount(5)
         table.setHorizontalHeaderLabels(['Type', 'Frame Type', 'Filename', 'Parameters', 'Path'])
+        # Left align the headers so they line up with the cell text (issue #296)
+        align_headers_with_data(table)
         table.horizontalHeader().setStretchLastSection(True)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
